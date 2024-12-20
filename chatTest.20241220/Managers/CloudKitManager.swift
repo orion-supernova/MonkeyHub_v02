@@ -70,7 +70,7 @@ class CloudKitManager: ObservableObject {
     static let shared = CloudKitManager()
 
     // MARK: - Properties
-    private let container: CKContainer
+    let container: CKContainer
     let database: CKDatabase
 
     @Published var currentUser: ChatUser?
@@ -101,7 +101,7 @@ class CloudKitManager: ObservableObject {
 
     // MARK: - Initialization
     func initialize() async {
-        Logger.info("Starting CloudKit initialization...", category: Logger.cloudKit)
+        Logger.info("Starting CloudKit initialization...", category: .cloudKit)
 
         do {
             // 1. Check iCloud availability
@@ -109,33 +109,33 @@ class CloudKitManager: ObservableObject {
 
             switch accountStatus {
             case .available:
-                Logger.info("iCloud is available", category: Logger.cloudKit)
+                Logger.info("iCloud is available", category: .cloudKit)
                 iCloudStatus = .available
 
             case .noAccount:
-                Logger.info("No iCloud account", category: Logger.cloudKit)
+                Logger.info("No iCloud account", category: .cloudKit)
                 iCloudStatus = .noAccount
 
             case .restricted:
-                Logger.error(CloudKitError.permissionDenied, context: "iCloud status")
+                Logger.error(CloudKitError.permissionDenied, category: .cloudKit)
                 iCloudStatus = .restricted
 
             case .couldNotDetermine:
-                Logger.error(CloudKitError.networkError, context: "iCloud status")
+                Logger.error(CloudKitError.networkError, category: .cloudKit)
                 iCloudStatus = .noInternet
 
             case .temporarilyUnavailable:
-                Logger.error(CloudKitError.networkError, context: "iCloud status")
+                Logger.error(CloudKitError.networkError, category: .cloudKit)
                 iCloudStatus = .temporarilyUnavailable
-                
+
             @unknown default:
                 let error = CloudKitError.unknown(NSError())
-                Logger.error(error, context: "iCloud status")
+                Logger.error(error, category: .cloudKit)
                 iCloudStatus = .error(error)
             }
 
         } catch {
-            Logger.error(error, context: "CloudKit initialization")
+            Logger.error(error, category: .cloudKit)
             iCloudStatus = .error(error)
         }
 
@@ -184,29 +184,29 @@ class CloudKitManager: ObservableObject {
 
     func fetchCurrentUser() async throws -> ChatUser {
         Logger.info(
-            "iCloud account available, fetching user record...", category: Logger.cloudKit)
+            "iCloud account available, fetching user record...", category: .cloudKit)
         let userRecordID = try await container.userRecordID()
-        Logger.debug("User recordID: \(userRecordID.recordName)", category: Logger.cloudKit)
+        Logger.debug("User recordID: \(userRecordID.recordName)", category: .cloudKit)
 
         // Create a query to find the user record
         let predicate = NSPredicate(format: "id == %@", userRecordID.recordName)
         let query = CKQuery(recordType: "ChatUser", predicate: predicate)
 
         do {
-            Logger.debug("Querying for existing user record...", category: Logger.cloudKit)
+            Logger.debug("Querying for existing user record...", category: .cloudKit)
             let (records, _) = try await database.records(matching: query)
 
             if let userRecord = try records.first?.1.get() {
-                Logger.info("Existing user record found", category: Logger.cloudKit)
+                Logger.info("Existing user record found", category: .cloudKit)
                 let user = try ChatUser(from: userRecord)
                 currentUser = user
                 Logger.info(
-                    "User loaded: \(user.name) (\(user.id))", category: Logger.cloudKit)
+                    "User loaded: \(user.name) (\(user.id))", category: .cloudKit)
                 return user
             } else {
                 Logger.info(
                     "No existing user record found, creating new user...",
-                    category: Logger.cloudKit)
+                    category: .cloudKit)
                 // Create new user record
                 let newRecord = CKRecord(recordType: "ChatUser")
                 newRecord["id"] = userRecordID.recordName
@@ -214,14 +214,14 @@ class CloudKitManager: ObservableObject {
                 newRecord["email"] = ""
 
                 do {
-                    Logger.debug("Saving new user record...", category: Logger.cloudKit)
+                    Logger.debug("Saving new user record...", category: .cloudKit)
                     let saveResult = try await database.modifyRecords(
                         saving: [newRecord], deleting: []
                     ).saveResults.first?.1.get()
 
                     guard let savedRecord = saveResult else {
                         Logger.error(
-                            CloudKitError.operationFailed, context: "Save new user")
+                            CloudKitError.operationFailed, category: .cloudKit)
                         throw CloudKitError.operationFailed
                     }
 
@@ -229,15 +229,15 @@ class CloudKitManager: ObservableObject {
                     currentUser = user
                     Logger.info(
                         "New user created: \(user.name) (\(user.id))",
-                        category: Logger.cloudKit)
+                        category: .cloudKit)
                     return user
                 } catch {
-                    Logger.error(error, context: "Save new user record")
+                    Logger.error(error, category: .cloudKit)
                     throw CloudKitError.operationFailed
                 }
             }
         } catch {
-            Logger.error(error, context: "Query user record")
+            Logger.error(error, category: .cloudKit)
             throw CloudKitError.unknown(error)
         }
     }
@@ -416,16 +416,16 @@ class CloudKitManager: ObservableObject {
             }
         } catch let error as CKError where error.code == .unknownItem {
             // SchemaVersion record type doesn't exist yet, create initial version
-            Logger.info("Creating initial schema version", category: Logger.cloudKit)
+            Logger.info("Creating initial schema version", category: .cloudKit)
 
             let versionRecord = CKRecord(recordType: "SchemaVersion")
             versionRecord[versionKey] = currentSchemaVersion
 
             do {
                 _ = try await database.modifyRecords(saving: [versionRecord], deleting: [])
-                Logger.info("Schema version initialized", category: Logger.cloudKit)
+                Logger.info("Schema version initialized", category: .cloudKit)
             } catch {
-                Logger.error(error, context: "Schema version initialization")
+                Logger.error(error, category: .cloudKit)
                 throw CloudKitError.schemaError("Failed to initialize schema version")
             }
         } catch {
@@ -436,7 +436,7 @@ class CloudKitManager: ObservableObject {
     private func migrateSchema(from oldVersion: Int, to newVersion: Int) async throws {
         // Implement schema migration logic here if needed
         Logger.info(
-            "Migrating schema from v\(oldVersion) to v\(newVersion)", category: Logger.cloudKit)
+            "Migrating schema from v\(oldVersion) to v\(newVersion)", category: .cloudKit)
     }
 
     func searchRooms(matching query: String) async throws -> [ChatRoom] {
@@ -466,7 +466,7 @@ class CloudKitManager: ObservableObject {
             NSSortDescriptor(key: ChatRoom.createdAtKey, ascending: false)
         ]
 
-        Logger.debug("Executing search query: \(predicate)", category: Logger.database)
+        Logger.debug("Executing search query: \(predicate)", category: .database)
 
         let (records, _) = try await database.records(matching: query)
         return try records.compactMap { try ChatRoom(from: try $0.1.get()) }
@@ -492,7 +492,7 @@ class CloudKitManager: ObservableObject {
             NSSortDescriptor(key: ChatMessage.timestampKey, ascending: false)
         ]
 
-        Logger.debug("Fetching messages for room: \(roomId)", category: Logger.database)
+        Logger.debug("Fetching messages for room: \(roomId)", category: .database)
 
         let (records, cursor) = try await database.records(
             matching: query,
@@ -528,29 +528,12 @@ class CloudKitManager: ObservableObject {
             ]
         }
 
-        Logger.debug("Fetching rooms for user: \(currentUser.id)", category: Logger.database)
+        Logger.debug("Fetching rooms for user: \(currentUser.id)", category: .database)
 
         let (records, _) = try await database.records(matching: query)
         return try records.compactMap { result in
             let record = try result.1.get()
             return try ChatRoom(from: record)
         }
-    }
-}
-
-// Fix the ChatUser initialization from CKRecord
-extension ChatUser {
-    init(from record: CKRecord) throws {
-        guard
-            let id = record["id"] as? String,
-            let name = record["name"] as? String,
-            let email = record["email"] as? String
-        else {
-            throw CloudKitError.invalidRecord
-        }
-
-        self.id = id
-        self.name = name
-        self.email = email
     }
 }

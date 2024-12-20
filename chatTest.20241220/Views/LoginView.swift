@@ -9,6 +9,7 @@ struct LoginView: View {
     @State private var isAnimating = false
     @State private var showContent = false
     @State private var bubblePhase = 0.0
+    @StateObject private var viewModel = LoginViewModel()
 
     // Refined deep ocean colors
     private let oceanColors: [Color] = [
@@ -62,16 +63,33 @@ struct LoginView: View {
                 Spacer()
 
                 // Sign in button
-                SignInWithAppleButton { request in
-                    request.requestedScopes = [.fullName, .email]
-                } onCompletion: { result in
-                    handleSignIn(result)
+                VStack {
+                    if viewModel.isAuthenticated {
+                        Button(action: viewModel.signOut) {
+                            Text("Sign Out")
+                                .foregroundColor(.white)
+                                .padding(.horizontal)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Capsule()
+                                        .fill(.ultraThinMaterial)
+                                )
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.horizontal, 30)
+                    } else {
+                        SignInWithAppleButton { request in
+                            request.requestedScopes = [.fullName, .email]
+                        } onCompletion: { result in
+                            viewModel.handleSignInWithApple(result)
+                        }
+                        .signInWithAppleButtonStyle(.white)
+                        .frame(height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: .black.opacity(0.2), radius: 15)
+                        .padding(.horizontal, 30)
+                    }
                 }
-                .signInWithAppleButtonStyle(.white)
-                .frame(height: 56)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .shadow(color: .black.opacity(0.2), radius: 15)
-                .padding(.horizontal, 30)
                 .offset(y: showContent ? 0 : 40)
                 .opacity(showContent ? 1 : 0)
             }
@@ -84,6 +102,11 @@ struct LoginView: View {
         } message: {
             Text(errorMessage)
         }
+        .alert("Success", isPresented: $viewModel.showSuccess) {
+            Button("OK") {}
+        } message: {
+            Text(viewModel.successMessage)
+        }
     }
 
     private func startAnimations() {
@@ -95,27 +118,6 @@ struct LoginView: View {
         }
         withAnimation(.linear(duration: 20).repeatForever(autoreverses: false)) {
             bubblePhase = 1.0
-        }
-    }
-
-    private func handleSignIn(_ result: Result<ASAuthorization, Error>) {
-        Task {
-            do {
-                switch result {
-                case .success(let authorization):
-                    if let appleIDCredential = authorization.credential
-                        as? ASAuthorizationAppleIDCredential
-                    {
-                        try await cloudKit.signIn(with: appleIDCredential)
-                    }
-                case .failure(let error):
-                    errorMessage = error.localizedDescription
-                    showError = true
-                }
-            } catch {
-                errorMessage = error.localizedDescription
-                showError = true
-            }
         }
     }
 }

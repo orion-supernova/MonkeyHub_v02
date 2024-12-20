@@ -170,10 +170,20 @@ struct BubbleStreamView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ForEach(0..<3) { column in
+            // Multiple layers of bubbles for depth
+            ForEach(0..<6) { layer in  // Increased from 4 to 6 layers
                 BubbleColumn(
                     phase: phase,
-                    columnOffset: CGFloat(column),
+                    columnOffset: CGFloat(layer),
+                    geometrySize: geometry.size,
+                    depth: Double(layer) / 6.0
+                )
+            }
+
+            // Add some random floating bubbles
+            ForEach(0..<8) { _ in
+                FloatingBubble2(
+                    phase: phase,
                     geometrySize: geometry.size
                 )
             }
@@ -181,41 +191,130 @@ struct BubbleStreamView: View {
     }
 }
 
+// New view for random floating bubbles
+struct FloatingBubble2: View {
+    let phase: Double
+    let geometrySize: CGSize
+    let initialPosition: CGPoint
+    let speed: Double
+    let size: CGFloat
+
+    init(phase: Double, geometrySize: CGSize) {
+        self.phase = phase
+        self.geometrySize = geometrySize
+        self.initialPosition = CGPoint(
+            x: CGFloat.random(in: 0...geometrySize.width),
+            y: CGFloat.random(in: 0...geometrySize.height)
+        )
+        self.speed = Double.random(in: 0.3...0.7)
+        self.size = CGFloat.random(in: 2...5)
+    }
+
+    var body: some View {
+        Circle()
+            .fill(
+                RadialGradient(
+                    colors: [
+                        .white.opacity(0.6),
+                        .white.opacity(0.3),
+                        .white.opacity(0.1),
+                    ],
+                    center: .topLeading,
+                    startRadius: 0,
+                    endRadius: 4
+                )
+            )
+            .frame(width: size, height: size)
+            .blur(radius: 0.3)
+            .offset(
+                x: initialPosition.x + sin(phase * .pi * speed) * 20,
+                y: initialPosition.y
+                    - (phase * geometrySize.height * speed)
+                    .remainder(dividingBy: geometrySize.height * 1.2)
+            )
+            .opacity(0.4)
+    }
+}
+
 struct BubbleColumn: View {
     let phase: Double
     let columnOffset: CGFloat
     let geometrySize: CGSize
+    let depth: Double
 
     var body: some View {
-        let bubbleCount = 6
+        let bubbleCount = Int.random(in: 5...10)  // Increased range
 
         ForEach(0..<bubbleCount, id: \.self) { index in
-            let baseX = geometrySize.width * (0.2 + columnOffset * 0.3)
-            let delayedPhase = phase - Double(index) * 0.1
+            let baseX = geometrySize.width * (0.1 + columnOffset * 0.2)
+            let delayedPhase = phase - Double(index) * 0.15
             let yOffset = geometrySize.height * (1.2 - delayedPhase.remainder(dividingBy: 1))
 
-            Circle()
+            // Enhanced natural movement
+            let wobbleFrequency = Double.random(in: 1.5...3.0)
+            let wobbleAmplitude = Double.random(in: 15...30) * (1 - depth)
+            let xOffset = sin(delayedPhase * .pi * wobbleFrequency) * wobbleAmplitude
+
+            // Main bubble
+            BubbleShape(wobblePhase: delayedPhase)
                 .fill(
-                    LinearGradient(
+                    RadialGradient(
                         colors: [
-                            .white.opacity(0.5),
-                            .white.opacity(0.2),
+                            .white.opacity(0.7 * (1 - depth)),
+                            .white.opacity(0.3 * (1 - depth)),
+                            .white.opacity(0.1 * (1 - depth)),
                         ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                        center: .topLeading,
+                        startRadius: 0,
+                        endRadius: 8 * (1 - depth)
                     )
                 )
-                .frame(width: CGFloat.random(in: 4...8))
-                .blur(radius: 0.5)
+                .frame(
+                    width: CGFloat.random(in: 3...8) * (1 - depth) + 2,
+                    height: CGFloat.random(in: 3...8) * (1 - depth) + 2
+                )
+                .blur(radius: depth * 0.5)
                 .offset(
-                    x: baseX + sin(delayedPhase * .pi * 2) * 20,
+                    x: baseX + xOffset,
                     y: yOffset
                 )
                 .opacity(
                     delayedPhase.remainder(dividingBy: 1) < 0.1
-                        ? 0 : delayedPhase.remainder(dividingBy: 1) > 0.9 ? 0 : 0.6
+                        ? 0 : delayedPhase.remainder(dividingBy: 1) > 0.9 ? 0 : 0.8
                 )
+                .scaleEffect(sin(delayedPhase * .pi * 2) * 0.1 + 0.9)
+                .rotationEffect(.degrees(sin(delayedPhase * .pi) * 20))
         }
+    }
+}
+
+// New shape for more organic bubbles
+struct BubbleShape: Shape {
+    let wobblePhase: Double
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+
+        // Create slightly wobbling circle
+        let points = 8
+        for i in 0..<points {
+            let angle = (Double(i) / Double(points)) * .pi * 2
+            let wobbleAmount = sin(wobblePhase * 2 + angle) * radius * 0.1
+            let pointRadius = radius + wobbleAmount
+            let x = center.x + cos(angle) * pointRadius
+            let y = center.y + sin(angle) * pointRadius
+
+            if i == 0 {
+                path.move(to: CGPoint(x: x, y: y))
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+        }
+
+        path.closeSubpath()
+        return path
     }
 }
 

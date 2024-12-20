@@ -73,12 +73,9 @@ class CloudKitManager: ObservableObject {
     let container: CKContainer
     let database: CKDatabase
 
-    @Published var currentUser: ChatUser?
+    @Published var currentUser: ChatUser? = nil
     @Published var isInitialized = false
     @Published var iCloudStatus: CloudKitStatus = .unknown
-
-    private let defaults = UserDefaults.standard
-    private let authKey = "isAuthenticated"
 
     // Schema versioning
     private let versionKey = "version"
@@ -95,7 +92,7 @@ class CloudKitManager: ObservableObject {
     }
 
     private init() {
-        self.container = CKContainer(identifier: "iCloud.com.walhallaa.chatTest2")
+        self.container = CKContainer(identifier: "iCloud.CrossTest")
         self.database = container.publicCloudDatabase
     }
 
@@ -168,16 +165,12 @@ class CloudKitManager: ObservableObject {
         }
 
         currentUser = try ChatUser(from: record)
-        defaults.set(true, forKey: authKey)
+        userDefaults.set(true, forKey: isAuthenticatedUserDefaultKey)
     }
 
     func signOut() {
         currentUser = nil
-        defaults.set(false, forKey: authKey)
-    }
-
-    var isAuthenticated: Bool {
-        currentUser != nil
+        userDefaults.set(false, forKey: isAuthenticatedUserDefaultKey)
     }
 
     // MARK: - User Management
@@ -535,5 +528,35 @@ class CloudKitManager: ObservableObject {
             let record = try result.1.get()
             return try ChatRoom(from: record)
         }
+    }
+
+    func fetchUsers() async throws -> [ChatUser] {
+        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
+
+        let predicate = NSPredicate(
+            format: "recordID != %@", currentUser.id
+        )
+        let query = CKQuery(recordType: "User", predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+
+        let (records, _) = try await database.records(matching: query)
+        return try records.compactMap { result in
+            let record = try result.1.get()
+            return try ChatUser(from: record)
+        }
+    }
+
+    func createChatRoom(name: String, participants: [ChatUser]) async throws {
+        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
+
+        let participantIds = participants.map { $0.id } + [currentUser.id]
+
+        let room = ChatRoom(
+            name: name,
+            createdBy: currentUser.id,
+            participants: participantIds
+        )
+
+        try await createChatRoom(room)
     }
 }

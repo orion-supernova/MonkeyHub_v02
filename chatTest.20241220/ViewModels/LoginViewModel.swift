@@ -30,17 +30,10 @@ enum AuthError: LocalizedError {
 
 @MainActor
 class LoginViewModel: ObservableObject {
-    @Published var isAuthenticated = false
-    @Published var showError = false
-    @Published var errorMessage = ""
-    @Published var showSuccess = false
-    @Published var successMessage = ""
-
     private let cloudKit: CloudKitManager
 
     init(cloudKit: CloudKitManager = .shared) {
         self.cloudKit = cloudKit
-        self.isAuthenticated = cloudKit.isAuthenticated
     }
 
     func handleSignInWithApple(_ result: Result<ASAuthorization, Error>) {
@@ -67,12 +60,11 @@ class LoginViewModel: ObservableObject {
                         let userName = "\(fullName?.givenName ?? "") \(fullName?.familyName ?? "")"
                             .trimmingCharacters(in: .whitespaces)
 
-                        //                        try await createUser(
-                        //                            with: credential,
-                        //                            name: userName.isEmpty ? "User" : userName,
-                        //                            email: email
-                        //                        )
-                        Logger.debug("CREATE USER", category: .cloudKit)
+                        try await createUser(
+                            with: credential,
+                            name: userName.isEmpty ? "I'm just a username" : userName,
+                            email: email ?? "I'm your email address"
+                        )
                     }
 
                 case .failure(let error):
@@ -92,21 +84,24 @@ class LoginViewModel: ObservableObject {
         do {
             let iCloudId = try await cloudKit.container.userRecordID()
 
-            let record = CKRecord(recordType: "ChatUser")
-            record["id"] = iCloudId.recordName  // Use iCloud ID instead of UUID
-            record["name"] = name
-            record["email"] = email
+            let newRecord = CKRecord(recordType: "ChatUser")
+            newRecord["id"] = iCloudId.recordName  // Use iCloud ID instead of UUID
+            newRecord["name"] = name
+            newRecord["email"] = email
+            
+            let savedRecord = try await cloudKit.database.modifyRecords(
+                saving: [newRecord],
+                deleting: []).saveResults.first?.1.get()
 
-            try await cloudKit.signIn(with: credential)
-
-            withAnimation {
-                isAuthenticated = true
-                showSuccess = true
-                successMessage = "Welcome!"
+            guard let record = savedRecord else {
+                throw CloudKitError.operationFailed
             }
 
+            cloudKit.currentUser = try ChatUser(from: record)
+            userDefaults.set(true, forKey: isAuthenticatedUserDefaultKey)
+
             Logger.info("User created successfully", category: .auth)
-        } catch {
+        } catch let error {
             Logger.error("Failed to create user: \(error)", category: .auth)
             throw AuthError.userCreationFailed
         }
@@ -115,12 +110,6 @@ class LoginViewModel: ObservableObject {
     private func loginUser(with credential: ASAuthorizationAppleIDCredential) async throws {
         do {
             try await cloudKit.signIn(with: credential)
-
-            withAnimation {
-                isAuthenticated = true
-                showSuccess = true
-                successMessage = "Welcome back!"
-            }
 
             Logger.info("User logged in successfully: \(credential.user)", category: .auth)
         } catch {
@@ -159,12 +148,6 @@ class LoginViewModel: ObservableObject {
         Task {
             do {
                 try await cloudKit.signOut()
-
-                withAnimation {
-                    isAuthenticated = false
-                    showSuccess = true
-                    successMessage = "Signed out successfully"
-                }
 
                 Logger.info("User signed out successfully", category: .auth)
             } catch {

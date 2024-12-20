@@ -37,7 +37,7 @@ struct MainView: View {
         } else {
             switch cloudKit.iCloudStatus {
             case .available:
-                if cloudKit.isAuthenticated {
+                if (cloudKit.currentUser != nil) {
                     ContentView()
                         .environmentObject(cloudKit)
                 } else {
@@ -60,3 +60,8 @@ struct MainView: View {
         }
     }
 }
+
+
+
+let userDefaults = UserDefaults.standard
+let isAuthenticatedUserDefaultKey = "isAuthenticated"

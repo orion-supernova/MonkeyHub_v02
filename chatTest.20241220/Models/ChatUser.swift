@@ -1,13 +1,22 @@
 import CloudKit
 import Foundation
 
-struct ChatUser: Identifiable {
-    let id: String  // Primary ID (existing field)
-    let appleId: String  // New field for Apple Sign In ID
-    let recordName: String  // CloudKit Record Name
+struct ChatUser: Identifiable, Hashable {
+    let id: String
+    let appleId: String
+    let recordName: String
     let name: String
     let email: String
     let avatarAsset: CKAsset?
+
+    // Add Hashable conformance
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)  // Only hash by id since it's unique
+    }
+
+    static func == (lhs: ChatUser, rhs: ChatUser) -> Bool {
+        lhs.id == rhs.id  // Compare only by id
+    }
 
     init(from record: CKRecord) throws {
         guard

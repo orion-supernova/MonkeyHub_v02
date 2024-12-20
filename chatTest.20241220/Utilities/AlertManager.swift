@@ -5,8 +5,8 @@ struct AlertAction {
     let role: ButtonRole?
     let action: () -> Void
 
-    static func cancel() -> AlertAction {
-        AlertAction(title: "Cancel", role: .cancel, action: {})
+    static func okayAction() -> AlertAction {
+        AlertAction(title: "OK", role: .cancel, action: {})
     }
 }
 
@@ -36,7 +36,7 @@ class AlertManager: ObservableObject {
 
         self.title = title
         self.message = message
-        self.actions = actions.isEmpty ? [.cancel()] : actions
+        self.actions = actions.isEmpty ? [.okayAction()] : actions
         self.isPresented = true
     }
 

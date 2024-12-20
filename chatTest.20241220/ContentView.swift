@@ -15,26 +15,22 @@ struct ContentView: View {
     @State private var isShowingNewRoomSheet = false
     @State private var isShowingAvailableRooms = false
     @State private var newRoomName = ""
-    @State private var errorMessage = ""
-    @State private var showingError = false
     @State private var showingSignOutAlert = false
 
     // MARK: - Room Operations
     private func loadData() async {
         do {
             myRooms = try await cloudKit.fetchChatRooms()
-        } catch {
-            errorMessage = error.localizedDescription
-            showingError = true
+        } catch let error {
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
 
     private func loadAvailableRooms() async {
         do {
             availableRooms = try await cloudKit.fetchAvailableRooms()
-        } catch {
-            errorMessage = error.localizedDescription
-            showingError = true
+        } catch let error {
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
 
@@ -52,9 +48,8 @@ struct ContentView: View {
             await loadData()
             isShowingNewRoomSheet = false
             newRoomName = ""
-        } catch {
-            errorMessage = error.localizedDescription
-            showingError = true
+        } catch let error {
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
 
@@ -63,9 +58,8 @@ struct ContentView: View {
             try await cloudKit.joinRoom(room)
             await loadData()
             isShowingAvailableRooms = false
-        } catch {
-            errorMessage = error.localizedDescription
-            showingError = true
+        } catch let error {
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
 
@@ -73,9 +67,8 @@ struct ContentView: View {
         do {
             try await cloudKit.leaveRoom(room)
             await loadData()
-        } catch {
-            errorMessage = error.localizedDescription
-            showingError = true
+        } catch let error {
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
 
@@ -202,13 +195,6 @@ struct ContentView: View {
             }
             .refreshable {
                 await loadData()
-            }
-            .alert("Error", isPresented: $showingError) {
-                Button("OK") {
-                    showingError = false
-                }
-            } message: {
-                Text(errorMessage)
             }
             .alert("Sign Out", isPresented: $showingSignOutAlert) {
                 Button("Cancel", role: .cancel) {}

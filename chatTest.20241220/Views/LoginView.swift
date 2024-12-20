@@ -4,8 +4,6 @@ import SwiftUI
 struct LoginView: View {
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject private var cloudKit: CloudKitManager
-    @State private var showError = false
-    @State private var errorMessage = ""
     @State private var isAnimating = false
     @State private var showContent = false
     @State private var bubblePhase = 0.0
@@ -64,31 +62,16 @@ struct LoginView: View {
 
                 // Sign in button
                 VStack {
-                    if viewModel.isAuthenticated {
-                        Button(action: viewModel.signOut) {
-                            Text("Sign Out")
-                                .foregroundColor(.white)
-                                .padding(.horizontal)
-                                .padding(.vertical, 8)
-                                .background(
-                                    Capsule()
-                                        .fill(.ultraThinMaterial)
-                                )
-                        }
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .padding(.horizontal, 30)
-                    } else {
-                        SignInWithAppleButton { request in
-                            request.requestedScopes = [.fullName, .email]
-                        } onCompletion: { result in
-                            viewModel.handleSignInWithApple(result)
-                        }
-                        .signInWithAppleButtonStyle(.white)
-                        .frame(height: 56)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .shadow(color: .black.opacity(0.2), radius: 15)
-                        .padding(.horizontal, 30)
+                    SignInWithAppleButton { request in
+                        request.requestedScopes = [.fullName, .email]
+                    } onCompletion: { result in
+                        viewModel.handleSignInWithApple(result)
                     }
+                    .signInWithAppleButtonStyle(.white)
+                    .frame(height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .shadow(color: .black.opacity(0.2), radius: 15)
+                    .padding(.horizontal, 30)
                 }
                 .offset(y: showContent ? 0 : 40)
                 .opacity(showContent ? 1 : 0)
@@ -97,16 +80,6 @@ struct LoginView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear(perform: startAnimations)
-        .alert("Sign In Failed", isPresented: $showError) {
-            Button("OK") {}
-        } message: {
-            Text(errorMessage)
-        }
-        .alert("Success", isPresented: $viewModel.showSuccess) {
-            Button("OK") {}
-        } message: {
-            Text(viewModel.successMessage)
-        }
     }
 
     private func startAnimations() {

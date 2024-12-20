@@ -9,7 +9,6 @@ enum AuthError: LocalizedError {
     case signInFailed
     case signOutFailed
     case unknown(Error)
-    case emailRequired
 
     var errorDescription: String? {
         switch self {
@@ -25,8 +24,6 @@ enum AuthError: LocalizedError {
             return "Failed to sign out"
         case .unknown(let error):
             return error.localizedDescription
-        case .emailRequired:
-            return "Please sign in with your Apple ID and allow email access"
         }
     }
 }
@@ -64,15 +61,8 @@ class LoginViewModel: ObservableObject {
                         //                        try await loginUser(with: credential)
                         Logger.debug("LOGIN USER", category: .cloudKit)
                     } else {
-                        // New user - must have email for first sign in
-                        guard let email = credential.email else {
-                            Logger.error(
-                                "First-time sign in attempted without email access", category: .auth
-                            )
-                            throw AuthError.emailRequired
-                        }
 
-                        // If we have email but no name, use a default
+                        let email = credential.email
                         let fullName = credential.fullName
                         let userName = "\(fullName?.givenName ?? "") \(fullName?.familyName ?? "")"
                             .trimmingCharacters(in: .whitespaces)
@@ -88,7 +78,7 @@ class LoginViewModel: ObservableObject {
                 case .failure(let error):
                     throw AuthError.unknown(error)
                 }
-            } catch {
+            } catch let error {
                 await handleError(error)
             }
         }
@@ -150,7 +140,16 @@ class LoginViewModel: ObservableObject {
         do {
             let (records, _) = try await cloudKit.database.records(matching: query)
             return try records.first?.1.get() != nil
-        } catch {
+        } catch let error as CKError where error.code == .unknownItem {
+            // This error means the record type doesn't exist yet (first app launch)
+            Logger.info("No ChatUser records exist yet", category: .auth)
+            return false
+        } catch let error as CKError where error.code == .zoneNotFound {
+            // This error can occur when the zone is being created
+            Logger.info("CloudKit zone not found, likely first launch", category: .auth)
+            return false
+        } catch let error {
+            // Log and rethrow other errors that might indicate actual problems
             Logger.error("Failed to check user existence: \(error)", category: .auth)
             throw AuthError.unknown(error)
         }
@@ -177,10 +176,9 @@ class LoginViewModel: ObservableObject {
 
     private func handleError(_ error: Error) {
         let authError = (error as? AuthError) ?? AuthError.unknown(error)
-
-        withAnimation {
-            errorMessage = authError.localizedDescription
-            showError = true
-        }
+        AlertManager.shared.showAlert(
+            title: "Error",
+            message: authError.localizedDescription
+        )
     }
 }

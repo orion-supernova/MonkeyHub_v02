@@ -23,6 +23,7 @@ struct chatTest_20241220App: App {
                         await cloudKit.initialize()
                     }
                 }
+                .withAlertManager()
         }
     }
 }

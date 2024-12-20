@@ -1,0 +1,77 @@
+import CloudKit
+import Foundation
+
+struct ChatRoom: Identifiable {
+    let id: String
+    let name: String
+    let createdBy: String
+    let createdAt: Date
+    let lastMessage: String?
+    let lastMessageDate: Date?
+    let participants: [String]
+    let description: String?
+    let isPrivate: Bool?
+
+    // CloudKit record keys
+    static let recordType = "ChatRoom"
+    static let idKey = "id"
+    static let nameKey = "name"
+    static let createdByKey = "createdBy"
+    static let createdAtKey = "createdAt"
+    static let lastMessageKey = "lastMessage"
+    static let lastMessageDateKey = "lastMessageDate"
+    static let participantsKey = "participants"
+    static let descriptionKey = "description"
+    static let isPrivateKey = "isPrivate"
+
+    init(from record: CKRecord) throws {
+        guard
+            let id = record[ChatRoom.idKey] as? String,
+            let name = record[ChatRoom.nameKey] as? String,
+            let createdBy = record[ChatRoom.createdByKey] as? String,
+            let createdAt = record[ChatRoom.createdAtKey] as? Date
+        else {
+            throw CloudKitError.invalidRecord
+        }
+
+        self.id = id
+        self.name = name
+        self.createdBy = createdBy
+        self.createdAt = createdAt
+        self.lastMessage = record[ChatRoom.lastMessageKey] as? String
+        self.lastMessageDate = record[ChatRoom.lastMessageDateKey] as? Date
+        self.participants = (record[ChatRoom.participantsKey] as? [String]) ?? [createdBy]
+        self.description = record[ChatRoom.descriptionKey] as? String
+        self.isPrivate = record[ChatRoom.isPrivateKey] as? Bool
+    }
+
+    init(name: String, createdBy: String, participants: [String] = []) {
+        self.id = UUID().uuidString
+        self.name = name
+        self.createdBy = createdBy
+        self.createdAt = Date()
+        self.lastMessage = nil
+        self.lastMessageDate = nil
+        self.participants = participants
+        self.description = nil
+        self.isPrivate = false
+    }
+
+    func toRecord() -> CKRecord {
+        let record = CKRecord(recordType: ChatRoom.recordType)
+        record[ChatRoom.idKey] = id
+        record[ChatRoom.nameKey] = name
+        record[ChatRoom.createdByKey] = createdBy
+        record[ChatRoom.createdAtKey] = createdAt
+        record[ChatRoom.lastMessageKey] = lastMessage
+        record[ChatRoom.lastMessageDateKey] = lastMessageDate
+        record[ChatRoom.participantsKey] = participants
+        if let description = description {
+            record[ChatRoom.descriptionKey] = description
+        }
+        if let isPrivate = isPrivate {
+            record[ChatRoom.isPrivateKey] = isPrivate
+        }
+        return record
+    }
+}

@@ -90,6 +90,7 @@ class CloudKitManager: ObservableObject {
         case noAccount
         case restricted
         case noInternet
+        case temporarilyUnavailable
         case error(Error)
     }
 
@@ -111,15 +112,6 @@ class CloudKitManager: ObservableObject {
                 Logger.info("iCloud is available", category: Logger.cloudKit)
                 iCloudStatus = .available
 
-                // 2. Try to restore saved user if exists
-                if defaults.bool(forKey: authKey) {
-                    do {
-                        _ = try await fetchCurrentUser()
-                    } catch {
-                        Logger.info("No saved user found", category: Logger.cloudKit)
-                    }
-                }
-
             case .noAccount:
                 Logger.info("No iCloud account", category: Logger.cloudKit)
                 iCloudStatus = .noAccount
@@ -132,6 +124,10 @@ class CloudKitManager: ObservableObject {
                 Logger.error(CloudKitError.networkError, context: "iCloud status")
                 iCloudStatus = .noInternet
 
+            case .temporarilyUnavailable:
+                Logger.error(CloudKitError.networkError, context: "iCloud status")
+                iCloudStatus = .temporarilyUnavailable
+                
             @unknown default:
                 let error = CloudKitError.unknown(NSError())
                 Logger.error(error, context: "iCloud status")
@@ -187,89 +183,61 @@ class CloudKitManager: ObservableObject {
     // MARK: - User Management
 
     func fetchCurrentUser() async throws -> ChatUser {
+        Logger.info(
+            "iCloud account available, fetching user record...", category: Logger.cloudKit)
+        let userRecordID = try await container.userRecordID()
+        Logger.debug("User recordID: \(userRecordID.recordName)", category: Logger.cloudKit)
+
+        // Create a query to find the user record
+        let predicate = NSPredicate(format: "id == %@", userRecordID.recordName)
+        let query = CKQuery(recordType: "ChatUser", predicate: predicate)
+
         do {
-            Logger.info("Checking iCloud account status...", category: Logger.cloudKit)
-            let accountStatus = try await container.accountStatus()
+            Logger.debug("Querying for existing user record...", category: Logger.cloudKit)
+            let (records, _) = try await database.records(matching: query)
 
-            switch accountStatus {
-            case .available:
+            if let userRecord = try records.first?.1.get() {
+                Logger.info("Existing user record found", category: Logger.cloudKit)
+                let user = try ChatUser(from: userRecord)
+                currentUser = user
                 Logger.info(
-                    "iCloud account available, fetching user record...", category: Logger.cloudKit)
-                let userRecordID = try await container.userRecordID()
-                Logger.debug("User recordID: \(userRecordID.recordName)", category: Logger.cloudKit)
-
-                // Create a query to find the user record
-                let predicate = NSPredicate(format: "id == %@", userRecordID.recordName)
-                let query = CKQuery(recordType: "ChatUser", predicate: predicate)
+                    "User loaded: \(user.name) (\(user.id))", category: Logger.cloudKit)
+                return user
+            } else {
+                Logger.info(
+                    "No existing user record found, creating new user...",
+                    category: Logger.cloudKit)
+                // Create new user record
+                let newRecord = CKRecord(recordType: "ChatUser")
+                newRecord["id"] = userRecordID.recordName
+                newRecord["name"] = "User"
+                newRecord["email"] = ""
 
                 do {
-                    Logger.debug("Querying for existing user record...", category: Logger.cloudKit)
-                    let (records, _) = try await database.records(matching: query)
+                    Logger.debug("Saving new user record...", category: Logger.cloudKit)
+                    let saveResult = try await database.modifyRecords(
+                        saving: [newRecord], deleting: []
+                    ).saveResults.first?.1.get()
 
-                    if let userRecord = try records.first?.1.get() {
-                        Logger.info("Existing user record found", category: Logger.cloudKit)
-                        let user = try ChatUser(from: userRecord)
-                        currentUser = user
-                        Logger.info(
-                            "User loaded: \(user.name) (\(user.id))", category: Logger.cloudKit)
-                        return user
-                    } else {
-                        Logger.info(
-                            "No existing user record found, creating new user...",
-                            category: Logger.cloudKit)
-                        // Create new user record
-                        let newRecord = CKRecord(recordType: "ChatUser")
-                        newRecord["id"] = userRecordID.recordName
-                        newRecord["name"] = "User"
-                        newRecord["email"] = ""
-
-                        do {
-                            Logger.debug("Saving new user record...", category: Logger.cloudKit)
-                            let saveResult = try await database.modifyRecords(
-                                saving: [newRecord], deleting: []
-                            ).saveResults.first?.1.get()
-
-                            guard let savedRecord = saveResult else {
-                                Logger.error(
-                                    CloudKitError.operationFailed, context: "Save new user")
-                                throw CloudKitError.operationFailed
-                            }
-
-                            let user = try ChatUser(from: savedRecord)
-                            currentUser = user
-                            Logger.info(
-                                "New user created: \(user.name) (\(user.id))",
-                                category: Logger.cloudKit)
-                            return user
-                        } catch {
-                            Logger.error(error, context: "Save new user record")
-                            throw CloudKitError.operationFailed
-                        }
+                    guard let savedRecord = saveResult else {
+                        Logger.error(
+                            CloudKitError.operationFailed, context: "Save new user")
+                        throw CloudKitError.operationFailed
                     }
-                } catch {
-                    Logger.error(error, context: "Query user record")
-                    throw CloudKitError.unknown(error)
-                }
 
-            case .noAccount:
-                Logger.error(CloudKitError.notAuthenticated, context: "Account status")
-                throw CloudKitError.notAuthenticated
-            case .restricted:
-                Logger.error(CloudKitError.permissionDenied, context: "Account status")
-                throw CloudKitError.permissionDenied
-            case .couldNotDetermine:
-                Logger.error(CloudKitError.networkError, context: "Account status")
-                throw CloudKitError.networkError
-            @unknown default:
-                let error = NSError(domain: "CloudKit", code: -1, userInfo: nil)
-                Logger.error(CloudKitError.unknown(error), context: "Account status")
-                throw CloudKitError.unknown(error)
+                    let user = try ChatUser(from: savedRecord)
+                    currentUser = user
+                    Logger.info(
+                        "New user created: \(user.name) (\(user.id))",
+                        category: Logger.cloudKit)
+                    return user
+                } catch {
+                    Logger.error(error, context: "Save new user record")
+                    throw CloudKitError.operationFailed
+                }
             }
-        } catch let error as CKError where error.code == .notAuthenticated {
-            Logger.error(CloudKitError.notAuthenticated, context: "Account check")
-            throw CloudKitError.notAuthenticated
         } catch {
-            Logger.error(CloudKitError.unknown(error), context: "Account check")
+            Logger.error(error, context: "Query user record")
             throw CloudKitError.unknown(error)
         }
     }

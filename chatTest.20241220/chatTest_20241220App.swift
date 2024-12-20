@@ -53,6 +53,8 @@ struct MainView: View {
                 ICloudErrorView(message: error.localizedDescription)
             case .unknown:
                 LoadingView()
+            case .temporarilyUnavailable:
+                ICloudErrorView(message: "iCloud is temporarily unavailable. Please try again later")
             }
         }
     }

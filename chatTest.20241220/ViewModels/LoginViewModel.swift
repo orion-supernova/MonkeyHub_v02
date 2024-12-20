@@ -51,8 +51,7 @@ class LoginViewModel: ObservableObject {
                     let userExists = try await isUserExists()
 
                     if userExists {
-                        //                        try await loginUser(with: credential)
-                        Logger.debug("LOGIN USER", category: .cloudKit)
+                        try await loginUser(with: credential)
                     } else {
 
                         let email = credential.email
@@ -71,7 +70,7 @@ class LoginViewModel: ObservableObject {
                     throw AuthError.unknown(error)
                 }
             } catch let error {
-                await handleError(error)
+                handleError(error)
             }
         }
     }
@@ -89,17 +88,16 @@ class LoginViewModel: ObservableObject {
             newRecord["name"] = name
             newRecord["email"] = email
             
-            let savedRecord = try await cloudKit.database.modifyRecords(
-                saving: [newRecord],
-                deleting: []).saveResults.first?.1.get()
-
-            guard let record = savedRecord else {
-                throw CloudKitError.operationFailed
+            do {
+                try await cloudKit.database.save(newRecord)
+            } catch let error {
+                Logger.error(error.localizedDescription, category: .cloudKit)
+                throw CloudKitError.custom(error.localizedDescription)
             }
 
-            cloudKit.currentUser = try ChatUser(from: record)
-            userDefaults.set(true, forKey: isAuthenticatedUserDefaultKey)
-
+            cloudKit.isAuthenticated = true
+            userDefaults.set(iCloudId.recordName, forKey: userIdUserDefaultsKey)
+            
             Logger.info("User created successfully", category: .auth)
         } catch let error {
             Logger.error("Failed to create user: \(error)", category: .auth)
@@ -109,9 +107,12 @@ class LoginViewModel: ObservableObject {
 
     private func loginUser(with credential: ASAuthorizationAppleIDCredential) async throws {
         do {
-            try await cloudKit.signIn(with: credential)
-
-            Logger.info("User logged in successfully: \(credential.user)", category: .auth)
+            let iCloudId = try await cloudKit.container.userRecordID()
+            let id = iCloudId.recordName
+            
+            userDefaults.set(id, forKey: userIdUserDefaultsKey)
+            cloudKit.isAuthenticated = true
+            Logger.info("User logged in successfully: \(id)", category: .auth)
         } catch {
             Logger.error("Failed to login user: \(error)", category: .auth)
             throw AuthError.signInFailed
@@ -145,16 +146,7 @@ class LoginViewModel: ObservableObject {
     }
 
     func signOut() {
-        Task {
-            do {
-                try await cloudKit.signOut()
-
-                Logger.info("User signed out successfully", category: .auth)
-            } catch {
-                Logger.error("Failed to sign out: \(error)", category: .auth)
-                await handleError(AuthError.signOutFailed)
-            }
-        }
+        cloudKit.signOut()
     }
 
     private func handleError(_ error: Error) {

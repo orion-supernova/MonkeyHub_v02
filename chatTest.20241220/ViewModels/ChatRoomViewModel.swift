@@ -21,11 +21,11 @@ class ChatRoomViewModel: ObservableObject {
     }
 
     func sendMessage(_ text: String) async {
-        guard let currentUser = cloudKit.currentUser else { return }
+//        guard let currentUser = cloudKit.currentUser else { return }
 
         let message = ChatMessage(
-            senderId: currentUser.id,
-            senderName: currentUser.name,
+            senderId: "currentUser.id",
+            senderName: "currentUser.name",
             content: text,
             type: .text,
             roomId: roomId
@@ -40,16 +40,16 @@ class ChatRoomViewModel: ObservableObject {
     }
 
     func sendImage(_ image: UIImage) async {
-        guard let currentUser = cloudKit.currentUser,
-            let imageData = image.jpegData(compressionQuality: 0.7)
-        else { return }
+//        guard let currentUser = cloudKit.currentUser,
+//            let imageData = image.jpegData(compressionQuality: 0.7)
+//        else { return }
 
         do {
-            let fileURL = try await cloudKit.uploadAsset(data: imageData, fileExtension: "jpg")
+            let fileURL = try await cloudKit.uploadAsset(data: /*imageData*/Data(), fileExtension: "jpg")
 
             let message = ChatMessage(
-                senderId: currentUser.id,
-                senderName: currentUser.name,
+                senderId: "currentUser.id",
+                senderName: "currentUser.name",
                 content: " Photo",
                 type: .image,
                 roomId: roomId,

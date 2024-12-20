@@ -35,12 +35,12 @@ struct ContentView: View {
     }
 
     private func createRoom() async {
-        guard let currentUser = cloudKit.currentUser else { return }
-
+//        guard let currentUser = cloudKit.currentUser else { return }
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let room = ChatRoom(
             name: newRoomName,
-            createdBy: currentUser.id,
-            participants: [currentUser.id]
+            createdBy: userId,
+            participants: [userId]
         )
 
         do {
@@ -207,10 +207,57 @@ struct ContentView: View {
                 Text("Are you sure you want to sign out?")
             }
         }
+        .onAppear {
+            guard isUserExistOnDatabase() else {
+                cloudKit.isAuthenticated = false
+                userDefaults.set(nil, forKey: userIdUserDefaultsKey)
+                return
+            }
+        }
+    }
+    
+
+    private func isUserExistOnDatabase() -> Bool {
+        // Get the user ID from UserDefaults
+        guard let userId = userDefaults.string(forKey: userIdUserDefaultsKey) else {
+            // If no user ID is stored in UserDefaults, return false
+            return false
+        }
+        
+        // Reference to the CloudKit database
+        let database = cloudKit.database
+        
+        // Create a predicate to search for the user by their ID
+        let predicate = NSPredicate(format: "id == %@", userId)
+        let query = CKQuery(recordType: "ChatUser", predicate: predicate)
+        
+        // Perform the query asynchronously
+        let semaphore = DispatchSemaphore(value: 0)
+        var userExists = false
+        
+        database.fetch(withQuery: query) { result in
+            switch result {
+            case .success(let matchResults):
+                let results = matchResults.matchResults
+                guard !results.isEmpty else { userExists = false; semaphore.signal(); return }
+                userExists = true
+            case .failure(let error):
+                print(error.localizedDescription)
+                userExists = false
+            }
+            // Signal semaphore to continue execution
+            semaphore.signal()
+        }
+        // Wait for the async CloudKit query to finish
+        semaphore.wait()
+        
+        return userExists
     }
 
+
     private func signOut() async {
-        cloudKit.currentUser = nil
+        userDefaults.set(nil, forKey: userIdUserDefaultsKey)
+        cloudKit.isAuthenticated = false
     }
 }
 

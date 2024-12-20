@@ -5,7 +5,8 @@ struct MessageView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var isCurrentUser: Bool {
-        message.senderId == CloudKitManager.shared.currentUser?.id
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+        return message.senderId == userId
     }
 
     var body: some View {

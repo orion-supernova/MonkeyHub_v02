@@ -62,10 +62,9 @@ struct FloatingMenu: View {
                 let tab = BaseView.Tab.allCases[index]
                 MenuButton(
                     icon: tab.icon,
-                    title: tab.rawValue,
                     isSelected: selectedTab == tab,
-                    distance: isExpanded ? 80.0 * Double(index + 1) : 0,
-                    angle: Double.pi / 4 * Double(index),
+                    distance: isExpanded ? 82.0 : 0,
+                    angle: -.pi / 2.2 + .pi / 4.5 * Double(index),
                     action: {
                         withAnimation(.spring(duration: 0.3)) {
                             selectedTab = tab
@@ -115,7 +114,6 @@ struct FloatingMenu: View {
 
 struct MenuButton: View {
     let icon: String
-    let title: String
     let isSelected: Bool
     let distance: Double
     let angle: Double
@@ -125,58 +123,37 @@ struct MenuButton: View {
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: isSelected
-                                ? selectedTheme.colors(for: colorScheme).primary
-                                : [selectedTheme.colors(for: colorScheme).cardBackground],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: isSelected
+                            ? selectedTheme.colors(for: colorScheme).primary
+                            : [selectedTheme.colors(for: colorScheme).cardBackground],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 40, height: 40)
+                .shadow(
+                    color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.2),
+                    radius: 6,
+                    y: 3
+                )
+                .overlay {
+                    Image(systemName: icon)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(
+                            isSelected
+                                ? selectedTheme.colors(for: colorScheme).text
+                                : selectedTheme.colors(for: colorScheme).textSecondary
                         )
-                    )
-                    .frame(width: 48, height: 48)
-                    .shadow(
-                        color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.2),
-                        radius: 6,
-                        y: 3
-                    )
-
-                Image(systemName: icon)
-                    .font(.title3)
-                    .foregroundStyle(
-                        isSelected
-                            ? selectedTheme.colors(for: colorScheme).text
-                            : selectedTheme.colors(for: colorScheme).textSecondary
-                    )
-            }
-            .overlay(alignment: .trailing) {
-                if distance > 0 {
-                    Text(title)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule()
-                                .fill(selectedTheme.colors(for: colorScheme).cardBackground)
-                                .shadow(
-                                    color: selectedTheme.colors(for: colorScheme).primary[0]
-                                        .opacity(0.1),
-                                    radius: 4,
-                                    y: 2
-                                )
-                        )
-                        .offset(x: 60)
-                        .opacity(distance > 0 ? 1 : 0)
-                        .transition(.opacity.combined(with: .scale))
                 }
-            }
         }
         .offset(
             x: cos(angle) * distance,
-            y: -sin(angle) * distance
+            y: sin(angle) * distance
         )
+        .scaleEffect(isSelected ? 1.08 : 1.0)
+        .animation(.spring(duration: 0.3), value: isSelected)
     }
 }

@@ -353,3 +353,7 @@ private struct UsersListView: View {
         }
     }
 }
+
+#Preview {
+    SearchView()
+}

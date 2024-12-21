@@ -20,7 +20,6 @@ struct ContentView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var isShowingJoinRoomSheet = false
     @State private var availableRooms: [ChatRoom] = []
-    @State private var isShowingFindFriendSheet = false
     @State private var isShowingSearchView = false
 
     // MARK: - Room Operations
@@ -332,16 +331,16 @@ struct ContentView: View {
                     }
                 )
             }
-            .sheet(isPresented: $isShowingFindFriendSheet) {
-                FindFriendSheet(
-                    isShowingSheet: $isShowingFindFriendSheet,
-                    createPrivateRoom: { friend in
-                        Task {
-                            await createPrivateRoom(with: friend)
-                        }
-                    }
-                )
-            }
+//            .sheet(isPresented: $isShowingFindFriendSheet) {
+//                FindFriendSheet(
+//                    isShowingSheet: $isShowingFindFriendSheet,
+//                    createPrivateRoom: { friend in
+//                        Task {
+//                            await createPrivateRoom(with: friend)
+//                        }
+//                    }
+//                )
+//            }
             .sheet(isPresented: $isShowingSearchView) {
                 SearchView()
             }
@@ -456,7 +455,6 @@ struct ContentView: View {
         do {
             try await cloudKit.createChatRoom(room)
             await loadData()
-            isShowingFindFriendSheet = false
         } catch let error {
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }

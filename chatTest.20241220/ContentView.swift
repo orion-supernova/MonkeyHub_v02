@@ -28,13 +28,14 @@ struct ContentView: View {
         }
     }
 
-    private func createRoom() async {
-        //        guard let currentUser = cloudKit.currentUser else { return }
+    private func createRoom(type: RoomType, messageLifetime: TimeInterval?) async {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let room = ChatRoom(
             name: newRoomName,
             createdBy: userId,
-            participants: [userId]
+            participants: [userId],
+            type: type,
+            messageLifetime: messageLifetime
         )
 
         do {
@@ -296,8 +297,6 @@ struct ContentView: View {
                     roomName: $newRoomName,
                     createRoom: createRoom
                 )
-                .presentationDetents([.height(300)])
-                .presentationBackground(selectedTheme.colors.background)
             }
         }
         .task {
@@ -459,48 +458,245 @@ struct EnhancedRoomCard: View {
 struct EnhancedNewRoomSheet: View {
     @Binding var isShowingSheet: Bool
     @Binding var roomName: String
-    let createRoom: () async -> Void
+    @State private var selectedType: RoomType = .regular
+    @State private var messageLifetime: TimeInterval = 300  // 5 minutes default
+    let createRoom: (RoomType, TimeInterval?) async -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @State private var animateContent = false
+    @State private var selectedOptionId: TimeInterval?
+    @Namespace private var animation
+
+    private let lifetimeOptions: [(String, TimeInterval)] = [
+        ("5 minutes", 300),
+        ("1 hour", 3600),
+        ("24 hours", 86400),
+        ("7 days", 604800),
+    ]
 
     var body: some View {
-        VStack(spacing: 24) {
-            // Enhanced header
-            VStack(spacing: 8) {
-                Text("Create New Room")
-                    .font(.title.bold())
-                    .foregroundStyle(selectedTheme.colors.textPrimary)
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 32) {
+                // Enhanced Header with animation
+                VStack(spacing: 8) {
+                    Text("Create New Room")
+                        .font(.title.bold())
+                        .foregroundStyle(selectedTheme.colors.textPrimary)
+                        .opacity(animateContent ? 1 : 0)
+                        .offset(y: animateContent ? 0 : 20)
 
-                Text("Start a new conversation")
-                    .font(.subheadline)
-                    .foregroundStyle(selectedTheme.colors.textSecondary)
-            }
-
-            // Enhanced room name input
-            VStack(alignment: .leading, spacing: 8) {
-                Text("ROOM NAME")
-                    .font(.caption.bold())
-                    .foregroundStyle(selectedTheme.colors.textSecondary)
-                    .padding(.leading, 4)
-
-                TextField("Enter room name", text: $roomName)
-                    .textFieldStyle(.plain)
-                    .padding()
-                    .background(selectedTheme.colors.cardBackground)
-                    .foregroundStyle(selectedTheme.colors.textPrimary)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(selectedTheme.colors.accent.opacity(0.2), lineWidth: 1)
-                    )
-            }
-
-            // Enhanced create button
-            Button {
-                Task {
-                    await createRoom()
+                    Text("Select room type and customize settings")
+                        .font(.subheadline)
+                        .foregroundStyle(selectedTheme.colors.textSecondary)
+                        .opacity(animateContent ? 1 : 0)
+                        .offset(y: animateContent ? 0 : 20)
                 }
-            } label: {
-                Text("Create Room")
+                .padding(.top, 24)
+
+                // Room Type Selector with improved animations
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("ROOM TYPE")
+                        .font(.caption.bold())
+                        .foregroundStyle(selectedTheme.colors.textSecondary)
+                        .padding(.leading, 4)
+                        .opacity(animateContent ? 1 : 0)
+                        .offset(y: animateContent ? 0 : 20)
+
+                    VStack(spacing: 16) {
+                        ForEach([RoomType.regular, .secret], id: \.self) { type in
+                            Button {
+                                withAnimation(.spring(duration: 0.5, bounce: 0.3)) {
+                                    selectedType = type
+                                }
+                            } label: {
+                                HStack(spacing: 16) {
+                                    // Room type icon
+                                    ZStack {
+                                        Circle()
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: selectedType == type
+                                                        ? selectedTheme.colors.primary
+                                                        : [selectedTheme.colors.cardBackground],
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                )
+                                            )
+                                            .frame(width: 44, height: 44)
+                                            .shadow(
+                                                color: selectedType == type
+                                                    ? selectedTheme.colors.primary[0].opacity(0.3)
+                                                    : .clear,
+                                                radius: 5, y: 2
+                                            )
+
+                                        Image(
+                                            systemName: type == .regular
+                                                ? "bubble.left.circle.fill" : "lock.shield.fill"
+                                        )
+                                        .font(.title3)
+                                        .foregroundStyle(
+                                            selectedType == type
+                                                ? selectedTheme.colors.text
+                                                : selectedTheme.colors.textSecondary
+                                        )
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(
+                                            type == .regular ? "Regular Room" : "Chamber of Secrets"
+                                        )
+                                        .font(.headline)
+                                        .foregroundStyle(selectedTheme.colors.textPrimary)
+
+                                        Text(
+                                            type == .regular
+                                                ? "Standard chat room with permanent messages"
+                                                : "Secret room with self-destructing messages"
+                                        )
+                                        .font(.caption)
+                                        .foregroundStyle(selectedTheme.colors.textSecondary)
+                                        .lineLimit(2)
+                                    }
+
+                                    Spacer()
+
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(selectedTheme.colors.accent)
+                                        .opacity(selectedType == type ? 1 : 0)
+                                }
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(selectedTheme.colors.cardBackground)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .strokeBorder(
+                                            selectedType == type
+                                                ? selectedTheme.colors.accent
+                                                : selectedTheme.colors.textSecondary.opacity(0.1),
+                                            lineWidth: selectedType == type ? 1.5 : 1
+                                        )
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .opacity(animateContent ? 1 : 0)
+                            .offset(y: animateContent ? 0 : 20)
+                        }
+                    }
+                }
+
+                // Message Lifetime Selector with improved animations
+                if selectedType == .secret {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("MESSAGE LIFETIME")
+                            .font(.caption.bold())
+                            .foregroundStyle(selectedTheme.colors.textSecondary)
+                            .padding(.leading, 4)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+
+                        VStack(spacing: 12) {
+                            ForEach(lifetimeOptions, id: \.1) { option in
+                                Button {
+                                    withAnimation(.spring(duration: 0.3)) {
+                                        messageLifetime = option.1
+                                        selectedOptionId = option.1
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text(option.0)
+                                            .font(.subheadline)
+                                            .foregroundStyle(selectedTheme.colors.textPrimary)
+
+                                        Spacer()
+
+                                        if messageLifetime == option.1 {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(selectedTheme.colors.accent)
+                                                .matchedGeometryEffect(
+                                                    id: "check\(option.1)",
+                                                    in: animation
+                                                )
+                                        }
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(selectedTheme.colors.cardBackground)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .strokeBorder(
+                                                        messageLifetime == option.1
+                                                            ? selectedTheme.colors.accent
+                                                            : selectedTheme.colors.textSecondary
+                                                                .opacity(0.1),
+                                                        lineWidth: messageLifetime == option.1
+                                                            ? 1.5 : 1
+                                                    )
+                                            )
+                                    )
+                                    .scaleEffect(messageLifetime == option.1 ? 1.02 : 1)
+                                }
+                                .buttonStyle(.plain)
+                                .transition(.scale.combined(with: .opacity))
+                            }
+                        }
+                    }
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
+                // Room name input with animation
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("ROOM NAME")
+                        .font(.caption.bold())
+                        .foregroundStyle(selectedTheme.colors.textSecondary)
+                        .padding(.leading, 4)
+                        .opacity(animateContent ? 1 : 0)
+                        .offset(y: animateContent ? 0 : 20)
+
+                    TextField("Enter room name", text: $roomName)
+                        .textFieldStyle(.plain)
+                        .padding()
+                        .background(selectedTheme.colors.cardBackground)
+                        .foregroundStyle(selectedTheme.colors.textPrimary)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(
+                                    roomName.isEmpty
+                                        ? selectedTheme.colors.textSecondary.opacity(0.1)
+                                        : selectedTheme.colors.accent.opacity(0.2),
+                                    lineWidth: 1
+                                )
+                        )
+                }
+                .opacity(animateContent ? 1 : 0)
+                .offset(y: animateContent ? 0 : 20)
+
+                // Create button with enhanced animation
+                Button {
+                    // Add haptic feedback
+                    let impactMed = UIImpactFeedbackGenerator(style: .medium)
+                    impactMed.impactOccurred()
+
+                    Task {
+                        await createRoom(
+                            selectedType,
+                            selectedType == .secret ? messageLifetime : nil
+                        )
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(
+                            systemName: selectedType == .regular
+                                ? "plus.circle.fill" : "lock.shield.fill"
+                        )
+                        .transition(.scale.combined(with: .opacity))
+
+                        Text("Create \(selectedType == .regular ? "Room" : "Secret Room")")
+                    }
                     .font(.headline)
                     .foregroundStyle(selectedTheme.colors.text)
                     .frame(maxWidth: .infinity)
@@ -514,13 +710,154 @@ struct EnhancedNewRoomSheet: View {
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .shadow(color: selectedTheme.colors.primary[0].opacity(0.3), radius: 5, y: 2)
+                    .scaleEffect(roomName.isEmpty ? 0.98 : 1)
+                }
+                .disabled(roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .opacity(animateContent ? 1 : 0)
+                .offset(y: animateContent ? 0 : 20)
             }
-            .disabled(roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-            Spacer()
+            .padding(24)
+            .padding(.bottom, 16)
         }
-        .padding(24)
         .background(selectedTheme.colors.background)
+        .scrollDismissesKeyboard(.immediately)
+        .presentationDetents([
+            .height(selectedType == .secret ? 680 : 520)
+        ])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(selectedTheme.colors.background)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.4)) {
+                animateContent = true
+            }
+        }
+        .onChange(of: selectedType) { _, _ in
+            // Add haptic feedback for type change
+            let impactLight = UIImpactFeedbackGenerator(style: .light)
+            impactLight.impactOccurred()
+        }
+    }
+}
+
+struct JoinRoomSheet: View {
+    @Binding var isShowingSheet: Bool
+    @State private var availableRooms: [ChatRoom] = []
+    let joinRoom: (ChatRoom) async -> Void
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+
+    var body: some View {
+        VStack(spacing: 24) {
+            // Header
+            VStack(spacing: 8) {
+                Text("Join Room")
+                    .font(.title.bold())
+                    .foregroundStyle(selectedTheme.colors.textPrimary)
+
+                Text("Join an existing room")
+                    .font(.subheadline)
+                    .foregroundStyle(selectedTheme.colors.textSecondary)
+            }
+
+            if availableRooms.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "magnifyingglass.circle.fill")
+                        .font(.system(size: 60))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: selectedTheme.colors.primary,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+
+                    Text("No Rooms Available")
+                        .font(.title2.bold())
+                        .foregroundStyle(selectedTheme.colors.textPrimary)
+
+                    Text("Create a new room or try again later")
+                        .font(.subheadline)
+                        .foregroundStyle(selectedTheme.colors.textSecondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(40)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 16) {
+                        ForEach(availableRooms) { room in
+                            Button {
+                                Task {
+                                    await joinRoom(room)
+                                }
+                            } label: {
+                                HStack(spacing: 16) {
+                                    // Room icon
+                                    ZStack {
+                                        Circle()
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: selectedTheme.colors.primary,
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                )
+                                            )
+
+                                        Image(
+                                            systemName: room.type == .regular
+                                                ? "bubble.left" : "lock.shield"
+                                        )
+                                        .font(.title3.bold())
+                                        .foregroundStyle(selectedTheme.colors.text)
+                                    }
+                                    .frame(width: 44, height: 44)
+
+                                    // Room info
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(room.name)
+                                            .font(.headline)
+                                            .foregroundStyle(selectedTheme.colors.textPrimary)
+
+                                        HStack {
+                                            Image(systemName: "person.2.fill")
+                                                .imageScale(.small)
+                                            Text("\(room.participants.count) members")
+                                        }
+                                        .font(.caption)
+                                        .foregroundStyle(selectedTheme.colors.textSecondary)
+                                    }
+
+                                    Spacer()
+
+                                    Image(systemName: "chevron.right")
+                                        .font(.headline)
+                                        .foregroundStyle(selectedTheme.colors.textSecondary)
+                                }
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(selectedTheme.colors.cardBackground)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .strokeBorder(
+                                            selectedTheme.colors.accent.opacity(0.1), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+        }
+        .padding(.top, 24)
+        .background(selectedTheme.colors.background)
+        .task {
+            await loadAvailableRooms()
+        }
+    }
+
+    private func loadAvailableRooms() async {
+        // Implement your loading logic here
     }
 }
 

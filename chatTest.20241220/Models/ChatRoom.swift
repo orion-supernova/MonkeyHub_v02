@@ -1,6 +1,11 @@
 import CloudKit
 import Foundation
 
+enum RoomType: String, Codable {
+    case regular = "Regular Room"
+    case secret = "Chamber of Secrets"
+}
+
 struct ChatRoom: Identifiable {
     let id: String
     let name: String
@@ -11,6 +16,8 @@ struct ChatRoom: Identifiable {
     let participants: [String]
     let description: String?
     let isPrivate: Bool?
+    let type: RoomType
+    let messageLifetime: TimeInterval?
 
     // CloudKit record keys
     static let recordType = "ChatRoom"
@@ -23,6 +30,8 @@ struct ChatRoom: Identifiable {
     static let participantsKey = "participants"
     static let descriptionKey = "description"
     static let isPrivateKey = "isPrivate"
+    static let typeKey = "type"
+    static let messageLifetimeKey = "messageLifetime"
 
     init(from record: CKRecord) throws {
         guard
@@ -43,9 +52,15 @@ struct ChatRoom: Identifiable {
         self.participants = (record[ChatRoom.participantsKey] as? [String]) ?? [createdBy]
         self.description = record[ChatRoom.descriptionKey] as? String
         self.isPrivate = record[ChatRoom.isPrivateKey] as? Bool
+        self.type =
+            RoomType(rawValue: record[ChatRoom.typeKey] as? String ?? "Regular Room") ?? .regular
+        self.messageLifetime = record[ChatRoom.messageLifetimeKey] as? TimeInterval
     }
 
-    init(name: String, createdBy: String, participants: [String] = []) {
+    init(
+        name: String, createdBy: String, participants: [String] = [], type: RoomType = .regular,
+        messageLifetime: TimeInterval? = nil
+    ) {
         self.id = UUID().uuidString
         self.name = name
         self.createdBy = createdBy
@@ -55,6 +70,8 @@ struct ChatRoom: Identifiable {
         self.participants = participants
         self.description = nil
         self.isPrivate = false
+        self.type = type
+        self.messageLifetime = messageLifetime
     }
 
     func toRecord() -> CKRecord {
@@ -71,6 +88,10 @@ struct ChatRoom: Identifiable {
         }
         if let isPrivate = isPrivate {
             record[ChatRoom.isPrivateKey] = isPrivate
+        }
+        record[ChatRoom.typeKey] = type.rawValue
+        if let messageLifetime = messageLifetime {
+            record[ChatRoom.messageLifetimeKey] = messageLifetime
         }
         return record
     }

@@ -6,6 +6,7 @@ struct SettingsView: View {
     @StateObject private var cloudKit = CloudKitManager.shared
     @State private var showingSignOutAlert = false
     @State private var animateContent = false
+    @State private var isShowingThemeSheet = false
 
     private var headerHeight: CGFloat {
         let screenHeight = UIScreen.main.bounds.height
@@ -15,6 +16,47 @@ struct SettingsView: View {
     private func signOut() async {
         userDefaults.set(nil, forKey: userIdUserDefaultsKey)
         cloudKit.isAuthenticated = false
+    }
+
+    private var themeSection: some View {
+        SettingsSection(title: "APPEARANCE", padding: 24) {
+            Button {
+                withAnimation(.spring(duration: 0.3)) {
+                    isShowingThemeSheet = true
+                }
+            } label: {
+                ThemeRowContent()
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var accountSection: some View {
+        SettingsSection(title: "ACCOUNT") {
+            VStack(spacing: 16) {
+                SettingsRow(
+                    icon: "bell",
+                    title: "Notifications",
+                    color: selectedTheme.colors(for: colorScheme).accent
+                )
+
+                SettingsRow(
+                    icon: "lock.fill",
+                    title: "Privacy",
+                    color: selectedTheme.colors(for: colorScheme).accent
+                )
+
+                Button {
+                    showingSignOutAlert = true
+                } label: {
+                    SettingsRow(
+                        icon: "rectangle.portrait.and.arrow.right",
+                        title: "Sign Out",
+                        color: selectedTheme.colors(for: colorScheme).destructive
+                    )
+                }
+            }
+        }
     }
 
     var body: some View {
@@ -69,6 +111,7 @@ struct SettingsView: View {
                             }
                             .offset(y: animateContent ? 0 : 20)
                             .opacity(animateContent ? 1 : 0)
+                            .padding(.top, 20)
 
                             // User Info
                             VStack(spacing: 8) {
@@ -89,54 +132,13 @@ struct SettingsView: View {
                             .offset(y: animateContent ? 0 : 20)
                             .opacity(animateContent ? 1 : 0)
                         }
-                        .padding(.top, 60)
+                        .padding(.top, 40)
                         .padding(.bottom, 32)
 
                         // Settings Sections
-                        VStack(spacing: 32) {
-                            // Theme Section
-                            SettingsSection(title: "APPEARANCE") {
-                                VStack(spacing: 16) {
-                                    ForEach(AppTheme.allCases, id: \.self) { theme in
-                                        ThemeButton(
-                                            theme: theme,
-                                            isSelected: selectedTheme == theme
-                                        ) {
-                                            withAnimation(.spring(duration: 0.4)) {
-                                                selectedTheme = theme
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Account Section
-                            SettingsSection(title: "ACCOUNT") {
-                                VStack(spacing: 16) {
-                                    SettingsRow(
-                                        icon: "bell",
-                                        title: "Notifications",
-                                        color: selectedTheme.colors(for: colorScheme).accent
-                                    )
-
-                                    SettingsRow(
-                                        icon: "lock.fill",
-                                        title: "Privacy",
-                                        color: selectedTheme.colors(for: colorScheme).accent
-                                    )
-
-                                    Button {
-                                        showingSignOutAlert = true
-                                    } label: {
-                                        SettingsRow(
-                                            icon: "rectangle.portrait.and.arrow.right",
-                                            title: "Sign Out",
-                                            color: selectedTheme.colors(for: colorScheme)
-                                                .destructive
-                                        )
-                                    }
-                                }
-                            }
+                        VStack(spacing: 24) {
+                            themeSection
+                            accountSection
                         }
                         .padding(.horizontal, 16)
                         .background(
@@ -191,18 +193,23 @@ struct SettingsView: View {
                 animateContent = true
             }
         }
+        .sheet(isPresented: $isShowingThemeSheet) {
+            ThemeSelectionSheet(isShowingSheet: $isShowingThemeSheet)
+        }
     }
 }
 
 // Supporting Views
 struct SettingsSection<Content: View>: View {
     let title: String
+    let padding: CGFloat
     let content: Content
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
 
-    init(title: String, @ViewBuilder content: () -> Content) {
+    init(title: String, padding: CGFloat = 16, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.padding = padding
         self.content = content()
     }
 
@@ -212,6 +219,8 @@ struct SettingsSection<Content: View>: View {
                 .font(.caption.bold())
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
                 .padding(.leading, 4)
+                .padding(.horizontal, padding)
+                .padding(.top, 16)
 
             content
         }
@@ -305,6 +314,62 @@ private func themeIcon(for theme: AppTheme) -> String {
     case .retroWave: return "sunset.fill"
     case .neonNight: return "sparkles"
     case .deepOcean: return "water.waves"
+    }
+}
+
+// Add a separate view for theme row content
+private struct ThemeRowContent: View {
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme: ColorScheme
+
+    var body: some View {
+        HStack {
+            // Theme icon
+            Image(systemName: themeIcon(for: selectedTheme))
+                .font(.headline)
+                .foregroundStyle(
+                    selectedTheme.colors(for: colorScheme).accent
+                )
+                .frame(width: 32)
+
+            // Theme info
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Theme")
+                    .font(.headline)
+                    .foregroundStyle(
+                        selectedTheme.colors(for: colorScheme).textPrimary
+                    )
+
+                Text(selectedTheme.rawValue)
+                    .font(.subheadline)
+                    .foregroundStyle(
+                        selectedTheme.colors(for: colorScheme).textSecondary
+                    )
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.footnote.bold())
+                .foregroundStyle(
+                    selectedTheme.colors(for: colorScheme).textSecondary
+                )
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(
+                    selectedTheme.colors(for: colorScheme).cardBackground
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(
+                    selectedTheme.colors(for: colorScheme).textSecondary
+                        .opacity(0.1),
+                    lineWidth: 1
+                )
+        )
     }
 }
 

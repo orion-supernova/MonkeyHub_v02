@@ -17,7 +17,10 @@ struct chatTest_20241220App: App {
             // The view that checks for iCloud status and shows different views
             MainView()
                 .environmentObject(cloudKit)
-                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                .onReceive(
+                    NotificationCenter.default.publisher(
+                        for: UIApplication.didBecomeActiveNotification)
+                ) { _ in
                     // Trigger the initialization of CloudKit whenever the app becomes active
                     Task {
                         await cloudKit.initialize()
@@ -30,7 +33,7 @@ struct chatTest_20241220App: App {
 
 struct MainView: View {
     @EnvironmentObject var cloudKit: CloudKitManager
-    
+
     var body: some View {
         if !cloudKit.isInitialized {
             LoadingView()
@@ -38,12 +41,12 @@ struct MainView: View {
             switch cloudKit.iCloudStatus {
             case .available:
                 if cloudKit.isAuthenticated {
-                    ContentView()
+                    BaseView()
                         .environmentObject(cloudKit)
                 } else {
                     let isAuthenticated = userDefaults.string(forKey: userIdUserDefaultsKey)
                     if let isAuthenticated, !isAuthenticated.isEmpty {
-                        ContentView()
+                        BaseView()
                             .environmentObject(cloudKit)
                             .onAppear {
                                 cloudKit.isAuthenticated = true
@@ -52,7 +55,6 @@ struct MainView: View {
                         LoginView()
                             .environmentObject(cloudKit)
                     }
-                    
                 }
             case .noAccount:
                 ICloudErrorView(message: "Please sign in to iCloud in Settings")
@@ -65,13 +67,13 @@ struct MainView: View {
             case .unknown:
                 LoadingView()
             case .temporarilyUnavailable:
-                ICloudErrorView(message: "iCloud is temporarily unavailable. Please try again later")
+                ICloudErrorView(
+                    message: "iCloud is temporarily unavailable. Please try again later"
+                )
             }
         }
     }
 }
-
-
 
 let userDefaults = UserDefaults.standard
 let userIdUserDefaultsKey = "userId"

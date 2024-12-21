@@ -88,7 +88,7 @@ struct ContentView: View {
             ZStack(alignment: .top) {
                 // Header background that covers status bar and header content
                 LinearGradient(
-                    colors: selectedTheme.colors.headerBackground,
+                    colors: selectedTheme.colors(for: colorScheme).headerBackground,
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -113,13 +113,15 @@ struct ContentView: View {
                                                 weight: .bold
                                             )
                                         )
-                                        .foregroundStyle(selectedTheme.colors.text)
+                                        .foregroundStyle(
+                                            selectedTheme.colors(for: colorScheme).text)
 
                                     Text(
                                         "\(myRooms.count) Active Room\(myRooms.count == 1 ? "" : "s")"
                                     )
                                     .font(.subheadline)
-                                    .foregroundStyle(selectedTheme.colors.text.opacity(0.8))
+                                    .foregroundStyle(
+                                        selectedTheme.colors(for: colorScheme).text.opacity(0.8))
                                 }
 
                                 Spacer()
@@ -166,7 +168,8 @@ struct ContentView: View {
                                     Image(systemName: "ellipsis.circle.fill")
                                         .font(.title)
                                         .symbolRenderingMode(.hierarchical)
-                                        .foregroundStyle(selectedTheme.colors.text)
+                                        .foregroundStyle(
+                                            selectedTheme.colors(for: colorScheme).text)
                                 }
                             }
 
@@ -180,15 +183,16 @@ struct ContentView: View {
                                     Text("Create New Room")
                                         .fontWeight(.semibold)
                                 }
-                                .foregroundStyle(selectedTheme.colors.text)
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
                                 .frame(maxWidth: horizontalSizeClass == .regular ? 400 : .infinity)
                                 .padding(.horizontal, 20)
                                 .padding(.vertical, 12)
                                 .background(
                                     LinearGradient(
                                         colors: [
-                                            selectedTheme.colors.headerOverlay,
-                                            selectedTheme.colors.headerOverlay.opacity(0.8),
+                                            selectedTheme.colors(for: colorScheme).headerOverlay,
+                                            selectedTheme.colors(for: colorScheme).headerOverlay
+                                                .opacity(0.8),
                                         ],
                                         startPoint: .leading,
                                         endPoint: .trailing
@@ -198,7 +202,8 @@ struct ContentView: View {
                                 .overlay(
                                     Capsule()
                                         .strokeBorder(
-                                            selectedTheme.colors.text.opacity(0.2), lineWidth: 1)
+                                            selectedTheme.colors(for: colorScheme).text.opacity(
+                                                0.2), lineWidth: 1)
                                 )
                                 .shadow(color: Color.black.opacity(0.1), radius: 5, y: 2)
                             }
@@ -215,7 +220,8 @@ struct ContentView: View {
                                         .font(.system(size: 60))
                                         .foregroundStyle(
                                             LinearGradient(
-                                                colors: selectedTheme.colors.primary,
+                                                colors: selectedTheme.colors(for: colorScheme)
+                                                    .primary,
                                                 startPoint: .topLeading,
                                                 endPoint: .bottomTrailing
                                             )
@@ -224,11 +230,14 @@ struct ContentView: View {
 
                                     Text("No Active Rooms")
                                         .font(.title2.bold())
-                                        .foregroundStyle(selectedTheme.colors.textPrimary)
+                                        .foregroundStyle(
+                                            selectedTheme.colors(for: colorScheme).textPrimary)
 
                                     Text("Create a new room to start chatting")
                                         .font(.subheadline)
-                                        .foregroundStyle(selectedTheme.colors.textSecondary)
+                                        .foregroundStyle(
+                                            selectedTheme.colors(for: colorScheme).textSecondary
+                                        )
                                         .multilineTextAlignment(.center)
                                 }
                                 .frame(maxWidth: .infinity)
@@ -239,13 +248,16 @@ struct ContentView: View {
                                     HStack {
                                         Text("Your Rooms")
                                             .font(.title2.bold())
-                                            .foregroundStyle(selectedTheme.colors.textPrimary)
+                                            .foregroundStyle(
+                                                selectedTheme.colors(for: colorScheme).textPrimary)
 
                                         Spacer()
 
                                         Text("\(myRooms.count) Total")
                                             .font(.subheadline)
-                                            .foregroundStyle(selectedTheme.colors.textSecondary)
+                                            .foregroundStyle(
+                                                selectedTheme.colors(for: colorScheme).textSecondary
+                                            )
                                     }
                                     .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 20)
 
@@ -271,16 +283,17 @@ struct ContentView: View {
                             ZStack {
                                 // Main background with shadow
                                 RoundedRectangle(cornerRadius: 32)
-                                    .fill(selectedTheme.colors.background)
+                                    .fill(selectedTheme.colors(for: colorScheme).background)
                                     .shadow(
-                                        color: selectedTheme.colors.primary[0].opacity(0.1),
+                                        color: selectedTheme.colors(for: colorScheme).primary[0]
+                                            .opacity(0.1),
                                         radius: 20,
                                         y: -10
                                     )
 
                                 // Extended top edge overlay
                                 Rectangle()
-                                    .fill(selectedTheme.colors.background)
+                                    .fill(selectedTheme.colors(for: colorScheme).background)
                                     .frame(height: 50)  // Increased height
                                     .offset(y: -25)  // Adjusted offset
                             }
@@ -290,7 +303,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .background(selectedTheme.colors.background)
+            .background(selectedTheme.colors(for: colorScheme).background)
             .sheet(isPresented: $isShowingNewRoomSheet) {
                 EnhancedNewRoomSheet(
                     isShowingSheet: $isShowingNewRoomSheet,
@@ -383,6 +396,7 @@ struct EnhancedRoomCard: View {
     let room: ChatRoom
     let action: () -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -393,7 +407,7 @@ struct EnhancedRoomCard: View {
                     Circle()
                         .fill(
                             LinearGradient(
-                                colors: selectedTheme.colors.primary,
+                                colors: selectedTheme.colors(for: colorScheme).primary,
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
@@ -401,10 +415,12 @@ struct EnhancedRoomCard: View {
 
                     Text(room.name.prefix(1).uppercased())
                         .font(.title3.bold())
-                        .foregroundStyle(selectedTheme.colors.text)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
                 }
                 .frame(width: 44, height: 44)
-                .shadow(color: selectedTheme.colors.primary[0].opacity(0.3), radius: 5, y: 2)
+                .shadow(
+                    color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
+                    radius: 5, y: 2)
 
                 Spacer()
 
@@ -412,9 +428,9 @@ struct EnhancedRoomCard: View {
                 Button(action: action) {
                     Image(systemName: "door.left.hand.open")
                         .font(.headline)
-                        .foregroundStyle(selectedTheme.colors.destructive)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
                         .frame(width: 32, height: 32)
-                        .background(selectedTheme.colors.destructive.opacity(0.1))
+                        .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))
                         .clipShape(Circle())
                 }
             }
@@ -423,13 +439,13 @@ struct EnhancedRoomCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(room.name)
                     .font(.headline)
-                    .foregroundStyle(selectedTheme.colors.textPrimary)
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
                     .lineLimit(1)
 
                 if let lastMessage = room.lastMessage {
                     Text(lastMessage)
                         .font(.caption)
-                        .foregroundStyle(selectedTheme.colors.textSecondary)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
                         .lineLimit(2)
                 }
 
@@ -439,18 +455,21 @@ struct EnhancedRoomCard: View {
                     Text("\(room.participants.count)")
                 }
                 .font(.caption2)
-                .foregroundStyle(selectedTheme.colors.accent)
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
                 .padding(.top, 4)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selectedTheme.colors.cardBackground)
+        .background(selectedTheme.colors(for: colorScheme).cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: selectedTheme.colors.primary[0].opacity(0.1), radius: 8, y: 4)
+        .shadow(
+            color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.1), radius: 8, y: 4
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 20)
-                .strokeBorder(selectedTheme.colors.accent.opacity(0.1), lineWidth: 1)
+                .strokeBorder(
+                    selectedTheme.colors(for: colorScheme).accent.opacity(0.1), lineWidth: 1)
         )
     }
 }
@@ -465,6 +484,10 @@ struct EnhancedNewRoomSheet: View {
     @State private var animateContent = false
     @State private var selectedOptionId: TimeInterval?
     @Namespace private var animation
+    @FocusState private var isRoomNameFocused: Bool
+    @State private var keyboardHeight: CGFloat = 0
+    @State private var scrollID = UUID()  // For scroll anchor
+    @Environment(\.colorScheme) private var colorScheme
 
     private let lifetimeOptions: [(String, TimeInterval)] = [
         ("5 minutes", 300),
@@ -474,267 +497,328 @@ struct EnhancedNewRoomSheet: View {
     ]
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 32) {
-                // Enhanced Header with animation
-                VStack(spacing: 8) {
-                    Text("Create New Room")
-                        .font(.title.bold())
-                        .foregroundStyle(selectedTheme.colors.textPrimary)
-                        .opacity(animateContent ? 1 : 0)
-                        .offset(y: animateContent ? 0 : 20)
-
-                    Text("Select room type and customize settings")
-                        .font(.subheadline)
-                        .foregroundStyle(selectedTheme.colors.textSecondary)
-                        .opacity(animateContent ? 1 : 0)
-                        .offset(y: animateContent ? 0 : 20)
-                }
-                .padding(.top, 24)
-
-                // Room Type Selector with improved animations
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("ROOM TYPE")
-                        .font(.caption.bold())
-                        .foregroundStyle(selectedTheme.colors.textSecondary)
-                        .padding(.leading, 4)
-                        .opacity(animateContent ? 1 : 0)
-                        .offset(y: animateContent ? 0 : 20)
-
-                    VStack(spacing: 16) {
-                        ForEach([RoomType.regular, .secret], id: \.self) { type in
-                            Button {
-                                withAnimation(.spring(duration: 0.5, bounce: 0.3)) {
-                                    selectedType = type
-                                }
-                            } label: {
-                                HStack(spacing: 16) {
-                                    // Room type icon
-                                    ZStack {
-                                        Circle()
-                                            .fill(
-                                                LinearGradient(
-                                                    colors: selectedType == type
-                                                        ? selectedTheme.colors.primary
-                                                        : [selectedTheme.colors.cardBackground],
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                )
-                                            )
-                                            .frame(width: 44, height: 44)
-                                            .shadow(
-                                                color: selectedType == type
-                                                    ? selectedTheme.colors.primary[0].opacity(0.3)
-                                                    : .clear,
-                                                radius: 5, y: 2
-                                            )
-
-                                        Image(
-                                            systemName: type == .regular
-                                                ? "bubble.left.circle.fill" : "lock.shield.fill"
-                                        )
-                                        .font(.title3)
-                                        .foregroundStyle(
-                                            selectedType == type
-                                                ? selectedTheme.colors.text
-                                                : selectedTheme.colors.textSecondary
-                                        )
-                                    }
-
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(
-                                            type == .regular ? "Regular Room" : "Chamber of Secrets"
-                                        )
-                                        .font(.headline)
-                                        .foregroundStyle(selectedTheme.colors.textPrimary)
-
-                                        Text(
-                                            type == .regular
-                                                ? "Standard chat room with permanent messages"
-                                                : "Secret room with self-destructing messages"
-                                        )
-                                        .font(.caption)
-                                        .foregroundStyle(selectedTheme.colors.textSecondary)
-                                        .lineLimit(2)
-                                    }
-
-                                    Spacer()
-
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(selectedTheme.colors.accent)
-                                        .opacity(selectedType == type ? 1 : 0)
-                                }
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(selectedTheme.colors.cardBackground)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .strokeBorder(
-                                            selectedType == type
-                                                ? selectedTheme.colors.accent
-                                                : selectedTheme.colors.textSecondary.opacity(0.1),
-                                            lineWidth: selectedType == type ? 1.5 : 1
-                                        )
-                                )
-                            }
-                            .buttonStyle(.plain)
+        ScrollViewReader { proxy in
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 32) {
+                    // Enhanced Header with animation
+                    VStack(spacing: 8) {
+                        Text("Create New Room")
+                            .font(.title.bold())
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
                             .opacity(animateContent ? 1 : 0)
                             .offset(y: animateContent ? 0 : 20)
-                        }
+
+                        Text("Select room type and customize settings")
+                            .font(.subheadline)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                            .opacity(animateContent ? 1 : 0)
+                            .offset(y: animateContent ? 0 : 20)
                     }
-                }
+                    .padding(.top, 24)
 
-                // Message Lifetime Selector with improved animations
-                if selectedType == .secret {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("MESSAGE LIFETIME")
+                    // Room Type Selector with improved animations
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text("ROOM TYPE")
                             .font(.caption.bold())
-                            .foregroundStyle(selectedTheme.colors.textSecondary)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
                             .padding(.leading, 4)
-                            .transition(.move(edge: .top).combined(with: .opacity))
+                            .opacity(animateContent ? 1 : 0)
+                            .offset(y: animateContent ? 0 : 20)
 
-                        VStack(spacing: 12) {
-                            ForEach(lifetimeOptions, id: \.1) { option in
+                        VStack(spacing: 16) {
+                            ForEach([RoomType.regular, .secret], id: \.self) { type in
                                 Button {
-                                    withAnimation(.spring(duration: 0.3)) {
-                                        messageLifetime = option.1
-                                        selectedOptionId = option.1
+                                    withAnimation(.spring(duration: 0.5, bounce: 0.3)) {
+                                        selectedType = type
                                     }
                                 } label: {
-                                    HStack {
-                                        Text(option.0)
-                                            .font(.subheadline)
-                                            .foregroundStyle(selectedTheme.colors.textPrimary)
+                                    HStack(spacing: 16) {
+                                        // Room type icon
+                                        ZStack {
+                                            Circle()
+                                                .fill(
+                                                    LinearGradient(
+                                                        colors: selectedType == type
+                                                            ? selectedTheme.colors(for: colorScheme)
+                                                                .primary
+                                                            : [
+                                                                selectedTheme.colors(
+                                                                    for: colorScheme
+                                                                ).cardBackground
+                                                            ],
+                                                        startPoint: .topLeading,
+                                                        endPoint: .bottomTrailing
+                                                    )
+                                                )
+                                                .frame(width: 44, height: 44)
+                                                .shadow(
+                                                    color: selectedType == type
+                                                        ? selectedTheme.colors(for: colorScheme)
+                                                            .primary[0].opacity(
+                                                                0.3)
+                                                        : .clear,
+                                                    radius: 5, y: 2
+                                                )
+
+                                            Image(
+                                                systemName: type == .regular
+                                                    ? "bubble.left.circle.fill" : "lock.shield.fill"
+                                            )
+                                            .font(.title3)
+                                            .foregroundStyle(
+                                                selectedType == type
+                                                    ? selectedTheme.colors(for: colorScheme).text
+                                                    : selectedTheme.colors(for: colorScheme)
+                                                        .textSecondary
+                                            )
+                                        }
+
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(
+                                                type == .regular
+                                                    ? "Regular Room" : "Chamber of Secrets"
+                                            )
+                                            .font(.headline)
+                                            .foregroundStyle(
+                                                selectedTheme.colors(for: colorScheme).textPrimary)
+
+                                            Text(
+                                                type == .regular
+                                                    ? "Standard chat room with permanent messages"
+                                                    : "Secret room with self-destructing messages"
+                                            )
+                                            .font(.caption)
+                                            .foregroundStyle(
+                                                selectedTheme.colors(for: colorScheme).textSecondary
+                                            )
+                                            .lineLimit(2)
+                                        }
 
                                         Spacer()
 
-                                        if messageLifetime == option.1 {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .foregroundStyle(selectedTheme.colors.accent)
-                                                .matchedGeometryEffect(
-                                                    id: "check\(option.1)",
-                                                    in: animation
-                                                )
-                                        }
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(
+                                                selectedTheme.colors(for: colorScheme).accent
+                                            )
+                                            .opacity(selectedType == type ? 1 : 0)
                                     }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 12)
+                                    .padding()
                                     .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(selectedTheme.colors.cardBackground)
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 12)
-                                                    .strokeBorder(
-                                                        messageLifetime == option.1
-                                                            ? selectedTheme.colors.accent
-                                                            : selectedTheme.colors.textSecondary
-                                                                .opacity(0.1),
-                                                        lineWidth: messageLifetime == option.1
-                                                            ? 1.5 : 1
-                                                    )
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .fill(
+                                                selectedTheme.colors(for: colorScheme)
+                                                    .cardBackground)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .strokeBorder(
+                                                selectedType == type
+                                                    ? selectedTheme.colors(for: colorScheme).accent
+                                                    : selectedTheme.colors(for: colorScheme)
+                                                        .textSecondary.opacity(
+                                                            0.1),
+                                                lineWidth: selectedType == type ? 1.5 : 1
                                             )
                                     )
-                                    .scaleEffect(messageLifetime == option.1 ? 1.02 : 1)
                                 }
                                 .buttonStyle(.plain)
-                                .transition(.scale.combined(with: .opacity))
+                                .opacity(animateContent ? 1 : 0)
+                                .offset(y: animateContent ? 0 : 20)
                             }
                         }
                     }
-                    .padding(.top, 8)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
 
-                // Room name input with animation
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("ROOM NAME")
-                        .font(.caption.bold())
-                        .foregroundStyle(selectedTheme.colors.textSecondary)
-                        .padding(.leading, 4)
-                        .opacity(animateContent ? 1 : 0)
-                        .offset(y: animateContent ? 0 : 20)
-
-                    TextField("Enter room name", text: $roomName)
-                        .textFieldStyle(.plain)
-                        .padding()
-                        .background(selectedTheme.colors.cardBackground)
-                        .foregroundStyle(selectedTheme.colors.textPrimary)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(
-                                    roomName.isEmpty
-                                        ? selectedTheme.colors.textSecondary.opacity(0.1)
-                                        : selectedTheme.colors.accent.opacity(0.2),
-                                    lineWidth: 1
+                    // Message Lifetime Selector with improved animations
+                    if selectedType == .secret {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("MESSAGE LIFETIME")
+                                .font(.caption.bold())
+                                .foregroundStyle(
+                                    selectedTheme.colors(for: colorScheme).textSecondary
                                 )
+                                .padding(.leading, 4)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+
+                            VStack(spacing: 12) {
+                                ForEach(lifetimeOptions, id: \.1) { option in
+                                    Button {
+                                        withAnimation(.spring(duration: 0.3)) {
+                                            messageLifetime = option.1
+                                            selectedOptionId = option.1
+                                        }
+                                    } label: {
+                                        HStack {
+                                            Text(option.0)
+                                                .font(.subheadline)
+                                                .foregroundStyle(
+                                                    selectedTheme.colors(for: colorScheme)
+                                                        .textPrimary)
+
+                                            Spacer()
+
+                                            if messageLifetime == option.1 {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundStyle(
+                                                        selectedTheme.colors(for: colorScheme)
+                                                            .accent
+                                                    )
+                                                    .matchedGeometryEffect(
+                                                        id: "check\(option.1)",
+                                                        in: animation
+                                                    )
+                                            }
+                                        }
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 12)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(
+                                                    selectedTheme.colors(for: colorScheme)
+                                                        .cardBackground
+                                                )
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 12)
+                                                        .strokeBorder(
+                                                            messageLifetime == option.1
+                                                                ? selectedTheme.colors(
+                                                                    for: colorScheme
+                                                                ).accent
+                                                                : selectedTheme.colors(
+                                                                    for: colorScheme
+                                                                ).textSecondary
+                                                                    .opacity(0.1),
+                                                            lineWidth: messageLifetime == option.1
+                                                                ? 1.5 : 1
+                                                        )
+                                                )
+                                        )
+                                        .scaleEffect(messageLifetime == option.1 ? 1.02 : 1)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .transition(.scale.combined(with: .opacity))
+                                }
+                            }
+                        }
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+
+                    // Room name input with simplified keyboard handling
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("ROOM NAME")
+                            .font(.caption.bold())
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                            .padding(.leading, 4)
+                            .opacity(animateContent ? 1 : 0)
+                            .offset(y: animateContent ? 0 : 20)
+
+                        TextField("Enter room name", text: $roomName)
+                            .textFieldStyle(.plain)
+                            .padding()
+                            .background(selectedTheme.colors(for: colorScheme).cardBackground)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(
+                                        roomName.isEmpty
+                                            ? selectedTheme.colors(for: colorScheme).textSecondary
+                                                .opacity(0.1)
+                                            : selectedTheme.colors(for: colorScheme).accent.opacity(
+                                                0.2),
+                                        lineWidth: 1
+                                    )
+                            )
+                            .focused($isRoomNameFocused)
+                    }
+                    .id(scrollID)  // Add scroll anchor
+                    .opacity(animateContent ? 1 : 0)
+                    .offset(y: animateContent ? 0 : 20)
+
+                    // Create button with enhanced animation
+                    Button {
+                        // Add haptic feedback
+                        let impactMed = UIImpactFeedbackGenerator(style: .medium)
+                        impactMed.impactOccurred()
+
+                        Task {
+                            await createRoom(
+                                selectedType,
+                                selectedType == .secret ? messageLifetime : nil
+                            )
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(
+                                systemName: selectedType == .regular
+                                    ? "plus.circle.fill" : "lock.shield.fill"
+                            )
+                            .transition(.scale.combined(with: .opacity))
+
+                            Text("Create \(selectedType == .regular ? "Room" : "Secret Room")")
+                        }
+                        .font(.headline)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(
+                            LinearGradient(
+                                colors: selectedTheme.colors(for: colorScheme).primary,
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
                         )
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .shadow(
+                            color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
+                            radius: 5, y: 2
+                        )
+                        .scaleEffect(roomName.isEmpty ? 0.98 : 1)
+                    }
+                    .disabled(roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .opacity(animateContent ? 1 : 0)
+                    .offset(y: animateContent ? 0 : 20)
                 }
-                .opacity(animateContent ? 1 : 0)
-                .offset(y: animateContent ? 0 : 20)
-
-                // Create button with enhanced animation
-                Button {
-                    // Add haptic feedback
-                    let impactMed = UIImpactFeedbackGenerator(style: .medium)
-                    impactMed.impactOccurred()
-
-                    Task {
-                        await createRoom(
-                            selectedType,
-                            selectedType == .secret ? messageLifetime : nil
-                        )
+                .padding(24)
+                .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 20 : 16)
+            }
+            .onChange(of: isRoomNameFocused) { _, isFocused in
+                if isFocused {
+                    withAnimation {
+                        proxy.scrollTo(scrollID, anchor: .bottom)
                     }
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(
-                            systemName: selectedType == .regular
-                                ? "plus.circle.fill" : "lock.shield.fill"
-                        )
-                        .transition(.scale.combined(with: .opacity))
-
-                        Text("Create \(selectedType == .regular ? "Room" : "Secret Room")")
+                }
+            }
+            .background(selectedTheme.colors(for: colorScheme).background)
+            .presentationDetents([
+                .height(selectedType == .secret ? 680 : 520)
+            ])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(selectedTheme.colors(for: colorScheme).background)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            isRoomNameFocused = false
+                        }
                     }
-                    .font(.headline)
-                    .foregroundStyle(selectedTheme.colors.text)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(
-                        LinearGradient(
-                            colors: selectedTheme.colors.primary,
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
+                    .foregroundStyle(
+                        colorScheme == .dark
+                            ? selectedTheme.colors(for: colorScheme).accent
+                            : selectedTheme.colors(for: colorScheme).primary[0]
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .shadow(color: selectedTheme.colors.primary[0].opacity(0.3), radius: 5, y: 2)
-                    .scaleEffect(roomName.isEmpty ? 0.98 : 1)
                 }
-                .disabled(roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .opacity(animateContent ? 1 : 0)
-                .offset(y: animateContent ? 0 : 20)
             }
-            .padding(24)
-            .padding(.bottom, 16)
-        }
-        .background(selectedTheme.colors.background)
-        .scrollDismissesKeyboard(.immediately)
-        .presentationDetents([
-            .height(selectedType == .secret ? 680 : 520)
-        ])
-        .presentationDragIndicator(.visible)
-        .presentationBackground(selectedTheme.colors.background)
-        .onAppear {
-            withAnimation(.easeOut(duration: 0.4)) {
-                animateContent = true
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.4)) {
+                    animateContent = true
+                }
             }
-        }
-        .onChange(of: selectedType) { _, _ in
-            // Add haptic feedback for type change
-            let impactLight = UIImpactFeedbackGenerator(style: .light)
-            impactLight.impactOccurred()
+            .onChange(of: selectedType) { _, _ in
+                let impactLight = UIImpactFeedbackGenerator(style: .light)
+                impactLight.impactOccurred()
+            }
         }
     }
 }
@@ -744,6 +828,7 @@ struct JoinRoomSheet: View {
     @State private var availableRooms: [ChatRoom] = []
     let joinRoom: (ChatRoom) async -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 24) {
@@ -751,11 +836,11 @@ struct JoinRoomSheet: View {
             VStack(spacing: 8) {
                 Text("Join Room")
                     .font(.title.bold())
-                    .foregroundStyle(selectedTheme.colors.textPrimary)
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
 
                 Text("Join an existing room")
                     .font(.subheadline)
-                    .foregroundStyle(selectedTheme.colors.textSecondary)
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
             }
 
             if availableRooms.isEmpty {
@@ -764,7 +849,7 @@ struct JoinRoomSheet: View {
                         .font(.system(size: 60))
                         .foregroundStyle(
                             LinearGradient(
-                                colors: selectedTheme.colors.primary,
+                                colors: selectedTheme.colors(for: colorScheme).primary,
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
@@ -772,11 +857,11 @@ struct JoinRoomSheet: View {
 
                     Text("No Rooms Available")
                         .font(.title2.bold())
-                        .foregroundStyle(selectedTheme.colors.textPrimary)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
 
                     Text("Create a new room or try again later")
                         .font(.subheadline)
-                        .foregroundStyle(selectedTheme.colors.textSecondary)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(40)
@@ -795,7 +880,8 @@ struct JoinRoomSheet: View {
                                         Circle()
                                             .fill(
                                                 LinearGradient(
-                                                    colors: selectedTheme.colors.primary,
+                                                    colors: selectedTheme.colors(for: colorScheme)
+                                                        .primary,
                                                     startPoint: .topLeading,
                                                     endPoint: .bottomTrailing
                                                 )
@@ -806,7 +892,8 @@ struct JoinRoomSheet: View {
                                                 ? "bubble.left" : "lock.shield"
                                         )
                                         .font(.title3.bold())
-                                        .foregroundStyle(selectedTheme.colors.text)
+                                        .foregroundStyle(
+                                            selectedTheme.colors(for: colorScheme).text)
                                     }
                                     .frame(width: 44, height: 44)
 
@@ -814,7 +901,8 @@ struct JoinRoomSheet: View {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(room.name)
                                             .font(.headline)
-                                            .foregroundStyle(selectedTheme.colors.textPrimary)
+                                            .foregroundStyle(
+                                                selectedTheme.colors(for: colorScheme).textPrimary)
 
                                         HStack {
                                             Image(systemName: "person.2.fill")
@@ -822,24 +910,27 @@ struct JoinRoomSheet: View {
                                             Text("\(room.participants.count) members")
                                         }
                                         .font(.caption)
-                                        .foregroundStyle(selectedTheme.colors.textSecondary)
+                                        .foregroundStyle(
+                                            selectedTheme.colors(for: colorScheme).textSecondary)
                                     }
 
                                     Spacer()
 
                                     Image(systemName: "chevron.right")
                                         .font(.headline)
-                                        .foregroundStyle(selectedTheme.colors.textSecondary)
+                                        .foregroundStyle(
+                                            selectedTheme.colors(for: colorScheme).textSecondary)
                                 }
                                 .padding()
                                 .background(
                                     RoundedRectangle(cornerRadius: 16)
-                                        .fill(selectedTheme.colors.cardBackground)
+                                        .fill(selectedTheme.colors(for: colorScheme).cardBackground)
                                 )
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 16)
                                         .strokeBorder(
-                                            selectedTheme.colors.accent.opacity(0.1), lineWidth: 1)
+                                            selectedTheme.colors(for: colorScheme).accent.opacity(
+                                                0.1), lineWidth: 1)
                                 )
                             }
                             .buttonStyle(.plain)
@@ -850,7 +941,7 @@ struct JoinRoomSheet: View {
             }
         }
         .padding(.top, 24)
-        .background(selectedTheme.colors.background)
+        .background(selectedTheme.colors(for: colorScheme).background)
         .task {
             await loadAvailableRooms()
         }

@@ -7,7 +7,7 @@ enum AppTheme: String, CaseIterable {
     case neonNight = "Neon Night"
     case deepOcean = "Deep Ocean"
 
-    var colors: ThemeColors {
+    func colors(for scheme: ColorScheme) -> ThemeColors {
         switch self {
         case .basic:
             return ThemeColors(
@@ -15,11 +15,12 @@ enum AppTheme: String, CaseIterable {
                 secondary: [Color(hex: "007AFF").opacity(0.2), Color(hex: "007AFF").opacity(0.1)],
                 accent: Color(hex: "007AFF"),
                 text: .white,
-                background: Color(.systemBackground),
-                cardBackground: Color(.secondarySystemGroupedBackground),
+                background: scheme == .dark ? Color(.systemBackground) : .white,
+                cardBackground: scheme == .dark
+                    ? Color(.secondarySystemGroupedBackground) : Color(.systemGray6),
                 destructive: Color(hex: "FF3B30"),
-                textPrimary: Color(.label),
-                textSecondary: Color(.secondaryLabel),
+                textPrimary: scheme == .dark ? .white : Color(.label),
+                textSecondary: scheme == .dark ? Color(.secondaryLabel) : Color(.secondaryLabel),
                 headerBackground: [Color(hex: "007AFF"), Color(hex: "2B95FF")],
                 headerOverlay: Color.white.opacity(0.1)
             )
@@ -29,17 +30,17 @@ enum AppTheme: String, CaseIterable {
                 secondary: [Color(hex: "00FF66").opacity(0.2), Color(hex: "FF00A2").opacity(0.1)],
                 accent: Color(hex: "00FF66"),
                 text: .white,
-                background: Color(hex: "0A0A0F"),
-                cardBackground: Color(hex: "1A1A25"),
+                background: scheme == .dark ? Color(hex: "0A0A0F") : Color(hex: "F8F8FF"),
+                cardBackground: scheme == .dark ? Color(hex: "1A1A25") : Color(hex: "FFFFFF"),
                 destructive: Color(hex: "FF3D71"),
-                textPrimary: .white,
-                textSecondary: Color(hex: "8F8F9E"),
+                textPrimary: scheme == .dark ? .white : Color(hex: "1A1A25"),
+                textSecondary: scheme == .dark ? Color(hex: "8F8F9E") : Color(hex: "6B6B7E"),
                 headerBackground: [
                     Color(hex: "FF0055"),
                     Color(hex: "9D00FF"),
                     Color(hex: "00FF66"),
                 ],
-                headerOverlay: Color(hex: "00FF66").opacity(0.1)
+                headerOverlay: Color(hex: "00FF66").opacity(scheme == .dark ? 0.1 : 0.05)
             )
         case .retroWave:
             return ThemeColors(
@@ -47,17 +48,17 @@ enum AppTheme: String, CaseIterable {
                 secondary: [Color(hex: "00F9FF").opacity(0.2), Color(hex: "00F9FF").opacity(0.1)],
                 accent: Color(hex: "00F9FF"),
                 text: .white,
-                background: Color(hex: "120458"),
-                cardBackground: Color(hex: "1B0B40"),
+                background: scheme == .dark ? Color(hex: "120458") : Color(hex: "F0F0FF"),
+                cardBackground: scheme == .dark ? Color(hex: "1B0B40") : Color(hex: "FFFFFF"),
                 destructive: Color(hex: "FF3D71"),
-                textPrimary: .white,
-                textSecondary: Color(hex: "B4A5FF"),
+                textPrimary: scheme == .dark ? .white : Color(hex: "120458"),
+                textSecondary: scheme == .dark ? Color(hex: "B4A5FF") : Color(hex: "6B61A7"),
                 headerBackground: [
                     Color(hex: "FF2E6C"),
                     Color(hex: "FB00FF"),
                     Color(hex: "00F9FF"),
                 ],
-                headerOverlay: Color(hex: "00F9FF").opacity(0.15)
+                headerOverlay: Color(hex: "00F9FF").opacity(scheme == .dark ? 0.15 : 0.08)
             )
         case .neonNight:
             return ThemeColors(
@@ -65,17 +66,17 @@ enum AppTheme: String, CaseIterable {
                 secondary: [Color(hex: "FFFF00").opacity(0.2), Color(hex: "00FFE0").opacity(0.1)],
                 accent: Color(hex: "FFFF00"),
                 text: .white,
-                background: Color(hex: "090415"),
-                cardBackground: Color(hex: "131025"),
+                background: scheme == .dark ? Color(hex: "090415") : Color(hex: "F5FFF8"),
+                cardBackground: scheme == .dark ? Color(hex: "131025") : Color(hex: "FFFFFF"),
                 destructive: Color(hex: "FF0055"),
-                textPrimary: .white,
-                textSecondary: Color(hex: "7E7E9A"),
+                textPrimary: scheme == .dark ? .white : Color(hex: "090415"),
+                textSecondary: scheme == .dark ? Color(hex: "7E7E9A") : Color(hex: "4A4A66"),
                 headerBackground: [
                     Color(hex: "00FF66"),
                     Color(hex: "00FFE0"),
                     Color(hex: "FFFF00"),
                 ],
-                headerOverlay: Color(hex: "FFFF00").opacity(0.1)
+                headerOverlay: Color(hex: "FFFF00").opacity(scheme == .dark ? 0.1 : 0.05)
             )
         case .deepOcean:
             return ThemeColors(
@@ -83,13 +84,13 @@ enum AppTheme: String, CaseIterable {
                 secondary: [Color(hex: "26D0CE").opacity(0.2), Color(hex: "26D0CE").opacity(0.1)],
                 accent: Color(hex: "26D0CE"),
                 text: .white,
-                background: Color(hex: "0A192F"),
-                cardBackground: Color(hex: "112240"),
+                background: scheme == .dark ? Color(hex: "0A192F") : Color(hex: "F8FAFF"),
+                cardBackground: scheme == .dark ? Color(hex: "112240") : .white,
                 destructive: Color(hex: "FF647C"),
-                textPrimary: .white,
-                textSecondary: Color(hex: "8892B0"),
+                textPrimary: scheme == .dark ? .white : Color(hex: "0A192F"),
+                textSecondary: scheme == .dark ? Color(hex: "8892B0") : Color(hex: "4A5568"),
                 headerBackground: [Color(hex: "1A2980"), Color(hex: "26D0CE")],
-                headerOverlay: Color.white.opacity(0.05)
+                headerOverlay: Color.white.opacity(scheme == .dark ? 0.05 : 0.02)
             )
         }
     }

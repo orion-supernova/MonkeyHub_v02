@@ -5,6 +5,17 @@ struct SettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var cloudKit = CloudKitManager.shared
     @State private var showingSignOutAlert = false
+    @State private var animateContent = false
+
+    private var headerHeight: CGFloat {
+        let screenHeight = UIScreen.main.bounds.height
+        return screenHeight * 0.4  // 40% of screen height
+    }
+
+    private func signOut() async {
+        userDefaults.set(nil, forKey: userIdUserDefaultsKey)
+        cloudKit.isAuthenticated = false
+    }
 
     var body: some View {
         NavigationStack {
@@ -16,132 +27,287 @@ struct SettingsView: View {
                     endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea()
-                .frame(height: 140)
+                .frame(height: headerHeight)
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        // Header content
-                        VStack(spacing: 20) {
-                            // Status bar spacing
-                            Color.clear
-                                .frame(height: 50)
-
-                            Text("Settings")
-                                .font(.title.bold())
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-                        }
-                        .padding(24)
-
-                        // Content area with rounded corners
+                        // Profile Section
                         VStack(spacing: 24) {
-                            // Theme selector
-                            Section {
-                                ForEach(AppTheme.allCases, id: \.self) { theme in
-                                    Button {
-                                        withAnimation(.spring(duration: 0.4)) {
-                                            selectedTheme = theme
-                                        }
-                                    } label: {
-                                        HStack {
-                                            Image(systemName: themeIcon(for: theme))
-                                                .font(.title3)
-                                            Text(theme.rawValue)
-                                                .font(.headline)
-                                            Spacer()
-                                            if selectedTheme == theme {
-                                                Image(systemName: "checkmark.circle.fill")
-                                                    .foregroundStyle(
-                                                        selectedTheme.colors(for: colorScheme)
-                                                            .accent
-                                                    )
+                            // Profile Picture
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: selectedTheme.colors(for: colorScheme).primary,
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 100, height: 100)
+                                    .shadow(
+                                        color: selectedTheme.colors(for: colorScheme).primary[0]
+                                            .opacity(0.3),
+                                        radius: 10,
+                                        y: 5
+                                    )
+
+                                Text("MC")
+                                    .font(.title.bold())
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+
+                                // Edit button
+                                Circle()
+                                    .fill(selectedTheme.colors(for: colorScheme).accent)
+                                    .frame(width: 32, height: 32)
+                                    .overlay(
+                                        Image(systemName: "camera.fill")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(
+                                                selectedTheme.colors(for: colorScheme).text)
+                                    )
+                                    .offset(x: 32, y: 32)
+                            }
+                            .offset(y: animateContent ? 0 : 20)
+                            .opacity(animateContent ? 1 : 0)
+
+                            // User Info
+                            VStack(spacing: 8) {
+                                Text("Murat Can Koç")
+                                    .font(.title2.bold())
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+
+                                Text("@muratcankoc")
+                                    .font(.subheadline)
+                                    .foregroundStyle(
+                                        selectedTheme.colors(for: colorScheme).text.opacity(0.8))
+
+                                Text("murat@example.com")
+                                    .font(.footnote)
+                                    .foregroundStyle(
+                                        selectedTheme.colors(for: colorScheme).text.opacity(0.6))
+                            }
+                            .offset(y: animateContent ? 0 : 20)
+                            .opacity(animateContent ? 1 : 0)
+                        }
+                        .padding(.top, 60)
+                        .padding(.bottom, 32)
+
+                        // Settings Sections
+                        VStack(spacing: 32) {
+                            // Theme Section
+                            SettingsSection(title: "APPEARANCE") {
+                                VStack(spacing: 16) {
+                                    ForEach(AppTheme.allCases, id: \.self) { theme in
+                                        ThemeButton(
+                                            theme: theme,
+                                            isSelected: selectedTheme == theme
+                                        ) {
+                                            withAnimation(.spring(duration: 0.4)) {
+                                                selectedTheme = theme
                                             }
                                         }
-                                        .foregroundStyle(
-                                            selectedTheme.colors(for: colorScheme).textPrimary
-                                        )
-                                        .padding()
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 16)
-                                                .fill(
-                                                    selectedTheme.colors(for: colorScheme)
-                                                        .cardBackground)
+                                    }
+                                }
+                            }
+
+                            // Account Section
+                            SettingsSection(title: "ACCOUNT") {
+                                VStack(spacing: 16) {
+                                    SettingsRow(
+                                        icon: "bell",
+                                        title: "Notifications",
+                                        color: selectedTheme.colors(for: colorScheme).accent
+                                    )
+
+                                    SettingsRow(
+                                        icon: "lock.fill",
+                                        title: "Privacy",
+                                        color: selectedTheme.colors(for: colorScheme).accent
+                                    )
+
+                                    Button {
+                                        showingSignOutAlert = true
+                                    } label: {
+                                        SettingsRow(
+                                            icon: "rectangle.portrait.and.arrow.right",
+                                            title: "Sign Out",
+                                            color: selectedTheme.colors(for: colorScheme)
+                                                .destructive
                                         )
                                     }
                                 }
-                            } header: {
-                                Text("APPEARANCE")
-                                    .font(.caption.bold())
-                                    .foregroundStyle(
-                                        selectedTheme.colors(for: colorScheme).textSecondary
-                                    )
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-
-                            Button {
-                                showingSignOutAlert = true
-                            } label: {
-                                Text("Sign Out")
-                                    .font(.headline)
-                                    .foregroundStyle(.red)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .fill(
-                                                selectedTheme.colors(for: colorScheme)
-                                                    .cardBackground)
-                                    )
                             }
                         }
-                        .padding(24)
+                        .padding(.horizontal, 16)
                         .background(
                             ZStack {
                                 RoundedRectangle(cornerRadius: 32)
                                     .fill(selectedTheme.colors(for: colorScheme).background)
                                     .shadow(
                                         color: selectedTheme.colors(for: colorScheme).primary[0]
-                                            .opacity(0.1),
-                                        radius: 20,
-                                        y: -10
+                                            .opacity(0.2),
+                                        radius: 32,
+                                        y: -16
                                     )
 
-                                Rectangle()
-                                    .fill(selectedTheme.colors(for: colorScheme).background)
-                                    .frame(height: 50)
-                                    .offset(y: -25)
+                                VStack(spacing: 0) {
+                                    LinearGradient(
+                                        colors: [
+                                            selectedTheme.colors(for: colorScheme).background,
+                                            selectedTheme.colors(for: colorScheme).background
+                                                .opacity(0),
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                    .frame(height: 40)
+                                    .offset(y: -20)
+
+                                    Rectangle()
+                                        .fill(selectedTheme.colors(for: colorScheme).background)
+                                }
+                                .mask(RoundedRectangle(cornerRadius: 32))
                             }
                         )
-                        .offset(y: -40)
-                        .padding(.top, 40)
+                        .mask(RoundedRectangle(cornerRadius: 32))
+                        .offset(y: -60)
+                        .padding(.top, 60)
                     }
                 }
+                .scrollIndicators(.hidden)
             }
             .background(selectedTheme.colors(for: colorScheme).background)
             .alert("Sign Out", isPresented: $showingSignOutAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Sign Out", role: .destructive) {
-                    Task {
-                        await signOut()
-                    }
+                    Task { await signOut() }
                 }
             } message: {
                 Text("Are you sure you want to sign out?")
             }
         }
-    }
-
-    private func signOut() async {
-        userDefaults.set(nil, forKey: userIdUserDefaultsKey)
-        cloudKit.isAuthenticated = false
-    }
-
-    private func themeIcon(for theme: AppTheme) -> String {
-        switch theme {
-        case .basic: return "circle.grid.cross.fill"
-        case .cyberpunk: return "bolt.circle.fill"
-        case .retroWave: return "sunset.fill"
-        case .neonNight: return "sparkles"
-        case .deepOcean: return "water.waves"
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.6)) {
+                animateContent = true
+            }
         }
     }
+}
+
+// Supporting Views
+struct SettingsSection<Content: View>: View {
+    let title: String
+    let content: Content
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title)
+                .font(.caption.bold())
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                .padding(.leading, 4)
+
+            content
+        }
+    }
+}
+
+struct ThemeButton: View {
+    let theme: AppTheme
+    let isSelected: Bool
+    let action: () -> Void
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Image(systemName: themeIcon(for: theme))
+                    .font(.title3)
+                Text(theme.rawValue)
+                    .font(.headline)
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                        .symbolEffect(.bounce, value: isSelected)
+                }
+            }
+            .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(
+                        isSelected
+                            ? selectedTheme.colors(for: colorScheme).accent.opacity(0.5)
+                            : selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.1),
+                        lineWidth: isSelected ? 2 : 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct SettingsRow: View {
+    let icon: String
+    let title: String
+    let color: Color
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack {
+            Image(systemName: icon)
+                .font(.headline)
+                .foregroundStyle(color)
+                .frame(width: 32)
+
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.footnote.bold())
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(
+                    selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.1),
+                    lineWidth: 1
+                )
+        )
+    }
+}
+
+private func themeIcon(for theme: AppTheme) -> String {
+    switch theme {
+    case .basic: return "circle.grid.cross.fill"
+    case .cyberpunk: return "bolt.circle.fill"
+    case .retroWave: return "sunset.fill"
+    case .neonNight: return "sparkles"
+    case .deepOcean: return "water.waves"
+    }
+}
+
+#Preview {
+    SettingsView()
 }

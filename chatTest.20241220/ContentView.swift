@@ -861,11 +861,6 @@ struct EnhancedNewRoomSheet: View {
                 }
             }
             .background(selectedTheme.colors(for: colorScheme).background)
-            .presentationDetents([
-                .height(selectedType == .secret ? 680 : 520)
-            ])
-            .presentationDragIndicator(.visible)
-            .presentationBackground(selectedTheme.colors(for: colorScheme).background)
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
@@ -880,6 +875,18 @@ struct EnhancedNewRoomSheet: View {
                             : selectedTheme.colors(for: colorScheme).primary[0]
                     )
                 }
+
+                // Add close button
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        isShowingSheet = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                    }
+                }
             }
             .onAppear {
                 withAnimation(.easeOut(duration: 0.4)) {
@@ -891,6 +898,13 @@ struct EnhancedNewRoomSheet: View {
                 impactLight.impactOccurred()
             }
         }
+        .presentationDetents([
+            .height(selectedType == .secret ? 720 : 580),
+            .large,
+        ])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(selectedTheme.colors(for: colorScheme).background)
+        .interactiveDismissDisabled()
     }
 }
 

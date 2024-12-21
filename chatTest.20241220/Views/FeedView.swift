@@ -4,18 +4,24 @@ struct FeedView: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.displayScale) private var displayScale
+
+    private var headerHeight: CGFloat {
+        let screenHeight = UIScreen.main.bounds.height
+        return screenHeight * 0.5  // 50% of screen height
+    }
 
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
-                // Header background
+                // Header background with dynamic height
                 LinearGradient(
                     colors: selectedTheme.colors(for: colorScheme).headerBackground,
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea()
-                .frame(height: 140)
+                .frame(height: headerHeight)  // Use dynamic height
 
                 ScrollView {
                     VStack(spacing: 0) {
@@ -41,7 +47,7 @@ struct FeedView: View {
                         .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
                         .padding(.bottom, 32)
 
-                        // Content area with rounded corners
+                        // Content area with improved corner radius effect
                         VStack(spacing: 24) {
                             // Coming soon illustration
                             VStack(spacing: 24) {
@@ -128,25 +134,49 @@ struct FeedView: View {
                         .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 16)
                         .background(
                             ZStack {
+                                // Main background with enhanced shadow and corner radius
                                 RoundedRectangle(cornerRadius: 32)
                                     .fill(selectedTheme.colors(for: colorScheme).background)
                                     .shadow(
                                         color: selectedTheme.colors(for: colorScheme).primary[0]
-                                            .opacity(0.15),
-                                        radius: 24,
-                                        y: -12
+                                            .opacity(0.2),
+                                        radius: 32,
+                                        y: -16
                                     )
 
-                                Rectangle()
-                                    .fill(selectedTheme.colors(for: colorScheme).background)
-                                    .frame(height: 60)
-                                    .offset(y: -30)
+                                // Top overlay for smooth transition
+                                VStack(spacing: 0) {
+                                    // Gradient overlay for smoother transition
+                                    LinearGradient(
+                                        colors: [
+                                            selectedTheme.colors(for: colorScheme).background,
+                                            selectedTheme.colors(for: colorScheme).background
+                                                .opacity(0),
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                    .frame(height: 40)
+                                    .offset(y: -20)
+
+                                    // Background fill
+                                    Rectangle()
+                                        .fill(selectedTheme.colors(for: colorScheme).background)
+                                }
+                                .mask(
+                                    RoundedRectangle(cornerRadius: 32)
+                                )
                             }
                         )
-                        .offset(y: -40)
-                        .padding(.top, 40)
+                        .mask(
+                            // Mask to ensure content respects corner radius
+                            RoundedRectangle(cornerRadius: 32)
+                        )
+                        .offset(y: -60)
+                        .padding(.top, 60)
                     }
                 }
+                .scrollIndicators(.hidden)
             }
             .background(selectedTheme.colors(for: colorScheme).background)
         }

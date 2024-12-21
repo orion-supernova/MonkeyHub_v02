@@ -18,12 +18,12 @@ struct SearchView: View {
 
     enum SearchMode: String, CaseIterable {
         case rooms = "Rooms"
-        case friends = "Friends"
+        case users = "Users"
 
         var icon: String {
             switch self {
             case .rooms: return "bubble.left.and.bubble.right.fill"
-            case .friends: return "person.2.fill"
+            case .users: return "person.2.fill"
             }
         }
     }
@@ -123,38 +123,33 @@ struct SearchView: View {
                         .padding(.top, 24)
                         .background(
                             ZStack {
-                                // Main background with enhanced shadow
+                                // Main background with enhanced shadow and more contrast
                                 RoundedRectangle(cornerRadius: 32)
-                                    .fill(selectedTheme.colors(for: colorScheme).background)
+                                    .fill(
+                                        selectedTheme.colors(for: colorScheme).background
+                                            .opacity(1)
+                                    )
                                     .shadow(
                                         color: selectedTheme.colors(for: colorScheme).primary[0]
-                                            .opacity(0.15),
-                                        radius: 24,
-                                        y: -12
+                                            .opacity(colorScheme == .dark ? 0.4 : 0.25),
+                                        radius: 40,
+                                        y: -20
                                     )
 
-                                // Improved top edge overlay
-                                Rectangle()
-                                    .fill(selectedTheme.colors(for: colorScheme).background)
-                                    .frame(height: 60)
-                                    .offset(y: -30)
-
-                                // Add subtle divider line
+                                // Improved top edge overlay with gradient
                                 Rectangle()
                                     .fill(
                                         LinearGradient(
                                             colors: [
-                                                selectedTheme.colors(for: colorScheme).primary[0]
-                                                    .opacity(0.1),
-                                                selectedTheme.colors(for: colorScheme).primary[0]
-                                                    .opacity(0.05),
+                                                selectedTheme.colors(for: colorScheme).background,
+                                                selectedTheme.colors(for: colorScheme).background,
                                             ],
-                                            startPoint: .leading,
-                                            endPoint: .trailing
+                                            startPoint: .top,
+                                            endPoint: .bottom
                                         )
                                     )
-                                    .frame(height: 1)
-                                    .offset(y: -30)
+                                    .frame(height: 80)
+                                    .offset(y: -40)
                             }
                         )
                         .offset(y: -50)
@@ -262,12 +257,30 @@ private struct RoomsListView: View {
                         .padding()
                         .background(
                             RoundedRectangle(cornerRadius: 16)
-                                .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+                                .fill(
+                                    selectedTheme.colors(for: colorScheme).cardBackground
+                                        .opacity(1)
+                                )
+                                .shadow(
+                                    color: selectedTheme.colors(for: colorScheme).primary[0]
+                                        .opacity(colorScheme == .dark ? 0.35 : 0.2),
+                                    radius: 16,
+                                    y: 6
+                                )
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 16)
                                 .strokeBorder(
-                                    selectedTheme.colors(for: colorScheme).accent.opacity(0.1),
+                                    LinearGradient(
+                                        colors: [
+                                            selectedTheme.colors(for: colorScheme).accent
+                                                .opacity(colorScheme == .dark ? 0.4 : 0.3),
+                                            selectedTheme.colors(for: colorScheme).accent
+                                                .opacity(0.05),
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
                                     lineWidth: 1
                                 )
                         )
@@ -351,17 +364,51 @@ private struct UsersListView: View {
 
                             Image(systemName: "message.circle.fill")
                                 .font(.title3)
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        colors: [
+                                            selectedTheme.colors(for: colorScheme).accent,
+                                            selectedTheme.colors(for: colorScheme).accent.opacity(
+                                                0.8),
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .shadow(
+                                    color: selectedTheme.colors(for: colorScheme).accent.opacity(
+                                        0.3),
+                                    radius: 4,
+                                    y: 2
+                                )
                         }
                         .padding()
                         .background(
                             RoundedRectangle(cornerRadius: 16)
-                                .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+                                .fill(
+                                    selectedTheme.colors(for: colorScheme).cardBackground
+                                        .opacity(1)
+                                )
+                                .shadow(
+                                    color: selectedTheme.colors(for: colorScheme).primary[0]
+                                        .opacity(colorScheme == .dark ? 0.35 : 0.2),
+                                    radius: 16,
+                                    y: 6
+                                )
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 16)
                                 .strokeBorder(
-                                    selectedTheme.colors(for: colorScheme).accent.opacity(0.1),
+                                    LinearGradient(
+                                        colors: [
+                                            selectedTheme.colors(for: colorScheme).accent
+                                                .opacity(colorScheme == .dark ? 0.4 : 0.3),
+                                            selectedTheme.colors(for: colorScheme).accent
+                                                .opacity(0.05),
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
                                     lineWidth: 1
                                 )
                         )

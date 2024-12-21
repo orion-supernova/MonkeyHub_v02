@@ -31,14 +31,14 @@ struct SearchView: View {
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
-                // Header background
+                // Header background with increased height for mode selector
                 LinearGradient(
                     colors: selectedTheme.colors(for: colorScheme).headerBackground,
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea()
-                .frame(height: 180)
+                .frame(height: 200)
 
                 ScrollView {
                     VStack(spacing: 0) {
@@ -109,9 +109,9 @@ struct SearchView: View {
                             .clipShape(Capsule())
                         }
                         .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
-                        .padding(.bottom, 24)
+                        .padding(.bottom, 32)
 
-                        // Results list
+                        // Results list with improved visual separation
                         Group {
                             if searchMode == .rooms {
                                 RoomsListView(rooms: rooms, joinRoom: { _ in })
@@ -120,26 +120,45 @@ struct SearchView: View {
                             }
                         }
                         .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 16)
-                        .padding(.top, 16)
+                        .padding(.top, 24)
                         .background(
                             ZStack {
+                                // Main background with enhanced shadow
                                 RoundedRectangle(cornerRadius: 32)
                                     .fill(selectedTheme.colors(for: colorScheme).background)
                                     .shadow(
                                         color: selectedTheme.colors(for: colorScheme).primary[0]
-                                            .opacity(0.1),
-                                        radius: 20,
-                                        y: -10
+                                            .opacity(0.15),
+                                        radius: 24,
+                                        y: -12
                                     )
 
+                                // Improved top edge overlay
                                 Rectangle()
                                     .fill(selectedTheme.colors(for: colorScheme).background)
-                                    .frame(height: 50)
-                                    .offset(y: -25)
+                                    .frame(height: 60)
+                                    .offset(y: -30)
+
+                                // Add subtle divider line
+                                Rectangle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                selectedTheme.colors(for: colorScheme).primary[0]
+                                                    .opacity(0.1),
+                                                selectedTheme.colors(for: colorScheme).primary[0]
+                                                    .opacity(0.05),
+                                            ],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(height: 1)
+                                    .offset(y: -30)
                             }
                         )
-                        .offset(y: -40)
-                        .padding(.top, 40)
+                        .offset(y: -50)
+                        .padding(.top, 50)
                     }
                 }
             }

@@ -107,223 +107,209 @@ struct ContentView: View {
                             Color.clear
                                 .frame(height: verticalSizeClass == .compact ? 20 : 50)
 
-                            // Title and menu
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Chat Rooms")
-                                        .font(
-                                            .system(
-                                                size: verticalSizeClass == .compact ? 28 : 34,
-                                                weight: .bold
+                            // Title and action buttons
+                            VStack(spacing: 16) {
+                                // Title and room count
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Chat Rooms")
+                                            .font(
+                                                .system(
+                                                    size: verticalSizeClass == .compact ? 28 : 34,
+                                                    weight: .bold
+                                                )
                                             )
+                                            .foregroundStyle(
+                                                selectedTheme.colors(for: colorScheme).text)
+
+                                        Text(
+                                            "\(myRooms.count) Active Room\(myRooms.count == 1 ? "" : "s")"
                                         )
+                                        .font(.subheadline)
                                         .foregroundStyle(
-                                            selectedTheme.colors(for: colorScheme).text)
-
-                                    Text(
-                                        "\(myRooms.count) Active Room\(myRooms.count == 1 ? "" : "s")"
-                                    )
-                                    .font(.subheadline)
-                                    .foregroundStyle(
-                                        selectedTheme.colors(for: colorScheme).text.opacity(0.8))
-                                }
-
-                                Spacer()
-
-                                // Menu button
-                                Menu {
-                                    // Theme selector with icons
-                                    Menu {
-                                        ForEach(AppTheme.allCases, id: \.self) { theme in
-                                            Button {
-                                                withAnimation(.spring(duration: 0.4)) {
-                                                    selectedTheme = theme
-                                                }
-                                            } label: {
-                                                HStack {
-                                                    Image(systemName: themeIcon(for: theme))
-                                                    Text(theme.rawValue)
-                                                    if selectedTheme == theme {
-                                                        Image(systemName: "checkmark")
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } label: {
-                                        Label("Theme", systemImage: "paintpalette.fill")
+                                            selectedTheme.colors(for: colorScheme).text.opacity(0.8)
+                                        )
                                     }
 
+                                    Spacer()
+                                }
+
+                                // Action buttons
+                                HStack(spacing: 12) {
+                                    // Create Room button
                                     Button {
                                         isShowingNewRoomSheet = true
                                     } label: {
-                                        Label("New Room", systemImage: "plus.circle.fill")
-                                    }
-
-                                    Divider()
-
-                                    Button(role: .destructive) {
-                                        showingSignOutAlert = true
-                                    } label: {
-                                        Label(
-                                            "Sign Out",
-                                            systemImage: "rectangle.portrait.and.arrow.right")
-                                    }
-                                } label: {
-                                    Image(systemName: "ellipsis.circle.fill")
-                                        .font(.title)
-                                        .symbolRenderingMode(.hierarchical)
+                                        HStack(spacing: 8) {
+                                            Image(systemName: "plus.circle.fill")
+                                            Text("New Room")
+                                        }
+                                        .font(.headline)
                                         .foregroundStyle(
-                                            selectedTheme.colors(for: colorScheme).text)
-                                }
-                            }
-
-                            // Action Buttons
-                            VStack(spacing: 16) {
-                                // Create New Room button
-                                Button {
-                                    isShowingNewRoomSheet = true
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "plus.circle.fill")
-                                        Text("New")
-                                    }
-                                    .font(.headline)
-                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        selectedTheme.colors(for: colorScheme).headerOverlay
-                                    )
-                                    .clipShape(Capsule())
-                                    .overlay(
-                                        Capsule()
-                                            .strokeBorder(
-                                                selectedTheme.colors(for: colorScheme).text.opacity(
-                                                    0.2),
-                                                lineWidth: 1
+                                            selectedTheme.colors(for: colorScheme).text
+                                        )
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(
+                                            LinearGradient(
+                                                colors: [
+                                                    selectedTheme.colors(for: colorScheme)
+                                                        .headerOverlay,
+                                                    selectedTheme.colors(for: colorScheme)
+                                                        .headerOverlay.opacity(0.8),
+                                                ],
+                                                startPoint: .leading,
+                                                endPoint: .trailing
                                             )
-                                    )
-                                }
-
-                                // Search button
-                                Button {
-                                    isShowingSearchView = true
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "magnifyingglass")
-                                        Text("Search")
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16)
+                                                .strokeBorder(
+                                                    selectedTheme.colors(for: colorScheme).text
+                                                        .opacity(0.2),
+                                                    lineWidth: 1
+                                                )
+                                        )
                                     }
-                                    .font(.headline)
-                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        selectedTheme.colors(for: colorScheme).headerOverlay
-                                    )
-                                    .clipShape(Capsule())
-                                    .overlay(
-                                        Capsule()
-                                            .strokeBorder(
-                                                selectedTheme.colors(for: colorScheme).text.opacity(
-                                                    0.2),
-                                                lineWidth: 1
+
+                                    // Search button
+                                    Button {
+                                        isShowingSearchView = true
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: "magnifyingglass")
+                                            Text("Search")
+                                        }
+                                        .font(.headline)
+                                        .foregroundStyle(
+                                            selectedTheme.colors(for: colorScheme).text
+                                        )
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(
+                                            LinearGradient(
+                                                colors: [
+                                                    selectedTheme.colors(for: colorScheme)
+                                                        .headerOverlay,
+                                                    selectedTheme.colors(for: colorScheme)
+                                                        .headerOverlay.opacity(0.8),
+                                                ],
+                                                startPoint: .leading,
+                                                endPoint: .trailing
                                             )
-                                    )
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16)
+                                                .strokeBorder(
+                                                    selectedTheme.colors(for: colorScheme).text
+                                                        .opacity(0.2),
+                                                    lineWidth: 1
+                                                )
+                                        )
+                                    }
                                 }
+                                .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
                             }
                             .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
-                        }
-                        .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
-                        .padding(.bottom, verticalSizeClass == .compact ? 16 : 24)
+                            .padding(.bottom, verticalSizeClass == .compact ? 16 : 24)
 
-                        // Rooms list
-                        LazyVStack(spacing: 16) {
-                            if myRooms.isEmpty {
-                                VStack(spacing: 16) {
-                                    Image(systemName: "bubble.left.circle.fill")
-                                        .font(.system(size: 60))
-                                        .foregroundStyle(
-                                            LinearGradient(
-                                                colors: selectedTheme.colors(for: colorScheme)
-                                                    .primary,
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
+                            // Rooms list
+                            LazyVStack(spacing: 16) {
+                                if myRooms.isEmpty {
+                                    VStack(spacing: 16) {
+                                        Image(systemName: "bubble.left.circle.fill")
+                                            .font(.system(size: 60))
+                                            .foregroundStyle(
+                                                LinearGradient(
+                                                    colors: selectedTheme.colors(for: colorScheme)
+                                                        .primary,
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                )
                                             )
-                                        )
-                                        .padding(.bottom, 8)
+                                            .padding(.bottom, 8)
 
-                                    Text("No Active Rooms")
-                                        .font(.title2.bold())
-                                        .foregroundStyle(
-                                            selectedTheme.colors(for: colorScheme).textPrimary)
-
-                                    Text("Create a new room to start chatting")
-                                        .font(.subheadline)
-                                        .foregroundStyle(
-                                            selectedTheme.colors(for: colorScheme).textSecondary
-                                        )
-                                        .multilineTextAlignment(.center)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(40)
-                            } else {
-                                VStack(spacing: 24) {
-                                    // Section header
-                                    HStack {
-                                        Text("Your Rooms")
+                                        Text("No Active Rooms")
                                             .font(.title2.bold())
                                             .foregroundStyle(
                                                 selectedTheme.colors(for: colorScheme).textPrimary)
 
-                                        Spacer()
-
-                                        Text("\(myRooms.count) Total")
+                                        Text("Create a new room to start chatting")
                                             .font(.subheadline)
                                             .foregroundStyle(
                                                 selectedTheme.colors(for: colorScheme).textSecondary
                                             )
+                                            .multilineTextAlignment(.center)
                                     }
-                                    .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 20)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(40)
+                                } else {
+                                    VStack(spacing: 24) {
+                                        // Section header
+                                        HStack {
+                                            Text("Your Rooms")
+                                                .font(.title2.bold())
+                                                .foregroundStyle(
+                                                    selectedTheme.colors(for: colorScheme)
+                                                        .textPrimary)
 
-                                    // Rooms grid
-                                    LazyVGrid(columns: gridColumns, spacing: 16) {
-                                        ForEach(myRooms) { room in
-                                            NavigationLink(destination: ChatRoomView(room: room)) {
-                                                EnhancedRoomCard(room: room) {
-                                                    Task {
-                                                        await leaveRoom(room)
+                                            Spacer()
+
+                                            Text("\(myRooms.count) Total")
+                                                .font(.subheadline)
+                                                .foregroundStyle(
+                                                    selectedTheme.colors(for: colorScheme)
+                                                        .textSecondary
+                                                )
+                                        }
+                                        .padding(
+                                            .horizontal, horizontalSizeClass == .regular ? 32 : 20)
+
+                                        // Rooms grid
+                                        LazyVGrid(columns: gridColumns, spacing: 16) {
+                                            ForEach(myRooms) { room in
+                                                NavigationLink(
+                                                    destination: ChatRoomView(room: room)
+                                                ) {
+                                                    EnhancedRoomCard(room: room) {
+                                                        Task {
+                                                            await leaveRoom(room)
+                                                        }
                                                     }
                                                 }
+                                                .buttonStyle(.plain)
                                             }
-                                            .buttonStyle(.plain)
                                         }
+                                        .padding(
+                                            .horizontal, horizontalSizeClass == .regular ? 32 : 16)
                                     }
-                                    .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 16)
                                 }
                             }
-                        }
-                        .padding(.top, 16)
-                        .background(
-                            ZStack {
-                                // Main background with shadow
-                                RoundedRectangle(cornerRadius: 32)
-                                    .fill(selectedTheme.colors(for: colorScheme).background)
-                                    .shadow(
-                                        color: selectedTheme.colors(for: colorScheme).primary[0]
-                                            .opacity(0.1),
-                                        radius: 20,
-                                        y: -10
-                                    )
+                            .padding(.top, 16)
+                            .background(
+                                ZStack {
+                                    // Main background with shadow
+                                    RoundedRectangle(cornerRadius: 32)
+                                        .fill(selectedTheme.colors(for: colorScheme).background)
+                                        .shadow(
+                                            color: selectedTheme.colors(for: colorScheme).primary[0]
+                                                .opacity(0.1),
+                                            radius: 20,
+                                            y: -10
+                                        )
 
-                                // Extended top edge overlay
-                                Rectangle()
-                                    .fill(selectedTheme.colors(for: colorScheme).background)
-                                    .frame(height: 50)  // Increased height
-                                    .offset(y: -25)  // Adjusted offset
-                            }
-                        )
-                        .offset(y: -40)  // Increased overlap with header
-                        .padding(.top, 40)  // Adjusted padding to compensate
+                                    // Extended top edge overlay
+                                    Rectangle()
+                                        .fill(selectedTheme.colors(for: colorScheme).background)
+                                        .frame(height: 50)  // Increased height
+                                        .offset(y: -25)  // Adjusted offset
+                                }
+                            )
+                            .offset(y: -40)  // Increased overlap with header
+                            .padding(.top, 40)  // Adjusted padding to compensate
+                        }
                     }
                 }
             }

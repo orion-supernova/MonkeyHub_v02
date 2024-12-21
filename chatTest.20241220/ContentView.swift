@@ -18,6 +18,10 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @State private var isShowingJoinRoomSheet = false
+    @State private var availableRooms: [ChatRoom] = []
+    @State private var isShowingFindFriendSheet = false
+    @State private var isShowingSearchView = false
 
     // MARK: - Room Operations
     private func loadData() async {
@@ -173,41 +177,61 @@ struct ContentView: View {
                                 }
                             }
 
-                            // Create Room button
-                            Button {
-                                isShowingNewRoomSheet = true
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "plus.circle.fill")
-                                        .font(.title3)
-                                    Text("Create New Room")
-                                        .fontWeight(.semibold)
-                                }
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-                                .frame(maxWidth: horizontalSizeClass == .regular ? 400 : .infinity)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 12)
-                                .background(
-                                    LinearGradient(
-                                        colors: [
-                                            selectedTheme.colors(for: colorScheme).headerOverlay,
-                                            selectedTheme.colors(for: colorScheme).headerOverlay
-                                                .opacity(0.8),
-                                        ],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
+                            // Action Buttons
+                            VStack(spacing: 16) {
+                                // Create New Room button
+                                Button {
+                                    isShowingNewRoomSheet = true
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "plus.circle.fill")
+                                        Text("New")
+                                    }
+                                    .font(.headline)
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        selectedTheme.colors(for: colorScheme).headerOverlay
                                     )
-                                )
-                                .clipShape(Capsule())
-                                .overlay(
-                                    Capsule()
-                                        .strokeBorder(
-                                            selectedTheme.colors(for: colorScheme).text.opacity(
-                                                0.2), lineWidth: 1)
-                                )
-                                .shadow(color: Color.black.opacity(0.1), radius: 5, y: 2)
+                                    .clipShape(Capsule())
+                                    .overlay(
+                                        Capsule()
+                                            .strokeBorder(
+                                                selectedTheme.colors(for: colorScheme).text.opacity(
+                                                    0.2),
+                                                lineWidth: 1
+                                            )
+                                    )
+                                }
+
+                                // Search button
+                                Button {
+                                    isShowingSearchView = true
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "magnifyingglass")
+                                        Text("Search")
+                                    }
+                                    .font(.headline)
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        selectedTheme.colors(for: colorScheme).headerOverlay
+                                    )
+                                    .clipShape(Capsule())
+                                    .overlay(
+                                        Capsule()
+                                            .strokeBorder(
+                                                selectedTheme.colors(for: colorScheme).text.opacity(
+                                                    0.2),
+                                                lineWidth: 1
+                                            )
+                                    )
+                                }
                             }
-                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
                         }
                         .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
                         .padding(.bottom, verticalSizeClass == .compact ? 16 : 24)
@@ -311,6 +335,30 @@ struct ContentView: View {
                     createRoom: createRoom
                 )
             }
+            .sheet(isPresented: $isShowingJoinRoomSheet) {
+                JoinRoomSheet(
+                    isShowingSheet: $isShowingJoinRoomSheet,
+                    availableRooms: availableRooms,
+                    joinRoom: { room in
+                        Task {
+                            await joinRoom(room)
+                        }
+                    }
+                )
+            }
+            .sheet(isPresented: $isShowingFindFriendSheet) {
+                FindFriendSheet(
+                    isShowingSheet: $isShowingFindFriendSheet,
+                    createPrivateRoom: { friend in
+                        Task {
+                            await createPrivateRoom(with: friend)
+                        }
+                    }
+                )
+            }
+            .sheet(isPresented: $isShowingSearchView) {
+                SearchView()
+            }
         }
         .task {
             await loadData()
@@ -388,6 +436,43 @@ struct ContentView: View {
             return "sparkles"
         case .deepOcean:
             return "water.waves"
+        }
+    }
+
+    private func joinRoom(_ room: ChatRoom) async {
+        do {
+            try await cloudKit.joinRoom(room)
+            await loadData()
+            isShowingJoinRoomSheet = false
+        } catch let error {
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+        }
+    }
+
+    private func loadAvailableRooms() async {
+        do {
+            availableRooms = try await cloudKit.fetchAvailableRooms()
+        } catch let error {
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+        }
+    }
+
+    private func createPrivateRoom(with friend: ChatUser) async {
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+        let room = ChatRoom(
+            name: "Chat with \(friend.name)",
+            createdBy: userId,
+            participants: [userId, friend.id],
+            type: .regular,
+            messageLifetime: nil
+        )
+
+        do {
+            try await cloudKit.createChatRoom(room)
+            await loadData()
+            isShowingFindFriendSheet = false
+        } catch let error {
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
 }
@@ -825,7 +910,7 @@ struct EnhancedNewRoomSheet: View {
 
 struct JoinRoomSheet: View {
     @Binding var isShowingSheet: Bool
-    @State private var availableRooms: [ChatRoom] = []
+    let availableRooms: [ChatRoom]
     let joinRoom: (ChatRoom) async -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
@@ -942,13 +1027,6 @@ struct JoinRoomSheet: View {
         }
         .padding(.top, 24)
         .background(selectedTheme.colors(for: colorScheme).background)
-        .task {
-            await loadAvailableRooms()
-        }
-    }
-
-    private func loadAvailableRooms() async {
-        // Implement your loading logic here
     }
 }
 

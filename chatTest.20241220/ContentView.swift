@@ -16,6 +16,8 @@ struct ContentView: View {
     @State private var newRoomName = ""
     @State private var showingSignOutAlert = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     // MARK: - Room Operations
     private func loadData() async {
@@ -54,6 +56,32 @@ struct ContentView: View {
         }
     }
 
+    private var gridColumns: [GridItem] {
+        if horizontalSizeClass == .regular {
+            // iPad or large screen: 3 columns
+            return [
+                GridItem(.flexible()),
+                GridItem(.flexible()),
+                GridItem(.flexible()),
+            ]
+        } else {
+            // iPhone: 2 columns
+            return [
+                GridItem(.flexible()),
+                GridItem(.flexible()),
+            ]
+        }
+    }
+
+    private var headerHeight: CGFloat {
+        switch verticalSizeClass {
+        case .compact:
+            return 200  // Landscape mode
+        default:
+            return 260  // Portrait mode
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
@@ -64,21 +92,26 @@ struct ContentView: View {
                     endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea()
-                .frame(height: 230)  // Increased height to fully contain header content
+                .frame(height: headerHeight)
 
                 ScrollView {
                     VStack(spacing: 0) {
                         // Header content
-                        VStack(spacing: 20) {
+                        VStack(spacing: verticalSizeClass == .compact ? 12 : 20) {
                             // Status bar spacing
                             Color.clear
-                                .frame(height: 50)
+                                .frame(height: verticalSizeClass == .compact ? 20 : 50)
 
                             // Title and menu
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("Chat Rooms")
-                                        .font(.system(size: 34, weight: .bold))
+                                        .font(
+                                            .system(
+                                                size: verticalSizeClass == .compact ? 28 : 34,
+                                                weight: .bold
+                                            )
+                                        )
                                         .foregroundStyle(selectedTheme.colors.text)
 
                                     Text(
@@ -147,7 +180,7 @@ struct ContentView: View {
                                         .fontWeight(.semibold)
                                 }
                                 .foregroundStyle(selectedTheme.colors.text)
-                                .frame(maxWidth: .infinity)
+                                .frame(maxWidth: horizontalSizeClass == .regular ? 400 : .infinity)
                                 .padding(.horizontal, 20)
                                 .padding(.vertical, 12)
                                 .background(
@@ -168,35 +201,91 @@ struct ContentView: View {
                                 )
                                 .shadow(color: Color.black.opacity(0.1), radius: 5, y: 2)
                             }
+                            .frame(maxWidth: .infinity)
                         }
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 24)
+                        .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
+                        .padding(.bottom, verticalSizeClass == .compact ? 16 : 24)
 
                         // Rooms list
                         LazyVStack(spacing: 16) {
                             if myRooms.isEmpty {
-                                ContentUnavailableView(
-                                    "No Active Rooms",
-                                    systemImage: "bubble.left.circle.fill",
-                                    description: Text("Create a new room to start chatting")
-                                )
-                                .foregroundStyle(selectedTheme.colors.textSecondary)
+                                VStack(spacing: 16) {
+                                    Image(systemName: "bubble.left.circle.fill")
+                                        .font(.system(size: 60))
+                                        .foregroundStyle(
+                                            LinearGradient(
+                                                colors: selectedTheme.colors.primary,
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .padding(.bottom, 8)
+
+                                    Text("No Active Rooms")
+                                        .font(.title2.bold())
+                                        .foregroundStyle(selectedTheme.colors.textPrimary)
+
+                                    Text("Create a new room to start chatting")
+                                        .font(.subheadline)
+                                        .foregroundStyle(selectedTheme.colors.textSecondary)
+                                        .multilineTextAlignment(.center)
+                                }
+                                .frame(maxWidth: .infinity)
                                 .padding(40)
                             } else {
-                                ForEach(myRooms) { room in
-                                    NavigationLink(destination: ChatRoomView(room: room)) {
-                                        EnhancedRoomCard(room: room) {
-                                            Task {
-                                                await leaveRoom(room)
+                                VStack(spacing: 24) {
+                                    // Section header
+                                    HStack {
+                                        Text("Your Rooms")
+                                            .font(.title2.bold())
+                                            .foregroundStyle(selectedTheme.colors.textPrimary)
+
+                                        Spacer()
+
+                                        Text("\(myRooms.count) Total")
+                                            .font(.subheadline)
+                                            .foregroundStyle(selectedTheme.colors.textSecondary)
+                                    }
+                                    .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 20)
+
+                                    // Rooms grid
+                                    LazyVGrid(columns: gridColumns, spacing: 16) {
+                                        ForEach(myRooms) { room in
+                                            NavigationLink(destination: ChatRoomView(room: room)) {
+                                                EnhancedRoomCard(room: room) {
+                                                    Task {
+                                                        await leaveRoom(room)
+                                                    }
+                                                }
                                             }
+                                            .buttonStyle(.plain)
                                         }
                                     }
-                                    .buttonStyle(.plain)
+                                    .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 16)
                                 }
                             }
                         }
-                        .padding(16)
-                        .background(selectedTheme.colors.background)
+                        .padding(.top, 16)
+                        .background(
+                            ZStack {
+                                // Main background with shadow
+                                RoundedRectangle(cornerRadius: 32)
+                                    .fill(selectedTheme.colors.background)
+                                    .shadow(
+                                        color: selectedTheme.colors.primary[0].opacity(0.1),
+                                        radius: 20,
+                                        y: -10
+                                    )
+
+                                // Extended top edge overlay
+                                Rectangle()
+                                    .fill(selectedTheme.colors.background)
+                                    .frame(height: 50)  // Increased height
+                                    .offset(y: -25)  // Adjusted offset
+                            }
+                        )
+                        .offset(y: -40)  // Increased overlap with header
+                        .padding(.top, 40)  // Adjusted padding to compensate
                     }
                 }
             }
@@ -297,58 +386,66 @@ struct EnhancedRoomCard: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
 
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
-            // Enhanced room avatar
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: selectedTheme.colors.primary,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+        VStack(alignment: .leading, spacing: 16) {
+            // Header with room avatar and leave button
+            HStack {
+                // Room avatar
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: selectedTheme.colors.primary,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
 
-                Text(room.name.prefix(1).uppercased())
-                    .font(.title2.bold())
-                    .foregroundStyle(selectedTheme.colors.text)
+                    Text(room.name.prefix(1).uppercased())
+                        .font(.title3.bold())
+                        .foregroundStyle(selectedTheme.colors.text)
+                }
+                .frame(width: 44, height: 44)
+                .shadow(color: selectedTheme.colors.primary[0].opacity(0.3), radius: 5, y: 2)
+
+                Spacer()
+
+                // Leave button
+                Button(action: action) {
+                    Image(systemName: "door.left.hand.open")
+                        .font(.headline)
+                        .foregroundStyle(selectedTheme.colors.destructive)
+                        .frame(width: 32, height: 32)
+                        .background(selectedTheme.colors.destructive.opacity(0.1))
+                        .clipShape(Circle())
+                }
             }
-            .frame(width: 56, height: 56)
-            .shadow(color: selectedTheme.colors.primary[0].opacity(0.3), radius: 5, y: 2)
 
+            // Room info
             VStack(alignment: .leading, spacing: 4) {
                 Text(room.name)
-                    .font(.title3.bold())
+                    .font(.headline)
                     .foregroundStyle(selectedTheme.colors.textPrimary)
+                    .lineLimit(1)
 
                 if let lastMessage = room.lastMessage {
                     Text(lastMessage)
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundStyle(selectedTheme.colors.textSecondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
 
-                HStack {
+                HStack(spacing: 4) {
                     Image(systemName: "person.2.fill")
                         .imageScale(.small)
                     Text("\(room.participants.count)")
                 }
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(selectedTheme.colors.accent)
-            }
-
-            Spacer()
-
-            Button(action: action) {
-                Image(systemName: "door.left.hand.open")
-                    .font(.title3)
-                    .foregroundStyle(selectedTheme.colors.destructive)
-                    .frame(width: 44, height: 44)
-                    .background(selectedTheme.colors.destructive.opacity(0.1))
-                    .clipShape(Circle())
+                .padding(.top, 4)
             }
         }
         .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(selectedTheme.colors.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .shadow(color: selectedTheme.colors.primary[0].opacity(0.1), radius: 8, y: 4)

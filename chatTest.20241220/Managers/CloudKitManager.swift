@@ -149,16 +149,14 @@ class CloudKitManager: ObservableObject {
     }
 
     // MARK: - User Management
-
     func fetchCurrentUser() async throws -> ChatUser {
-        Logger.info(
-            "iCloud account available, fetching user record...", category: .cloudKit)
+        Logger.info("Fetching current user record...", category: .cloudKit)
         let userRecordID = try await container.userRecordID()
         Logger.debug("User recordID: \(userRecordID.recordName)", category: .cloudKit)
 
         // Create a query to find the user record
         let predicate = NSPredicate(format: "id == %@", userRecordID.recordName)
-        let query = CKQuery(recordType: "ChatUser", predicate: predicate)
+        let query = CKQuery(recordType: ChatUser.recordType, predicate: predicate)
 
         do {
             Logger.debug("Querying for existing user record...", category: .cloudKit)
@@ -167,40 +165,11 @@ class CloudKitManager: ObservableObject {
             if let userRecord = try records.first?.1.get() {
                 Logger.info("Existing user record found", category: .cloudKit)
                 let user = try ChatUser(from: userRecord)
-                Logger.info(
-                    "User loaded: \(user.name) (\(user.id))", category: .cloudKit)
+                Logger.info("User loaded: \(user.name) (\(user.id))", category: .cloudKit)
                 return user
             } else {
-                Logger.info(
-                    "No existing user record found, creating new user...",
-                    category: .cloudKit)
-                // Create new user record
-                let newRecord = CKRecord(recordType: "ChatUser")
-                newRecord["id"] = userRecordID.recordName
-                newRecord["name"] = "User"
-                newRecord["email"] = ""
-
-                do {
-                    Logger.debug("Saving new user record...", category: .cloudKit)
-                    let saveResult = try await database.modifyRecords(
-                        saving: [newRecord], deleting: []
-                    ).saveResults.first?.1.get()
-
-                    guard let savedRecord = saveResult else {
-                        Logger.error(
-                            CloudKitError.operationFailed, category: .cloudKit)
-                        throw CloudKitError.operationFailed
-                    }
-
-                    let user = try ChatUser(from: savedRecord)
-                    Logger.info(
-                        "New user created: \(user.name) (\(user.id))",
-                        category: .cloudKit)
-                    return user
-                } catch {
-                    Logger.error(error, category: .cloudKit)
-                    throw CloudKitError.operationFailed
-                }
+                Logger.error(CloudKitError.recordNotFound, category: .cloudKit)
+                throw CloudKitError.recordNotFound
             }
         } catch {
             Logger.error(error, category: .cloudKit)
@@ -226,8 +195,7 @@ class CloudKitManager: ObservableObject {
 
     func fetchChatRooms() async throws -> [ChatRoom] {
         //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
-        
-        
+
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let predicate = NSPredicate(
             format: "%K CONTAINS %@", ChatRoom.participantsKey, userId)
@@ -243,8 +211,7 @@ class CloudKitManager: ObservableObject {
 
     func fetchAvailableRooms() async throws -> [ChatRoom] {
         //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
-        
-        
+
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let predicate = NSPredicate(
             format: "NOT (%K CONTAINS %@)", ChatRoom.participantsKey, userId)
@@ -260,8 +227,7 @@ class CloudKitManager: ObservableObject {
 
     func joinRoom(_ room: ChatRoom) async throws {
         //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
-        
-        
+
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let record = room.toRecord()
         var participants = room.participants
@@ -277,7 +243,7 @@ class CloudKitManager: ObservableObject {
 
     func leaveRoom(_ room: ChatRoom) async throws {
         //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
-        
+
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let record = room.toRecord()
         var participants = room.participants
@@ -414,7 +380,7 @@ class CloudKitManager: ObservableObject {
 
     func searchRooms(matching query: String) async throws -> [ChatRoom] {
         //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
-        
+
         // Compound predicate to search name and description
         let searchPredicate = NSPredicate(
             format: "name CONTAINS[cd] %@ OR description CONTAINS[cd] %@",
@@ -475,7 +441,7 @@ class CloudKitManager: ObservableObject {
     }
 
     func fetchUserRooms(sortBy: ChatRoomSortOption = .lastActivity) async throws -> [ChatRoom] {
-//        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
+        //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
 
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let predicate = NSPredicate(
@@ -512,7 +478,7 @@ class CloudKitManager: ObservableObject {
     }
 
     func fetchUsers() async throws -> [ChatUser] {
-//        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
+        //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let predicate = NSPredicate(
             format: "recordID != %@", userId
@@ -528,7 +494,7 @@ class CloudKitManager: ObservableObject {
     }
 
     func createChatRoom(name: String, participants: [ChatUser]) async throws {
-//        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
+        //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let participantIds = participants.map { $0.id } + [userId]
 

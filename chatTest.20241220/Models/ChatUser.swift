@@ -2,9 +2,12 @@ import CloudKit
 import Foundation
 
 struct ChatUser: Identifiable, Hashable {
+    static let recordType = "ChatUser"
+
     let id: String
     let recordName: String
     let name: String
+    let username: String
     let email: String
     let avatarAsset: CKAsset?
 
@@ -29,14 +32,16 @@ struct ChatUser: Identifiable, Hashable {
         self.id = id
         self.recordName = record.recordID.recordName
         self.name = name
+        self.username = record["username"] as? String ?? ""
         self.email = email
         self.avatarAsset = record["avatar"] as? CKAsset
     }
 
     func toRecord() -> CKRecord {
-        let record = CKRecord(recordType: "ChatUser")
+        let record = CKRecord(recordType: ChatUser.recordType)
         record["id"] = id
         record["name"] = name
+        record["username"] = username
         record["email"] = email
         if let avatar = avatarAsset {
             record["avatar"] = avatar

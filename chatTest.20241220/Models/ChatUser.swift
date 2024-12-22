@@ -5,7 +5,6 @@ struct ChatUser: Identifiable, Hashable {
     static let recordType = "ChatUser"
 
     let id: String
-    let recordName: String
     let name: String
     let username: String
     let email: String
@@ -34,7 +33,6 @@ struct ChatUser: Identifiable, Hashable {
         }
 
         self.id = id
-        self.recordName = record.recordID.recordName
         self.name = record[CodingKeys.name.rawValue] as? String ?? ""
         self.username = record[CodingKeys.username.rawValue] as? String ?? ""
         self.email = record[CodingKeys.email.rawValue] as? String ?? ""
@@ -43,11 +41,18 @@ struct ChatUser: Identifiable, Hashable {
 
     init(id: String, name: String, email: String) {
         self.id = id
-        self.recordName = id
         self.name = name
         self.username = ""
         self.email = email
         self.avatarAsset = nil
+    }
+
+    init(from existing: ChatUser, name: String, username: String, email: String) {
+        self.id = existing.id
+        self.name = name
+        self.username = username
+        self.email = email
+        self.avatarAsset = existing.avatarAsset
     }
 }
 

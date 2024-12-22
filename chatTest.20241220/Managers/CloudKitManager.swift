@@ -508,4 +508,89 @@ class CloudKitManager: ObservableObject {
 
         try await createChatRoom(room)
     }
+
+    func updateUser(_ user: ChatUser) async throws {
+        // First fetch the existing record
+        let predicate = NSPredicate(format: "%K == %@", ChatUser.CodingKeys.id.rawValue, user.id)
+        let query = CKQuery(recordType: ChatUser.recordType, predicate: predicate)
+
+        do {
+            let (records, _) = try await database.records(matching: query)
+            guard let existingRecord = try records.first?.1.get() else {
+                throw CloudKitError.recordNotFound
+            }
+
+            // Update only the mutable fields
+            existingRecord[ChatUser.CodingKeys.name.rawValue] = user.name
+            existingRecord[ChatUser.CodingKeys.username.rawValue] = user.username
+            existingRecord[ChatUser.CodingKeys.email.rawValue] = user.email
+            if let avatar = user.avatarAsset {
+                existingRecord[ChatUser.CodingKeys.avatar.rawValue] = avatar
+            }
+
+            // Save with specific options to force refresh
+            let modifyOperation = CKModifyRecordsOperation(
+                recordsToSave: [existingRecord],
+                recordIDsToDelete: nil
+            )
+            modifyOperation.savePolicy = .changedKeys
+            modifyOperation.qualityOfService = .userInitiated
+
+            // Save using modifyRecords instead
+            try await database.modifyRecords(saving: [existingRecord], deleting: [])
+
+            Logger.info("User updated successfully: \(user.name)", category: .cloudKit)
+        } catch {
+            Logger.error("Failed to update user: \(error)", category: .cloudKit)
+            throw error
+        }
+    }
+
+    // Add this helper function to convert UIImage to CKAsset
+    private func createAsset(from image: UIImage) throws -> CKAsset {
+        // Compress the image
+        guard let imageData = image.jpegData(compressionQuality: 0.7) else {
+            throw CloudKitError.custom("Failed to compress image")
+        }
+
+        // Create a temporary URL
+        let tempDirectory = FileManager.default.temporaryDirectory
+        let fileName = UUID().uuidString + ".jpg"
+        let fileURL = tempDirectory.appendingPathComponent(fileName)
+
+        // Write the image data
+        try imageData.write(to: fileURL)
+
+        // Create and return the asset
+        return CKAsset(fileURL: fileURL)
+    }
+
+    // Add this function to update profile picture
+    func updateUserProfilePicture(_ user: ChatUser, image: UIImage?) async throws {
+        let predicate = NSPredicate(format: "%K == %@", ChatUser.CodingKeys.id.rawValue, user.id)
+        let query = CKQuery(recordType: ChatUser.recordType, predicate: predicate)
+
+        do {
+            let (records, _) = try await database.records(matching: query)
+            guard let existingRecord = try records.first?.1.get() else {
+                throw CloudKitError.recordNotFound
+            }
+
+            if let image = image {
+                // Convert image to asset and update record
+                let asset = try createAsset(from: image)
+                existingRecord[ChatUser.CodingKeys.avatar.rawValue] = asset
+            } else {
+                // Remove existing avatar if image is nil
+                existingRecord[ChatUser.CodingKeys.avatar.rawValue] = nil
+            }
+
+            // Save the record
+            try await database.modifyRecords(saving: [existingRecord], deleting: [])
+            Logger.info("User profile picture updated successfully", category: .cloudKit)
+        } catch {
+            Logger.error("Failed to update profile picture: \(error)", category: .cloudKit)
+            throw error
+        }
+    }
 }

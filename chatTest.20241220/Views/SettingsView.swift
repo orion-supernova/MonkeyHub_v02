@@ -9,6 +9,12 @@ struct SettingsView: View {
     @State private var isShowingThemeSheet = false
     @State private var currentUser: ChatUser?
     @State private var isLoadingUser = true
+    @State private var isEditingProfile = false
+    @State private var editingName = ""
+    @State private var editingUsername = ""
+    @State private var editingEmail = ""
+    @State private var isImagePickerPresented = false
+    @State private var selectedImage: UIImage?
 
     private var headerHeight: CGFloat {
         let screenHeight = UIScreen.main.bounds.height
@@ -77,26 +83,19 @@ struct SettingsView: View {
 
     private var profileSection: some View {
         VStack(spacing: 24) {
-            // Profile Picture
+            // Profile Picture with edit button
             ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: selectedTheme.colors(for: colorScheme).primary,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+                if let selectedImage = selectedImage {
+                    Image(uiImage: selectedImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 100, height: 100)
+                        .clipShape(Circle())
+                        .shadow(
+                            color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
+                            radius: 10,
+                            y: 5
                         )
-                    )
-                    .frame(width: 100, height: 100)
-                    .shadow(
-                        color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
-                        radius: 10,
-                        y: 5
-                    )
-
-                if isLoadingUser {
-                    ProgressView()
-                        .tint(selectedTheme.colors(for: colorScheme).text)
                 } else if let avatarAsset = currentUser?.avatarAsset,
                     let avatarUrl = avatarAsset.fileURL,
                     let imageData = try? Data(contentsOf: avatarUrl),
@@ -105,56 +104,205 @@ struct SettingsView: View {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
+                        .frame(width: 100, height: 100)
                         .clipShape(Circle())
+                        .shadow(
+                            color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
+                            radius: 10,
+                            y: 5
+                        )
+                } else if isLoadingUser {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: selectedTheme.colors(for: colorScheme).primary,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 100, height: 100)
+                        .overlay {
+                            ProgressView()
+                                .tint(selectedTheme.colors(for: colorScheme).text)
+                        }
                 } else {
-                    Text(currentUser?.name.prefix(1).uppercased() ?? "?")
-                        .font(.title.bold())
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: selectedTheme.colors(for: colorScheme).primary,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 100, height: 100)
+                        .overlay {
+                            Text(currentUser?.name.prefix(1).uppercased() ?? "?")
+                                .font(.title.bold())
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                        }
                 }
 
                 // Edit button
-                Circle()
-                    .fill(selectedTheme.colors(for: colorScheme).accent)
-                    .frame(width: 32, height: 32)
-                    .overlay(
-                        Image(systemName: "camera.fill")
-                            .font(.caption.bold())
-                            .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-                    )
-                    .offset(x: 32, y: 32)
+                Button {
+                    isImagePickerPresented = true
+                } label: {
+                    Circle()
+                        .fill(selectedTheme.colors(for: colorScheme).accent)
+                        .frame(width: 32, height: 32)
+                        .overlay(
+                            Image(systemName: "camera.fill")
+                                .font(.caption.bold())
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                        )
+                }
+                .offset(x: 32, y: 32)
             }
-            .offset(y: animateContent ? 0 : 20)
-            .opacity(animateContent ? 1 : 0)
-            .padding(.top, 20)
 
-            // User Info with shimmer effect while loading
+            // User Info with edit button
             VStack(spacing: 8) {
-                if isLoadingUser {
-                    ShimmerView()
-                        .frame(width: 150, height: 24)
-                    ShimmerView()
-                        .frame(width: 120, height: 18)
-                    ShimmerView()
-                        .frame(width: 180, height: 16)
+                if isEditingProfile {
+                    // Edit mode
+                    VStack(spacing: 16) {
+                        ProfileTextField(
+                            title: "Name",
+                            text: $editingName,
+                            icon: "person.fill"
+                        )
+
+                        ProfileTextField(
+                            title: "Username",
+                            text: $editingUsername,
+                            icon: "at"
+                        )
+
+                        ProfileTextField(
+                            title: "Email",
+                            text: $editingEmail,
+                            icon: "envelope.fill"
+                        )
+
+                        // Save/Cancel buttons
+                        HStack(spacing: 16) {
+                            Button(role: .cancel) {
+                                isEditingProfile = false
+                            } label: {
+                                Text("Cancel")
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .foregroundStyle(
+                                        selectedTheme.colors(for: colorScheme).destructive
+                                    )
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(
+                                                selectedTheme.colors(for: colorScheme)
+                                                    .cardBackground)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .strokeBorder(
+                                                selectedTheme.colors(for: colorScheme).destructive
+                                                    .opacity(0.2),
+                                                lineWidth: 1
+                                            )
+                                    )
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                Task {
+                                    await saveProfileChanges()
+                                }
+                            } label: {
+                                Text("Save")
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: selectedTheme.colors(for: colorScheme)
+                                                        .primary,
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                )
+                                            )
+                                    )
+                                    .shadow(
+                                        color: selectedTheme.colors(for: colorScheme).primary[0]
+                                            .opacity(0.3),
+                                        radius: 8,
+                                        y: 4
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal)
                 } else {
-                    Text(currentUser?.name ?? "Unknown")
-                        .font(.title2.bold())
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                    // Display mode
+                    if isLoadingUser {
+                        VStack(spacing: 8) {
+                            ShimmerView()
+                                .frame(width: 150, height: 24)
+                            ShimmerView()
+                                .frame(width: 120, height: 18)
+                            ShimmerView()
+                                .frame(width: 180, height: 16)
+                        }
+                    } else {
+                        VStack(spacing: 8) {
+                            Text(currentUser?.name ?? "Unknown")
+                                .font(.title2.bold())
 
-                    Text(
-                        currentUser?.username.isEmpty == true
-                            ? "No username" : "@\(currentUser?.username ?? "")"
-                    )
-                    .font(.subheadline)
-                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text.opacity(0.8))
+                            Text(
+                                currentUser?.username.isEmpty == true
+                                    ? "No username" : "@\(currentUser?.username ?? "")"
+                            )
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
 
-                    Text(currentUser?.email ?? "No email")
-                        .font(.footnote)
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).text.opacity(0.6))
+                            Text(currentUser?.email ?? "No email")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Button {
+                            startEditing()
+                        } label: {
+                            Label("Edit Profile", systemImage: "pencil")
+                                .font(.subheadline.bold())
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .strokeBorder(
+                                            selectedTheme.colors(for: colorScheme).accent.opacity(
+                                                0.2),
+                                            lineWidth: 1
+                                        )
+                                )
+                        }
+                        .padding(.top, 12)
+                    }
                 }
             }
-            .offset(y: animateContent ? 0 : 20)
-            .opacity(animateContent ? 1 : 0)
+        }
+        .sheet(isPresented: $isImagePickerPresented) {
+            ImagePicker(image: $selectedImage)
+                .onChange(of: selectedImage) { _ in
+                    if selectedImage != nil {
+                        Task {
+                            await handleImageSelection()
+                        }
+                    }
+                }
         }
     }
 
@@ -242,6 +390,97 @@ struct SettingsView: View {
             await loadCurrentUser()
         }
         .withAlertManager()
+    }
+
+    private func startEditing() {
+        editingName = currentUser?.name ?? ""
+        editingUsername = currentUser?.username ?? ""
+        editingEmail = currentUser?.email ?? ""
+        isEditingProfile = true
+    }
+
+    private func saveProfileChanges() async {
+        guard let existingUser = currentUser else { return }
+
+        let updatedUser = ChatUser(
+            from: existingUser,
+            name: editingName,
+            username: editingUsername,
+            email: editingEmail
+        )
+
+        do {
+            // Save to CloudKit
+            try await CloudKitManager.shared.updateUser(updatedUser)
+
+            // Close edit mode
+            await MainActor.run {
+                isEditingProfile = false
+                // Clear current user to show loading state
+                currentUser = nil
+                isLoadingUser = true
+            }
+
+            // Add a small delay to ensure CloudKit sync
+            try await Task.sleep(nanoseconds: 500_000_000)  // 0.5 seconds
+
+            // Fetch fresh data
+            let freshUser = try await CloudKitManager.shared.fetchCurrentUser()
+
+            // Update UI on main thread
+            await MainActor.run {
+                withAnimation {
+                    self.currentUser = freshUser
+                    self.isLoadingUser = false
+                }
+            }
+
+            // Show success message
+            AlertManager.shared.showAlert(
+                title: "Success",
+                message: "Profile updated successfully"
+            )
+        } catch {
+            await MainActor.run {
+                isLoadingUser = false
+            }
+            AlertManager.shared.showAlert(
+                title: "Error",
+                message: "Failed to update profile: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func handleImageSelection() async {
+        guard let image = selectedImage, let user = currentUser else { return }
+
+        do {
+            isLoadingUser = true
+            try await CloudKitManager.shared.updateUserProfilePicture(user, image: image)
+
+            // Fetch updated user data
+            let freshUser = try await CloudKitManager.shared.fetchCurrentUser()
+
+            await MainActor.run {
+                withAnimation {
+                    self.currentUser = freshUser
+                    self.isLoadingUser = false
+                }
+            }
+
+            AlertManager.shared.showAlert(
+                title: "Success",
+                message: "Profile picture updated successfully"
+            )
+        } catch {
+            await MainActor.run {
+                isLoadingUser = false
+            }
+            AlertManager.shared.showAlert(
+                title: "Error",
+                message: "Failed to update profile picture: \(error.localizedDescription)"
+            )
+        }
     }
 }
 
@@ -462,6 +701,42 @@ struct ShimmerView: View {
                 phase = 1
             }
             .clipped()
+    }
+}
+
+// Add this helper view
+private struct ProfileTextField: View {
+    let title: String
+    @Binding var text: String
+    let icon: String
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack {
+            Image(systemName: icon)
+                .frame(width: 24)
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+
+            TextField(title, text: $text)
+                .textFieldStyle(.plain)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .autocapitalization(.none)
+                .keyboardType(icon == "at" || icon == "envelope.fill" ? .emailAddress : .default)
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(
+                    selectedTheme.colors(for: colorScheme).accent.opacity(0.2),
+                    lineWidth: 1
+                )
+        )
     }
 }
 

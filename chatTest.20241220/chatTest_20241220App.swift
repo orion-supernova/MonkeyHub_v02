@@ -42,18 +42,15 @@ struct MainView: View {
             case .available:
                 if cloudKit.isAuthenticated {
                     BaseView()
-                        .environmentObject(cloudKit)
                 } else {
                     let isAuthenticated = userDefaults.string(forKey: userIdUserDefaultsKey)
                     if let isAuthenticated, !isAuthenticated.isEmpty {
                         BaseView()
-                            .environmentObject(cloudKit)
                             .onAppear {
                                 cloudKit.isAuthenticated = true
                             }
                     } else {
                         LoginView()
-                            .environmentObject(cloudKit)
                     }
                 }
             case .noAccount:

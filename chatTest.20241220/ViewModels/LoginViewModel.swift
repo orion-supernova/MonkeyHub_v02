@@ -56,12 +56,12 @@ class LoginViewModel: ObservableObject {
 
                         let email = credential.email
                         let fullName = credential.fullName
-                        let userName = "\(fullName?.givenName ?? "") \(fullName?.familyName ?? "")"
+                        let username = "\(fullName?.givenName ?? "") \(fullName?.familyName ?? "")"
                             .trimmingCharacters(in: .whitespaces)
 
                         try await createUser(
                             with: credential,
-                            name: userName.isEmpty ? "I'm just a username" : userName,
+                            name: username.isEmpty ? "I'm your name and surname" : username,
                             email: email ?? "I'm your email address"
                         )
                     }
@@ -83,13 +83,14 @@ class LoginViewModel: ObservableObject {
         do {
             let iCloudId = try await cloudKit.container.userRecordID()
 
-            let newRecord = CKRecord(recordType: "ChatUser")
-            newRecord["id"] = iCloudId.recordName  // Use iCloud ID instead of UUID
-            newRecord["name"] = name
-            newRecord["email"] = email
-            
+            let newUser = ChatUser(
+                id: iCloudId.recordName,
+                name: name,
+                email: email
+            )
+
             do {
-                try await cloudKit.database.save(newRecord)
+                try await cloudKit.database.save(newUser.asCKRecord)
             } catch let error {
                 Logger.error(error.localizedDescription, category: .cloudKit)
                 throw CloudKitError.custom(error.localizedDescription)
@@ -97,7 +98,7 @@ class LoginViewModel: ObservableObject {
 
             cloudKit.isAuthenticated = true
             userDefaults.set(iCloudId.recordName, forKey: userIdUserDefaultsKey)
-            
+
             Logger.info("User created successfully", category: .auth)
         } catch let error {
             Logger.error("Failed to create user: \(error)", category: .auth)
@@ -109,7 +110,7 @@ class LoginViewModel: ObservableObject {
         do {
             let iCloudId = try await cloudKit.container.userRecordID()
             let id = iCloudId.recordName
-            
+
             userDefaults.set(id, forKey: userIdUserDefaultsKey)
             cloudKit.isAuthenticated = true
             Logger.info("User logged in successfully: \(id)", category: .auth)

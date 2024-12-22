@@ -155,7 +155,8 @@ class CloudKitManager: ObservableObject {
         Logger.debug("User recordID: \(userRecordID.recordName)", category: .cloudKit)
 
         // Create a query to find the user record
-        let predicate = NSPredicate(format: "id == %@", userRecordID.recordName)
+        let predicate = NSPredicate(
+            format: "%K == %@", ChatUser.CodingKeys.id.rawValue, userRecordID.recordName)
         let query = CKQuery(recordType: ChatUser.recordType, predicate: predicate)
 
         do {
@@ -478,13 +479,14 @@ class CloudKitManager: ObservableObject {
     }
 
     func fetchUsers() async throws -> [ChatUser] {
-        //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let predicate = NSPredicate(
-            format: "recordID != %@", userId
+            format: "%K != %@", ChatUser.CodingKeys.id.rawValue, userId
         )
-        let query = CKQuery(recordType: "User", predicate: predicate)
-        query.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+        let query = CKQuery(recordType: ChatUser.recordType, predicate: predicate)
+        query.sortDescriptors = [
+            NSSortDescriptor(key: ChatUser.CodingKeys.name.rawValue, ascending: true)
+        ]
 
         let (records, _) = try await database.records(matching: query)
         return try records.compactMap { result in

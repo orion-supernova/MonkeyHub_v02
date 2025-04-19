@@ -8,6 +8,7 @@ struct ChatRoomView: View {
     @State private var showImagePicker = false
     @State private var selectedImage: UIImage?
     @State private var isShowingAttachmentOptions = false
+    @StateObject private var navigationState = NavigationStateManager.shared
 
     init(room: ChatRoom) {
         self.room = room
@@ -25,6 +26,12 @@ struct ChatRoomView: View {
         .navigationTitle(room.name)
         .task {
             await viewModel.loadMessages()
+        }
+        .onAppear {
+            navigationState.currentScreen = .chatRoom
+        }
+        .onDisappear {
+            navigationState.currentScreen = .home
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(image: $selectedImage)

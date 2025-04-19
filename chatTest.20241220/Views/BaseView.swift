@@ -7,6 +7,7 @@ struct BaseView: View {
     @State private var menuButtonRotation = 0.0
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var navigationState = NavigationStateManager.shared
 
     enum Tab: String, CaseIterable {
         case chat = "Chat"
@@ -38,14 +39,18 @@ struct BaseView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // Floating Menu
-            FloatingMenu(
-                isExpanded: $isMenuExpanded,
-                selectedTab: $selectedTab,
-                rotation: $menuButtonRotation
-            )
-            .padding(24)
+            // Floating Menu - only show when on home screen
+            if navigationState.shouldShowFloatingMenu {
+                FloatingMenu(
+                    isExpanded: $isMenuExpanded,
+                    selectedTab: $selectedTab,
+                    rotation: $menuButtonRotation
+                )
+                .padding(24)
+                .transition(.scale.combined(with: .opacity))
+            }
         }
+        .animation(.spring(duration: 0.3), value: navigationState.currentScreen)
     }
 }
 

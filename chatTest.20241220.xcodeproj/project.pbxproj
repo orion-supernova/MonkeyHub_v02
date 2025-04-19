@@ -10,22 +10,9 @@
 		54EC1C3D2D15774800D57A53 /* chatTest.20241220.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = chatTest.20241220.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		5418BAC42D18965200727248 /* Exceptions for "chatTest.20241220" folder in "chatTest.20241220" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				"chatTest-20241220-Info.plist",
-			);
-			target = 54EC1C3C2D15774800D57A53 /* chatTest.20241220 */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		54EC1C3F2D15774800D57A53 /* chatTest.20241220 */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				5418BAC42D18965200727248 /* Exceptions for "chatTest.20241220" folder in "chatTest.20241220" target */,
-			);
 			path = chatTest.20241220;
 			sourceTree = "<group>";
 		};
@@ -281,7 +268,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.walhallaa.chatTest-20241220";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -322,7 +309,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.walhallaa.chatTest-20241220";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;

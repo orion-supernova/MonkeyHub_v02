@@ -22,6 +22,7 @@ struct BaseView: View {
         }
     }
 
+    // MARK: - Body
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             // Main content
@@ -48,6 +49,7 @@ struct BaseView: View {
     }
 }
 
+// MARK: - Floating Menu Struct
 struct FloatingMenu: View {
     @Binding var isExpanded: Bool
     @Binding var selectedTab: BaseView.Tab
@@ -55,6 +57,7 @@ struct FloatingMenu: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
 
+    // MARK: - Body
     var body: some View {
         ZStack {
             // Menu items
@@ -156,4 +159,9 @@ struct MenuButton: View {
         .scaleEffect(isSelected ? 1.08 : 1.0)
         .animation(.spring(duration: 0.3), value: isSelected)
     }
+}
+
+// MARK: - Preview
+#Preview {
+    BaseView()
 }

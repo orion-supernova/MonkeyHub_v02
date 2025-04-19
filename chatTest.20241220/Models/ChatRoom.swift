@@ -37,8 +37,7 @@ struct ChatRoom: Identifiable {
         guard
             let id = record[ChatRoom.idKey] as? String,
             let name = record[ChatRoom.nameKey] as? String,
-            let createdBy = record[ChatRoom.createdByKey] as? String,
-            let createdAt = record[ChatRoom.createdAtKey] as? Date
+            let createdBy = record[ChatRoom.createdByKey] as? String
         else {
             throw CloudKitError.invalidRecord
         }
@@ -46,7 +45,18 @@ struct ChatRoom: Identifiable {
         self.id = id
         self.name = name
         self.createdBy = createdBy
-        self.createdAt = createdAt
+
+        // Handle both String and Date formats for createdAt
+        if let createdAtDate = record[ChatRoom.createdAtKey] as? Date {
+            self.createdAt = createdAtDate
+        } else if let createdAtString = record[ChatRoom.createdAtKey] as? String {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            self.createdAt = formatter.date(from: createdAtString) ?? Date()
+        } else {
+            self.createdAt = Date()
+        }
+
         self.lastMessage = record[ChatRoom.lastMessageKey] as? String
         self.lastMessageDate = record[ChatRoom.lastMessageDateKey] as? Date
         self.participants = (record[ChatRoom.participantsKey] as? [String]) ?? [createdBy]

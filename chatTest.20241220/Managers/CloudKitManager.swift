@@ -183,20 +183,59 @@ class CloudKitManager: ObservableObject {
     func createChatRoom(_ room: ChatRoom) async throws {
         print("Creating room: \(room)")
         let record = room.toRecord()
-        print("Room record: \(record)")
 
-        let savedRecord = try await database.modifyRecords(saving: [record], deleting: [])
-            .saveResults.first?.1.get()
-        print("Saved record result: \(String(describing: savedRecord))")
+        // Convert Date to String for createdAt field
+        if let createdAt = record[ChatRoom.createdAtKey] as? Date {
+            record[ChatRoom.createdAtKey] = formatDateForCloudKit(createdAt)
+        }
 
-        guard savedRecord != nil else {
-            throw CloudKitError.operationFailed
+        print("Room record with formatted date: \(record)")
+
+        do {
+            let savedRecord = try await database.modifyRecords(saving: [record], deleting: [])
+                .saveResults.first?.1.get()
+            print("Saved record result: \(String(describing: savedRecord))")
+
+            guard savedRecord != nil else {
+                throw CloudKitError.operationFailed
+            }
+        } catch let error as CKError {
+            Logger.error(
+                "Failed to create chat room: \(error.localizedDescription)", category: .cloudKit)
+
+            switch error.code {
+            case .networkUnavailable, .networkFailure, .serverResponseLost:
+                throw CloudKitError.networkError
+            case .permissionFailure:
+                throw CloudKitError.permissionDenied
+            case .notAuthenticated:
+                throw CloudKitError.notAuthenticated
+            default:
+                throw CloudKitError.unknown(error)
+            }
+        } catch {
+            Logger.error(
+                "Unexpected error creating chat room: \(error.localizedDescription)",
+                category: .cloudKit)
+            throw CloudKitError.unknown(error)
         }
     }
 
-    func fetchChatRooms() async throws -> [ChatRoom] {
-        //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
+    // MARK: - Date Conversion Helpers
 
+    private func formatDateForCloudKit(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: date)
+    }
+
+    private func parseDateFromCloudKit(_ string: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: string)
+    }
+
+    func fetchChatRooms() async throws -> [ChatRoom] {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let predicate = NSPredicate(
             format: "%K CONTAINS %@", ChatRoom.participantsKey, userId)
@@ -211,8 +250,6 @@ class CloudKitManager: ObservableObject {
     }
 
     func fetchAvailableRooms() async throws -> [ChatRoom] {
-        //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
-
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let predicate = NSPredicate(
             format: "NOT (%K CONTAINS %@)", ChatRoom.participantsKey, userId)
@@ -227,8 +264,6 @@ class CloudKitManager: ObservableObject {
     }
 
     func joinRoom(_ room: ChatRoom) async throws {
-        //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
-
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let record = room.toRecord()
         var participants = room.participants
@@ -243,8 +278,6 @@ class CloudKitManager: ObservableObject {
     }
 
     func leaveRoom(_ room: ChatRoom) async throws {
-        //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
-
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let record = room.toRecord()
         var participants = room.participants
@@ -380,22 +413,17 @@ class CloudKitManager: ObservableObject {
     }
 
     func searchRooms(matching query: String) async throws -> [ChatRoom] {
-        //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
-
-        // Compound predicate to search name and description
         let searchPredicate = NSPredicate(
             format: "name CONTAINS[cd] %@ OR description CONTAINS[cd] %@",
             query, query
         )
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-        // Only show rooms user isn't already in
         let notMemberPredicate = NSPredicate(
             format: "NOT (%K CONTAINS %@)",
             ChatRoom.participantsKey,
             userId
         )
 
-        // Combine predicates
         let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
             searchPredicate,
             notMemberPredicate,
@@ -442,8 +470,6 @@ class CloudKitManager: ObservableObject {
     }
 
     func fetchUserRooms(sortBy: ChatRoomSortOption = .lastActivity) async throws -> [ChatRoom] {
-        //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
-
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let predicate = NSPredicate(
             format: "%K CONTAINS %@",
@@ -453,7 +479,6 @@ class CloudKitManager: ObservableObject {
 
         let query = CKQuery(recordType: ChatRoom.recordType, predicate: predicate)
 
-        // Dynamic sort based on user preference
         switch sortBy {
         case .lastActivity:
             query.sortDescriptors = [
@@ -496,7 +521,6 @@ class CloudKitManager: ObservableObject {
     }
 
     func createChatRoom(name: String, participants: [ChatUser]) async throws {
-        //        guard let currentUser = currentUser else { throw CloudKitError.notAuthenticated }
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let participantIds = participants.map { $0.id } + [userId]
 
@@ -510,7 +534,6 @@ class CloudKitManager: ObservableObject {
     }
 
     func updateUser(_ user: ChatUser) async throws {
-        // First fetch the existing record
         let predicate = NSPredicate(format: "%K == %@", ChatUser.CodingKeys.id.rawValue, user.id)
         let query = CKQuery(recordType: ChatUser.recordType, predicate: predicate)
 
@@ -520,7 +543,6 @@ class CloudKitManager: ObservableObject {
                 throw CloudKitError.recordNotFound
             }
 
-            // Update only the mutable fields
             existingRecord[ChatUser.CodingKeys.name.rawValue] = user.name
             existingRecord[ChatUser.CodingKeys.username.rawValue] = user.username
             existingRecord[ChatUser.CodingKeys.email.rawValue] = user.email
@@ -528,7 +550,6 @@ class CloudKitManager: ObservableObject {
                 existingRecord[ChatUser.CodingKeys.avatar.rawValue] = avatar
             }
 
-            // Save with specific options to force refresh
             let modifyOperation = CKModifyRecordsOperation(
                 recordsToSave: [existingRecord],
                 recordIDsToDelete: nil
@@ -536,7 +557,6 @@ class CloudKitManager: ObservableObject {
             modifyOperation.savePolicy = .changedKeys
             modifyOperation.qualityOfService = .userInitiated
 
-            // Save using modifyRecords instead
             try await database.modifyRecords(saving: [existingRecord], deleting: [])
 
             Logger.info("User updated successfully: \(user.name)", category: .cloudKit)
@@ -546,26 +566,20 @@ class CloudKitManager: ObservableObject {
         }
     }
 
-    // Add this helper function to convert UIImage to CKAsset
     private func createAsset(from image: UIImage) throws -> CKAsset {
-        // Compress the image
         guard let imageData = image.jpegData(compressionQuality: 0.7) else {
             throw CloudKitError.custom("Failed to compress image")
         }
 
-        // Create a temporary URL
         let tempDirectory = FileManager.default.temporaryDirectory
         let fileName = UUID().uuidString + ".jpg"
         let fileURL = tempDirectory.appendingPathComponent(fileName)
 
-        // Write the image data
         try imageData.write(to: fileURL)
 
-        // Create and return the asset
         return CKAsset(fileURL: fileURL)
     }
 
-    // Add this function to update profile picture
     func updateUserProfilePicture(_ user: ChatUser, image: UIImage?) async throws {
         let predicate = NSPredicate(format: "%K == %@", ChatUser.CodingKeys.id.rawValue, user.id)
         let query = CKQuery(recordType: ChatUser.recordType, predicate: predicate)
@@ -577,15 +591,12 @@ class CloudKitManager: ObservableObject {
             }
 
             if let image = image {
-                // Convert image to asset and update record
                 let asset = try createAsset(from: image)
                 existingRecord[ChatUser.CodingKeys.avatar.rawValue] = asset
             } else {
-                // Remove existing avatar if image is nil
                 existingRecord[ChatUser.CodingKeys.avatar.rawValue] = nil
             }
 
-            // Save the record
             try await database.modifyRecords(saving: [existingRecord], deleting: [])
             Logger.info("User profile picture updated successfully", category: .cloudKit)
         } catch {

@@ -8,7 +8,7 @@ enum MessageType: String, Codable {
     case url
 }
 
-struct ChatMessage: Identifiable {
+struct ChatMessage: Identifiable, Equatable {
     let id: String
     let senderId: String
     let senderName: String
@@ -92,5 +92,9 @@ struct ChatMessage: Identifiable {
         }
 
         return record
+    }
+
+    static func == (lhs: ChatMessage, rhs: ChatMessage) -> Bool {
+        lhs.id == rhs.id
     }
 }

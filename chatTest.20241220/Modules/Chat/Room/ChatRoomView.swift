@@ -10,6 +10,7 @@ struct ChatRoomView: View {
     @State private var isShowingAttachmentOptions = false
     @StateObject private var navigationState = NavigationStateManager.shared
     @State private var isLoading = true
+    @State private var keyboardHeight: CGFloat = 0
 
     init(room: ChatRoom) {
         self.room = room
@@ -17,24 +18,40 @@ struct ChatRoomView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            messagesList
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                MessagesListView(
+                    viewModel: viewModel,
+                    isLoading: isLoading
+                )
 
-            Divider()
+                Divider()
 
-            messageInputView
+                MessageInputView(
+                    messageText: $messageText,
+                    showImagePicker: $showImagePicker,
+                    isShowingAttachmentOptions: $isShowingAttachmentOptions,
+                    onSendMessage: {
+                        await viewModel.sendMessage(messageText)
+                        messageText = ""
+                    }
+                )
+            }
+            .padding(.bottom, keyboardHeight)
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Token") {
                     let token = getDeviceToken()
                     print("Device Token: \(token)")
-                    UIPasteboard.general.string = token // Copy to clipboard
-                    
+                    UIPasteboard.general.string = token  // Copy to clipboard
+
                     // Optional: Show an alert that token was copied
-                    let alertMessage = token == "Token not available" ?
-                        "No token available yet" : "Token copied to clipboard"
-                    
+                    let alertMessage =
+                        token == "Token not available"
+                        ? "No token available yet" : "Token copied to clipboard"
+
                     AlertManager.shared.showAlert(
                         title: "Device Token",
                         message: alertMessage
@@ -49,9 +66,11 @@ struct ChatRoomView: View {
         }
         .onAppear {
             navigationState.currentScreen = .chatRoom
+            setupKeyboardObservers()
         }
         .onDisappear {
             navigationState.currentScreen = .home
+            removeKeyboardObservers()
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(image: $selectedImage)
@@ -64,83 +83,48 @@ struct ChatRoomView: View {
                 }
             }
         }
+        .animation(.easeOut, value: keyboardHeight)
     }
 
-    // Helper function to dismiss keyboard
-    private func hideKeyboard() {
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil,
-            from: nil,
-            for: nil
-        )
-    }
-
-    private var messagesList: some View {
-        ScrollView {
-            LazyVStack(spacing: 8) {
-                if isLoading {
-                    Spacer()
-                    ProgressView("Loading messages...")
-                        .padding()
-                    Spacer()
-                } else if viewModel.messages.isEmpty {
-                    ContentUnavailableView(
-                        "No Messages",
-                        systemImage: "bubble.left",
-                        description: Text("Start the conversation by sending a message")
-                    )
-                    .padding()
-                } else {
-                    // Display messages in chronological order (oldest first, newest last)
-                    ForEach(viewModel.messages.sorted(by: { $0.timestamp < $1.timestamp })) {
-                        message in
-                        MessageView(message: message)
-                            .padding(.horizontal)
-                    }
-                }
-            }
-            .padding(.vertical)
-        }
-        .onTapGesture {
-            hideKeyboard()
-        }
-    }
-    
     private func getDeviceToken() -> String {
         return UserDefaults.standard.string(forKey: "deviceToken") ?? "Token not available"
     }
 
-    private var messageInputView: some View {
-        HStack(spacing: 8) {
-            Button {
-                isShowingAttachmentOptions.toggle()
-            } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.title2)
-            }
-            .confirmationDialog("Add Attachment", isPresented: $isShowingAttachmentOptions) {
-                Button("Photo") {
-                    showImagePicker = true
-                }
-                Button("Cancel", role: .cancel) {}
-            }
+    private func setupKeyboardObservers() {
+        NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
+        ) { notification in
+            if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey]
+                as? CGRect
+            {
+                let duration =
+                    notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey]
+                    as? Double ?? 0.25
 
-            TextField("Message", text: $messageText)
-                .textFieldStyle(.roundedBorder)
-
-            Button {
-                Task {
-                    await viewModel.sendMessage(messageText)
-                    messageText = ""
+                withAnimation(.easeOut(duration: duration)) {
+                    keyboardHeight = keyboardFrame.height
                 }
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
             }
-            .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .padding()
+
+        NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
+        ) { notification in
+            let duration =
+                notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
+                ?? 0.25
+
+            withAnimation(.easeOut(duration: duration)) {
+                keyboardHeight = 0
+            }
+        }
+    }
+
+    private func removeKeyboardObservers() {
+        NotificationCenter.default.removeObserver(
+            self, name: UIResponder.keyboardWillShowNotification, object: nil)
+        NotificationCenter.default.removeObserver(
+            self, name: UIResponder.keyboardWillHideNotification, object: nil)
     }
 }
 

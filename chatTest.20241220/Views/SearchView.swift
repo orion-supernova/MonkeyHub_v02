@@ -7,26 +7,8 @@ struct SearchView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    @State private var searchMode: SearchMode = .rooms
-    @State private var searchText = ""
-    @State private var users: [ChatUser] = []
-    @State private var rooms: [ChatRoom] = []
-    @State private var isSearching = false
+    @StateObject private var viewModel = SearchViewModel()
     @State private var animateContent = false
-    @State private var errorMessage: String?
-    @State private var showError = false
-
-    enum SearchMode: String, CaseIterable {
-        case rooms = "Rooms"
-        case users = "Users"
-
-        var icon: String {
-            switch self {
-            case .rooms: return "bubble.left.and.bubble.right.fill"
-            case .users: return "person.2.fill"
-            }
-        }
-    }
 
     var body: some View {
         NavigationStack {
@@ -43,117 +25,10 @@ struct SearchView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         // Header content
-                        VStack(spacing: 20) {
-                            // Status bar spacing
-                            Color.clear
-                                .frame(height: 50)
-
-                            // Search bar
-                            HStack {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.title3)
-                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-
-                                TextField(
-                                    searchMode == .rooms ? "Search rooms" : "Search users",
-                                    text: $searchText
-                                )
-                                .textFieldStyle(.plain)
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-                            }
-                            .padding()
-                            .background(selectedTheme.colors(for: colorScheme).headerOverlay)
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .strokeBorder(
-                                        selectedTheme.colors(for: colorScheme).text.opacity(0.2),
-                                        lineWidth: 1
-                                    )
-                            )
-
-                            // Mode selector
-                            HStack(spacing: 0) {
-                                ForEach(SearchMode.allCases, id: \.self) { mode in
-                                    Button {
-                                        withAnimation(.spring(duration: 0.3)) {
-                                            searchMode = mode
-                                        }
-                                    } label: {
-                                        HStack(spacing: 8) {
-                                            Image(systemName: mode.icon)
-                                            Text(mode.rawValue)
-                                        }
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(
-                                            searchMode == mode
-                                                ? selectedTheme.colors(for: colorScheme).text
-                                                : selectedTheme.colors(for: colorScheme).text
-                                                    .opacity(0.6)
-                                        )
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 10)
-                                        .background(
-                                            searchMode == mode
-                                                ? selectedTheme.colors(for: colorScheme)
-                                                    .headerOverlay : Color.clear
-                                        )
-                                        .clipShape(Capsule())
-                                    }
-                                }
-                            }
-                            .padding(4)
-                            .background(
-                                selectedTheme.colors(for: colorScheme).headerOverlay.opacity(0.5)
-                            )
-                            .clipShape(Capsule())
-                        }
-                        .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
-                        .padding(.bottom, 32)
+                        headerContent
 
                         // Results list with improved visual separation
-                        Group {
-                            if searchMode == .rooms {
-                                RoomsListView(rooms: rooms, joinRoom: { _ in })
-                            } else {
-                                UsersListView(users: users, selectUser: { _ in })
-                            }
-                        }
-                        .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 16)
-                        .padding(.top, 24)
-                        .background(
-                            ZStack {
-                                // Main background with enhanced shadow and more contrast
-                                RoundedRectangle(cornerRadius: 32)
-                                    .fill(
-                                        selectedTheme.colors(for: colorScheme).background
-                                            .opacity(1)
-                                    )
-                                    .shadow(
-                                        color: selectedTheme.colors(for: colorScheme).primary[0]
-                                            .opacity(colorScheme == .dark ? 0.4 : 0.25),
-                                        radius: 40,
-                                        y: -20
-                                    )
-
-                                // Improved top edge overlay with gradient
-                                Rectangle()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [
-                                                selectedTheme.colors(for: colorScheme).background,
-                                                selectedTheme.colors(for: colorScheme).background,
-                                            ],
-                                            startPoint: .top,
-                                            endPoint: .bottom
-                                        )
-                                    )
-                                    .frame(height: 80)
-                                    .offset(y: -40)
-                            }
-                        )
-                        .offset(y: -50)
-                        .padding(.top, 50)
+                        resultsContainer
                     }
                 }
             }
@@ -170,253 +45,251 @@ struct SearchView: View {
             }
         }
     }
-}
 
-// Add RoomsListView and UsersListView similar to previous implementations
+    private var headerContent: some View {
+        VStack(spacing: 20) {
+            // Status bar spacing
+            Color.clear
+                .frame(height: 50)
 
-private struct RoomsListView: View {
-    let rooms: [ChatRoom]
-    let joinRoom: (ChatRoom) async -> Void
-    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
-    @Environment(\.colorScheme) private var colorScheme
+            // Search bar
+            VStack(spacing: 8) {
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .font(.title3)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
 
-    var body: some View {
-        VStack(spacing: 16) {
-            if rooms.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "bubble.left.circle.fill")
-                        .font(.system(size: 60))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: selectedTheme.colors(for: colorScheme).primary,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
+                    TextField(
+                        viewModel.searchMode == .rooms ? "Search rooms" : "Search users",
+                        text: $viewModel.searchText
+                    )
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                    .submitLabel(.search)
+                    .onSubmit {
+                        Task {
+                            await viewModel.search()
+                        }
+                    }
+
+                    if !viewModel.searchText.isEmpty {
+                        Button {
+                            viewModel.clearSearch()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(
+                                    selectedTheme.colors(for: colorScheme).text.opacity(0.6))
+                        }
+                    }
+
+                    if viewModel.isSearching {
+                        ProgressView()
+                            .padding(.leading, 5)
+                    }
+                }
+                .padding()
+                .background(selectedTheme.colors(for: colorScheme).headerOverlay)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(
+                            selectedTheme.colors(for: colorScheme).text.opacity(0.2),
+                            lineWidth: 1
                         )
+                )
 
-                    Text("No Rooms Found")
-                        .font(.title2.bold())
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                // Error message with improved styling
+                errorMessageView
+            }
 
-                    Text("Try searching with different keywords")
-                        .font(.subheadline)
+            // Mode selector
+            modeSelectorView
+        }
+        .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
+        .padding(.bottom, 32)
+    }
+
+    @ViewBuilder
+    private var errorMessageView: some View {
+        if let errorMessage = viewModel.errorMessage {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+
+                Text(errorMessage)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+
+                Spacer()
+
+                Button {
+                    withAnimation {
+                        viewModel.clearErrorMessage()
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.footnote)
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(40)
-            } else {
-                ForEach(rooms) { room in
-                    Button {
-                        Task {
-                            await joinRoom(room)
-                        }
-                    } label: {
-                        HStack(spacing: 16) {
-                            // Room icon
-                            ZStack {
-                                Circle()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: selectedTheme.colors(for: colorScheme).primary,
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-
-                                Image(
-                                    systemName: room.type == .regular
-                                        ? "bubble.left" : "lock.shield"
-                                )
-                                .font(.title3.bold())
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-                            }
-                            .frame(width: 44, height: 44)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(room.name)
-                                    .font(.headline)
-                                    .foregroundStyle(
-                                        selectedTheme.colors(for: colorScheme).textPrimary)
-
-                                HStack {
-                                    Image(systemName: "person.2.fill")
-                                        .imageScale(.small)
-                                    Text("\(room.participants.count) members")
-                                }
-                                .font(.caption)
-                                .foregroundStyle(
-                                    selectedTheme.colors(for: colorScheme).textSecondary)
-                            }
-
-                            Spacer()
-
-                            Text("Join")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                        }
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(
-                                    selectedTheme.colors(for: colorScheme).cardBackground
-                                        .opacity(1)
-                                )
-                                .shadow(
-                                    color: selectedTheme.colors(for: colorScheme).primary[0]
-                                        .opacity(colorScheme == .dark ? 0.35 : 0.2),
-                                    radius: 16,
-                                    y: 6
-                                )
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .strokeBorder(
-                                    LinearGradient(
-                                        colors: [
-                                            selectedTheme.colors(for: colorScheme).accent
-                                                .opacity(colorScheme == .dark ? 0.4 : 0.3),
-                                            selectedTheme.colors(for: colorScheme).accent
-                                                .opacity(0.05),
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
-                                )
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+                    .opacity(0.95)
+                    .shadow(color: Color.black.opacity(0.1), radius: 4, y: 2)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(
+                        selectedTheme.colors(for: colorScheme).accent.opacity(0.3), lineWidth: 1)
+            )
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
-}
 
-private struct UsersListView: View {
-    let users: [ChatUser]
-    let selectUser: (ChatUser) async -> Void
-    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        VStack(spacing: 16) {
-            if users.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "person.fill.questionmark")
-                        .font(.system(size: 60))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: selectedTheme.colors(for: colorScheme).primary,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-
-                    Text("No Users Found")
-                        .font(.title2.bold())
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-
-                    Text("Try searching with different keywords")
-                        .font(.subheadline)
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(40)
-            } else {
-                ForEach(users) { user in
-                    Button {
-                        Task {
-                            await selectUser(user)
-                        }
-                    } label: {
-                        HStack(spacing: 16) {
-                            // User avatar
-                            ZStack {
-                                Circle()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: selectedTheme.colors(for: colorScheme).primary,
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-
-                                Text(user.name.prefix(1).uppercased())
-                                    .font(.title3.bold())
-                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-                            }
-                            .frame(width: 44, height: 44)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(user.name)
-                                    .font(.headline)
-                                    .foregroundStyle(
-                                        selectedTheme.colors(for: colorScheme).textPrimary)
-
-                                Text("Tap to start chatting")
-                                    .font(.caption)
-                                    .foregroundStyle(
-                                        selectedTheme.colors(for: colorScheme).textSecondary
-                                    )
-                            }
-
-                            Spacer()
-
-                            Image(systemName: "message.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(
-                                    LinearGradient(
-                                        colors: [
-                                            selectedTheme.colors(for: colorScheme).accent,
-                                            selectedTheme.colors(for: colorScheme).accent.opacity(
-                                                0.8),
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .shadow(
-                                    color: selectedTheme.colors(for: colorScheme).accent.opacity(
-                                        0.3),
-                                    radius: 4,
-                                    y: 2
-                                )
-                        }
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(
-                                    selectedTheme.colors(for: colorScheme).cardBackground
-                                        .opacity(1)
-                                )
-                                .shadow(
-                                    color: selectedTheme.colors(for: colorScheme).primary[0]
-                                        .opacity(colorScheme == .dark ? 0.35 : 0.2),
-                                    radius: 16,
-                                    y: 6
-                                )
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .strokeBorder(
-                                    LinearGradient(
-                                        colors: [
-                                            selectedTheme.colors(for: colorScheme).accent
-                                                .opacity(colorScheme == .dark ? 0.4 : 0.3),
-                                            selectedTheme.colors(for: colorScheme).accent
-                                                .opacity(0.05),
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
-                                )
-                        )
+    private var modeSelectorView: some View {
+        HStack(spacing: 0) {
+            ForEach(SearchViewModel.SearchMode.allCases, id: \.self) { mode in
+                Button {
+                    withAnimation(.spring(duration: 0.3)) {
+                        viewModel.setSearchMode(mode)
                     }
-                    .buttonStyle(.plain)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: mode.icon)
+                        Text(mode.rawValue)
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(
+                        viewModel.searchMode == mode
+                            ? selectedTheme.colors(for: colorScheme).text
+                            : selectedTheme.colors(for: colorScheme).text.opacity(0.6)
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(
+                        viewModel.searchMode == mode
+                            ? selectedTheme.colors(for: colorScheme).headerOverlay
+                            : Color.clear
+                    )
+                    .clipShape(Capsule())
                 }
             }
         }
+        .padding(4)
+        .background(selectedTheme.colors(for: colorScheme).headerOverlay.opacity(0.5))
+        .clipShape(Capsule())
+    }
+
+    private var resultsContainer: some View {
+        Group {
+            VStack(spacing: 16) {
+                // Results header
+                if !viewModel.searchText.isEmpty {
+                    HStack {
+                        Text(viewModel.searchMode == .rooms ? "Available Rooms" : "Found Users")
+                            .font(.headline)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+
+                        Spacer()
+
+                        Text(
+                            "\(viewModel.searchMode == .rooms ? viewModel.rooms.count : viewModel.users.count) found"
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                    }
+                    .padding(.horizontal)
+                }
+
+                if viewModel.isSearching {
+                    ProgressView("Searching...")
+                        .frame(maxWidth: .infinity, minHeight: 200)
+                } else if viewModel.searchText.isEmpty {
+                    ContentUnavailableView(
+                        "Search \(viewModel.searchMode == .rooms ? "Rooms" : "Users")",
+                        systemImage: viewModel.searchMode == .rooms
+                            ? "bubble.left.and.bubble.right" : "person.2",
+                        description: Text(
+                            "Enter a search term to find \(viewModel.searchMode == .rooms ? "rooms" : "users")"
+                        )
+                    )
+                    .padding(.top, 40)
+                } else if viewModel.searchMode == .rooms && viewModel.rooms.isEmpty
+                    || viewModel.searchMode == .users && viewModel.users.isEmpty
+                {
+                    ContentUnavailableView(
+                        "No Results",
+                        systemImage: "magnifyingglass",
+                        description: Text("Try searching with different keywords")
+                    )
+                    .padding(.top, 40)
+                } else {
+                    if viewModel.searchMode == .rooms {
+                        RoomsListView(
+                            rooms: viewModel.rooms,
+                            joinRoom: { room in
+                                Task {
+                                    try? await CloudKitManager.shared.joinRoom(room)
+                                    dismiss()
+                                }
+                            }
+                        )
+                    } else {
+                        UsersListView(
+                            users: viewModel.users,
+                            selectUser: { user in
+                                Task {
+                                    let userId =
+                                        UserDefaults.standard.string(forKey: "userId") ?? ""
+                                    let room = ChatRoom(
+                                        name: "Chat with \(user.name)",
+                                        createdBy: userId,
+                                        participants: [userId, user.id]
+                                    )
+                                    try? await CloudKitManager.shared.createChatRoom(room)
+                                    dismiss()
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 16)
+        .padding(.top, 24)
+        .background(
+            ZStack {
+                // Main background with enhanced shadow and more contrast
+                RoundedRectangle(cornerRadius: 32)
+                    .fill(selectedTheme.colors(for: colorScheme).background.opacity(1))
+                    .shadow(
+                        color: selectedTheme.colors(for: colorScheme).primary[0]
+                            .opacity(colorScheme == .dark ? 0.4 : 0.25),
+                        radius: 40,
+                        y: -20
+                    )
+
+                // Improved top edge overlay with gradient
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                selectedTheme.colors(for: colorScheme).background,
+                                selectedTheme.colors(for: colorScheme).background,
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(height: 80)
+                    .offset(y: -40)
+            }
+        )
+        .offset(y: -50)
+        .padding(.top, 50)
     }
 }
 

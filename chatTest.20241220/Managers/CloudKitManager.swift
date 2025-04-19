@@ -413,28 +413,19 @@ class CloudKitManager: ObservableObject {
     }
 
     func searchRooms(matching query: String) async throws -> [ChatRoom] {
-        let searchPredicate = NSPredicate(
-            format: "name CONTAINS[cd] %@ OR description CONTAINS[cd] %@",
-            query, query
-        )
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-        let notMemberPredicate = NSPredicate(
-            format: "NOT (%K CONTAINS %@)",
-            ChatRoom.participantsKey,
-            userId
-        )
 
-        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
-            searchPredicate,
-            notMemberPredicate,
-        ])
+        // Simple tokenized search using the supported 'CONTAINS' operator
+        let predicate = NSPredicate(
+            format: "self CONTAINS %@ AND NOT(participants CONTAINS %@)",
+            query, userId)
+
+        print("🔍 Room search predicate: \(predicate.predicateFormat)")
 
         let query = CKQuery(recordType: ChatRoom.recordType, predicate: predicate)
         query.sortDescriptors = [
             NSSortDescriptor(key: ChatRoom.createdAtKey, ascending: false)
         ]
-
-        Logger.debug("Executing search query: \(predicate)", category: .database)
 
         let (records, _) = try await database.records(matching: query)
         return try records.compactMap { try ChatRoom(from: try $0.1.get()) }
@@ -603,5 +594,22 @@ class CloudKitManager: ObservableObject {
             Logger.error("Failed to update profile picture: \(error)", category: .cloudKit)
             throw error
         }
+    }
+
+    func searchUsers(matching query: String) async throws -> [ChatUser] {
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+
+        // Simple tokenized search using the supported 'CONTAINS' operator
+        let predicate = NSPredicate(format: "self CONTAINS %@ AND NOT(id = %@)", query, userId)
+
+        print("🔍 User search predicate: \(predicate.predicateFormat)")
+
+        let query = CKQuery(recordType: ChatUser.recordType, predicate: predicate)
+        query.sortDescriptors = [
+            NSSortDescriptor(key: ChatUser.CodingKeys.name.rawValue, ascending: true)
+        ]
+
+        let (records, _) = try await database.records(matching: query)
+        return try records.compactMap { try ChatUser(from: try $0.1.get()) }
     }
 }

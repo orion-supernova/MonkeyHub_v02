@@ -12,6 +12,8 @@ import SwiftUI
 struct chatTest_20241220App: App {
     @StateObject private var cloudKit = CloudKitManager.shared
     
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    
     var body: some Scene {
         WindowGroup {
             // The view that checks for iCloud status and shows different views

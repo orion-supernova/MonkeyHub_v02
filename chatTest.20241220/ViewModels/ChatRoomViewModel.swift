@@ -6,13 +6,31 @@ class ChatRoomViewModel: ObservableObject {
     @Published private(set) var messages: [ChatMessage] = []
     private let cloudKit = CloudKitManager.shared
     private let roomId: String
+    private let userDefaults = UserDefaults.standard
+    private let userIdUserDefaultsKey = "userId"
+
+    // Store user data
+    private var userId: String = ""
+    private var userName: String = "User"
 
     init(roomId: String) {
         self.roomId = roomId
+        // Load user ID from UserDefaults
+        self.userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+    }
+
+    // Load user data once
+    private func loadUserData() async {
+        if let user = try? await cloudKit.fetchCurrentUser() {
+            self.userName = user.name
+        }
     }
 
     func loadMessages() async {
         do {
+            // Load user data first
+            await loadUserData()
+
             messages = try await cloudKit.fetchMessages(for: roomId)
             try await cloudKit.subscribeToMessages(in: roomId)
         } catch {
@@ -21,11 +39,9 @@ class ChatRoomViewModel: ObservableObject {
     }
 
     func sendMessage(_ text: String) async {
-//        guard let currentUser = cloudKit.currentUser else { return }
-
         let message = ChatMessage(
-            senderId: "currentUser.id",
-            senderName: "currentUser.name",
+            senderId: userId,
+            senderName: userName,
             content: text,
             type: .text,
             roomId: roomId
@@ -40,16 +56,14 @@ class ChatRoomViewModel: ObservableObject {
     }
 
     func sendImage(_ image: UIImage) async {
-//        guard let currentUser = cloudKit.currentUser,
-//            let imageData = image.jpegData(compressionQuality: 0.7)
-//        else { return }
-
         do {
-            let fileURL = try await cloudKit.uploadAsset(data: /*imageData*/Data(), fileExtension: "jpg")
+            let fileURL = try await cloudKit.uploadAsset(
+                data: image.jpegData(compressionQuality: 0.7) ?? Data(),
+                fileExtension: "jpg")
 
             let message = ChatMessage(
-                senderId: "currentUser.id",
-                senderName: "currentUser.name",
+                senderId: userId,
+                senderName: userName,
                 content: " Photo",
                 type: .image,
                 roomId: roomId,

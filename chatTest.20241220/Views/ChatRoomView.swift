@@ -9,6 +9,7 @@ struct ChatRoomView: View {
     @State private var selectedImage: UIImage?
     @State private var isShowingAttachmentOptions = false
     @StateObject private var navigationState = NavigationStateManager.shared
+    @State private var isLoading = true
 
     init(room: ChatRoom) {
         self.room = room
@@ -23,9 +24,28 @@ struct ChatRoomView: View {
 
             messageInputView
         }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Token") {
+                    let token = getDeviceToken()
+                    print("Device Token: \(token)")
+                    UIPasteboard.general.string = token // Copy to clipboard
+                    
+                    // Optional: Show an alert that token was copied
+                    let alertMessage = token == "Token not available" ?
+                        "No token available yet" : "Token copied to clipboard"
+                    
+                    AlertManager.shared.showAlert(
+                        title: "Device Token",
+                        message: alertMessage
+                    )
+                }
+            }
+        }
         .navigationTitle(room.name)
         .task {
             await viewModel.loadMessages()
+            isLoading = false
         }
         .onAppear {
             navigationState.currentScreen = .chatRoom
@@ -46,10 +66,25 @@ struct ChatRoomView: View {
         }
     }
 
+    // Helper function to dismiss keyboard
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+
     private var messagesList: some View {
         ScrollView {
             LazyVStack(spacing: 8) {
-                if viewModel.messages.isEmpty {
+                if isLoading {
+                    Spacer()
+                    ProgressView("Loading messages...")
+                        .padding()
+                    Spacer()
+                } else if viewModel.messages.isEmpty {
                     ContentUnavailableView(
                         "No Messages",
                         systemImage: "bubble.left",
@@ -57,7 +92,9 @@ struct ChatRoomView: View {
                     )
                     .padding()
                 } else {
-                    ForEach(viewModel.messages) { message in
+                    // Display messages in chronological order (oldest first, newest last)
+                    ForEach(viewModel.messages.sorted(by: { $0.timestamp < $1.timestamp })) {
+                        message in
                         MessageView(message: message)
                             .padding(.horizontal)
                     }
@@ -65,6 +102,13 @@ struct ChatRoomView: View {
             }
             .padding(.vertical)
         }
+        .onTapGesture {
+            hideKeyboard()
+        }
+    }
+    
+    private func getDeviceToken() -> String {
+        return UserDefaults.standard.string(forKey: "deviceToken") ?? "Token not available"
     }
 
     private var messageInputView: some View {

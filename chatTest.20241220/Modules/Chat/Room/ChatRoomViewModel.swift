@@ -76,4 +76,58 @@ class ChatRoomViewModel: ObservableObject {
             print("Error sending image: \(error)")
         }
     }
+
+    func sendImage(from url: URL) async {
+        do {
+            let message = ChatMessage(
+                senderId: userId,
+                senderName: userName,
+                content: " Photo",
+                type: .image,
+                roomId: roomId,
+                assetURL: url
+            )
+
+            try await cloudKit.sendMessage(message)
+            messages.insert(message, at: 0)
+        } catch {
+            print("Error sending image: \(error)")
+        }
+    }
+
+    func sendVideo(_ url: URL) async {
+        do {
+            let message = ChatMessage(
+                senderId: userId,
+                senderName: userName,
+                content: " Video",
+                type: .video,
+                roomId: roomId,
+                assetURL: url
+            )
+
+            try await cloudKit.sendMessage(message)
+            messages.insert(message, at: 0)
+        } catch {
+            print("Error sending video: \(error)")
+        }
+    }
+
+    func sendAudio(_ url: URL) async {
+        do {
+            let message = ChatMessage(
+                senderId: userId,
+                senderName: userName,
+                content: " Voice Message",
+                type: .audio,
+                roomId: roomId,
+                assetURL: url
+            )
+
+            try await cloudKit.sendMessage(message)
+            messages.insert(message, at: 0)
+        } catch {
+            print("Error sending audio: \(error)")
+        }
+    }
 }

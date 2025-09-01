@@ -1,4 +1,5 @@
 import SwiftUI
+import AVKit
 
 struct MessageView: View {
     let message: ChatMessage
@@ -21,15 +22,19 @@ struct MessageView: View {
                         .foregroundColor(.gray)
                 }
 
-                messageContent
-                    .padding(10)
-                    .background(
-                        isCurrentUser
-                            ? Color.blue
-                            : (colorScheme == .dark
-                                ? Color.gray.opacity(0.3) : Color.gray.opacity(0.1))
-                    )
-                    .cornerRadius(12)
+                if message.type == .audio {
+                    messageContent
+                } else {
+                    messageContent
+                        .padding(10)
+                        .background(
+                            isCurrentUser
+                                ? Color.blue
+                                : (colorScheme == .dark
+                                    ? Color.gray.opacity(0.3) : Color.gray.opacity(0.3))
+                        )
+                        .cornerRadius(12)
+                }
             }
 
             if !isCurrentUser { Spacer() }
@@ -58,11 +63,19 @@ struct MessageView: View {
                 .frame(maxWidth: 200, maxHeight: 200)
             }
         case .video:
-            Text("Video messages not implemented yet")
+            if let url = message.assetURL {
+                VideoPlayer(player: AVPlayer(url: url))
+                    .frame(width: 200, height: 200)
+                    .cornerRadius(8)
+            }
         case .url:
             if let url = URL(string: message.content) {
                 Link(message.content, destination: url)
                     .foregroundColor(isCurrentUser ? .white : .blue)
+            }
+        case .audio:
+            if let url = message.assetURL {
+                AudioPlayerView(url: url)
             }
         }
     }

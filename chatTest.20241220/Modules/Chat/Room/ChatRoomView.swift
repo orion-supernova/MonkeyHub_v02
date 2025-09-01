@@ -12,6 +12,8 @@ struct ChatRoomView: View {
     @State private var isLoading = true
     @State private var keyboardHeight: CGFloat = 0
     @State private var selectedImageUrl: URL?
+    @State private var showCamera = false
+    @State private var showVoiceRecorder = false
 
     init(room: ChatRoom) {
         self.room = room
@@ -34,10 +36,19 @@ struct ChatRoomView: View {
                 MessageInputView(
                     messageText: $messageText,
                     showImagePicker: $showImagePicker,
-                    isShowingAttachmentOptions: $isShowingAttachmentOptions,
+                    isShowingAttachmentMenu: $isShowingAttachmentOptions,
                     onSendMessage: {
                         await viewModel.sendMessage(messageText)
                         messageText = ""
+                    },
+                    onTakePhoto: {
+                        showCamera = true
+                    },
+                    onTakeVideo: {
+                        showCamera = true
+                    },
+                    onRecordAudio: {
+                        showVoiceRecorder = true
                     }
                 )
             }
@@ -78,6 +89,24 @@ struct ChatRoomView: View {
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(image: $selectedImage)
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraView(isPresented: $showCamera) { url, isVideo in
+                Task {
+                    if isVideo {
+                        await viewModel.sendVideo(url)
+                    } else {
+                        await viewModel.sendImage(from: url)
+                    }
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showVoiceRecorder) {
+            VoiceRecorderView(isPresented: $showVoiceRecorder) { url in
+                Task {
+                    await viewModel.sendAudio(url)
+                }
+            }
         }
         .onChange(of: selectedImage) { newImage in
             if let image = newImage {

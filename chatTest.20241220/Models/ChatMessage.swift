@@ -6,6 +6,7 @@ enum MessageType: String, Codable {
     case image
     case video
     case url
+    case audio
 }
 
 struct ChatMessage: Identifiable, Equatable {

@@ -166,3 +166,7 @@ private struct EmptyStateView: View {
                         searchText: .constant(""),
                         showNewChatSheet: .constant(true))
 }
+
+#Preview {
+    ChatRoomCard(room: .init(name: "Selam", createdBy: "Hmm", participants: ["Hmm, Hmm"], type: .secret, messageLifetime: 200))
+}

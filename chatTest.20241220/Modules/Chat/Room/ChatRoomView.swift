@@ -11,6 +11,7 @@ struct ChatRoomView: View {
     @StateObject private var navigationState = NavigationStateManager.shared
     @State private var isLoading = true
     @State private var keyboardHeight: CGFloat = 0
+    @State private var selectedImageUrl: URL?
 
     init(room: ChatRoom) {
         self.room = room
@@ -22,7 +23,10 @@ struct ChatRoomView: View {
             VStack(spacing: 0) {
                 MessagesListView(
                     viewModel: viewModel,
-                    isLoading: isLoading
+                    isLoading: isLoading,
+                    onImageTapped: { url in
+                        selectedImageUrl = url
+                    }
                 )
 
                 Divider()
@@ -84,6 +88,9 @@ struct ChatRoomView: View {
             }
         }
         .animation(.easeOut, value: keyboardHeight)
+        .fullScreenCover(item: $selectedImageUrl) { url in
+            FullscreenImageView(url: url)
+        }
     }
 
     private func getDeviceToken() -> String {

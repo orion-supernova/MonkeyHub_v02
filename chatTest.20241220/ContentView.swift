@@ -274,7 +274,7 @@ struct ContentView: View {
                                                 ) {
                                                     EnhancedRoomCard(room: room) {
                                                         Task {
-                                                            await leaveRoom(room)
+//                                                            await leaveRoom(room)
                                                         }
                                                     }
                                                 }

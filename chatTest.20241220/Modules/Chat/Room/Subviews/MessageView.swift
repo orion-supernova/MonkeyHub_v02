@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MessageView: View {
     let message: ChatMessage
+    let onImageTapped: (URL) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     private var isCurrentUser: Bool {
@@ -48,6 +49,9 @@ struct MessageView: View {
                         .resizable()
                         .scaledToFit()
                         .cornerRadius(8)
+                        .onTapGesture {
+                            onImageTapped(url)
+                        }
                 } placeholder: {
                     ProgressView()
                 }

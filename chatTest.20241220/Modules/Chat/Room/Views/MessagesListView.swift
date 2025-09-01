@@ -3,6 +3,7 @@ import SwiftUI
 struct MessagesListView: View {
     let viewModel: ChatRoomViewModel
     let isLoading: Bool
+    let onImageTapped: (URL) -> Void
     @State private var proxy: ScrollViewProxy?
 
     private var lastMessageId: String? {
@@ -30,7 +31,7 @@ struct MessagesListView: View {
                             ForEach(viewModel.messages.sorted(by: { $0.timestamp < $1.timestamp }))
                             {
                                 message in
-                                MessageView(message: message)
+                                MessageView(message: message, onImageTapped: onImageTapped)
                                     .padding(.horizontal)
                                     .id(message.id)
                             }

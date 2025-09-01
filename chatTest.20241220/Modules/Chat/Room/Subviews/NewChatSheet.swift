@@ -130,3 +130,7 @@ private struct UserSelectionRow: View {
         .foregroundColor(.primary)
     }
 }
+
+#Preview {
+    NewChatSheet()
+}

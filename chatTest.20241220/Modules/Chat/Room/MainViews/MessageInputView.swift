@@ -24,28 +24,6 @@ struct MessageInputView: View {
                         endPoint: .bottomTrailing
                     ))
             }
-            .sheet(isPresented: $isShowingAttachmentMenu) {
-                AttachmentMenuView(
-                    isPresented: $isShowingAttachmentMenu,
-                    onTakePhoto: {
-                        onTakePhoto()
-                        isShowingAttachmentMenu = false
-                    },
-                    onTakeVideo: {
-                        onTakeVideo()
-                        isShowingAttachmentMenu = false
-                    },
-                    onRecordAudio: {
-                        onRecordAudio()
-                        isShowingAttachmentMenu = false
-                    },
-                    onChooseFromGallery: {
-                        showImagePicker = true
-                        isShowingAttachmentMenu = false
-                    }
-                )
-                .presentationDetents([.height(250)])
-            }
 
             TextField("Message", text: $messageText)
                 .textFieldStyle(.roundedBorder)

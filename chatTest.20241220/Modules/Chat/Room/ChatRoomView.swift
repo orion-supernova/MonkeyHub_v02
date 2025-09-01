@@ -9,11 +9,14 @@ struct ChatRoomView: View {
     @State private var selectedImage: UIImage?
     @State private var isShowingAttachmentOptions = false
     @StateObject private var navigationState = NavigationStateManager.shared
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isLoading = true
     @State private var keyboardHeight: CGFloat = 0
     @State private var selectedImageUrl: URL?
     @State private var showCamera = false
     @State private var showVoiceRecorder = false
+    @State private var isShowingAttachmentMenu = false
 
     init(room: ChatRoom) {
         self.room = room
@@ -36,18 +39,21 @@ struct ChatRoomView: View {
                 MessageInputView(
                     messageText: $messageText,
                     showImagePicker: $showImagePicker,
-                    isShowingAttachmentMenu: $isShowingAttachmentOptions,
+                    isShowingAttachmentMenu: $isShowingAttachmentMenu,
                     onSendMessage: {
                         await viewModel.sendMessage(messageText)
                         messageText = ""
                     },
                     onTakePhoto: {
+                        isShowingAttachmentMenu = false
                         showCamera = true
                     },
                     onTakeVideo: {
+                        isShowingAttachmentMenu = false
                         showCamera = true
                     },
                     onRecordAudio: {
+                        isShowingAttachmentMenu = false
                         showVoiceRecorder = true
                     }
                 )
@@ -87,9 +93,6 @@ struct ChatRoomView: View {
             navigationState.currentScreen = .home
             removeKeyboardObservers()
         }
-        .sheet(isPresented: $showImagePicker) {
-            ImagePicker(image: $selectedImage)
-        }
         .fullScreenCover(isPresented: $showCamera) {
             CameraView(isPresented: $showCamera) { url, isVideo in
                 Task {
@@ -120,6 +123,29 @@ struct ChatRoomView: View {
         .fullScreenCover(item: $selectedImageUrl) { url in
             FullscreenImageView(url: url)
         }
+        .overlay(
+            CustomBottomSheet(
+                isPresented: $isShowingAttachmentMenu,
+                background: selectedTheme.colors(for: colorScheme).background,
+                cornerRadius: 20
+            ) {
+                AttachmentMenuView(
+                    isPresented: $isShowingAttachmentMenu,
+                    onTakePhoto: {
+                        showCamera = true
+                    },
+                    onTakeVideo: {
+                        showCamera = true
+                    },
+                    onRecordAudio: {
+                        showVoiceRecorder = true
+                    },
+                    onChooseFromGallery: {
+                        showImagePicker = true
+                    }
+                )
+            }
+        )
     }
 
     private func getDeviceToken() -> String {

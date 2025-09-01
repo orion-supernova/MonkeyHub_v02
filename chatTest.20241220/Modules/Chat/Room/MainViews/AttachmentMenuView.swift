@@ -10,11 +10,12 @@ struct AttachmentMenuView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Add Media")
-                .font(.title2.bold())
-                .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                .padding(.horizontal)
+        VStack( spacing: 0) {
+//            Text("Add Media")
+//                .font(.title2.bold())
+//                .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+//                .padding(.horizontal)
+//                .padding(.top, 10)
 
             HStack(spacing: 20) {
                 AttachmentButton(icon: "camera.fill", text: "Camera", action: onTakePhoto)
@@ -23,8 +24,11 @@ struct AttachmentMenuView: View {
                 AttachmentButton(icon: "photo.on.rectangle", text: "Gallery", action: onChooseFromGallery)
             }
             .padding(.horizontal)
+            .padding(.vertical, 20)
+            
+            Spacer()
+                .frame(height: 20)
         }
-        .padding(.vertical, 30)
         .background(selectedTheme.colors(for: colorScheme).background)
         .cornerRadius(20)
     }

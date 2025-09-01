@@ -124,6 +124,9 @@ struct ChatRoomView: View {
         .fullScreenCover(item: $selectedImageUrl) { url in
             FullscreenImageView(url: url)
         }
+        .sheet(isPresented: $showImagePicker) {
+            ImagePicker(image: $selectedImage)
+        }
         .overlay(
             CustomBottomSheet(
                 isPresented: $isShowingAttachmentMenu,

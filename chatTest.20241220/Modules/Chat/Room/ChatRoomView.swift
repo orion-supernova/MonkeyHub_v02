@@ -107,6 +107,7 @@ struct ChatRoomView: View {
         .fullScreenCover(isPresented: $showVoiceRecorder) {
             VoiceRecorderView(isPresented: $showVoiceRecorder) { url in
                 Task {
+                    isShowingAttachmentMenu = false
                     await viewModel.sendAudio(url)
                 }
             }

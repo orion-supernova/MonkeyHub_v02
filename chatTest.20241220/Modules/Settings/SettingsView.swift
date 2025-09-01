@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var editingEmail = ""
     @State private var isImagePickerPresented = false
     @State private var selectedImage: UIImage?
+    @StateObject private var navigationState = NavigationStateManager.shared
 
     private var headerHeight: CGFloat {
         let screenHeight = UIScreen.main.bounds.height
@@ -379,6 +380,7 @@ struct SettingsView: View {
             }
         }
         .onAppear {
+            navigationState.currentScreen = .settings
             withAnimation(.easeOut(duration: 0.6)) {
                 animateContent = true
             }

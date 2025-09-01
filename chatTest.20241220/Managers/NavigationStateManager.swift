@@ -6,8 +6,8 @@ class NavigationStateManager: ObservableObject {
     enum Screen {
         case home
         case chatRoom
-        case profile
         case settings
+        case feedView
     }
 
     @Published var currentScreen: Screen = .home
@@ -15,6 +15,6 @@ class NavigationStateManager: ObservableObject {
     private init() {}
 
     var shouldShowFloatingMenu: Bool {
-        currentScreen == .home
+        currentScreen == .home || currentScreen == .feedView || currentScreen == .settings
     }
 }

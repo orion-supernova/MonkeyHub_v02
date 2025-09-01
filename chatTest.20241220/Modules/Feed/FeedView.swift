@@ -5,6 +5,7 @@ struct FeedView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.displayScale) private var displayScale
+    @StateObject private var navigationState = NavigationStateManager.shared
 
     private var headerHeight: CGFloat {
         let screenHeight = UIScreen.main.bounds.height
@@ -179,6 +180,9 @@ struct FeedView: View {
                 .scrollIndicators(.hidden)
             }
             .background(selectedTheme.colors(for: colorScheme).background)
+        }
+        .onAppear {
+            navigationState.currentScreen = .feedView
         }
     }
 }

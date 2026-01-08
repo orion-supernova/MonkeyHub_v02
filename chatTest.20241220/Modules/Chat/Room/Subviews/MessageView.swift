@@ -22,7 +22,7 @@ struct MessageView: View {
                         .foregroundColor(.gray)
                 }
 
-                if message.type == .audio {
+                if message.type == .audio || message.type == .image {
                     messageContent
                 } else {
                     messageContent

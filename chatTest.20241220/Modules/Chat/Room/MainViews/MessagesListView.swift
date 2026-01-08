@@ -11,46 +11,57 @@ struct MessagesListView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        if isLoading {
-                            Spacer()
-                            ProgressView("Loading messages...")
-                                .padding()
-                            Spacer()
-                        } else if viewModel.messages.isEmpty {
-                            ContentUnavailableView(
-                                "No Messages",
-                                systemImage: "bubble.left",
-                                description: Text("Start the conversation by sending a message")
-                            )
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    if isLoading {
+                        Spacer()
+                        ProgressView("Loading messages...")
                             .padding()
-                        } else {
-                            ForEach(viewModel.messages.sorted(by: { $0.timestamp < $1.timestamp }))
-                            {
-                                message in
-                                MessageView(message: message, onImageTapped: onImageTapped)
-                                    .padding(.horizontal)
-                                    .id(message.id)
-                            }
+                        Spacer()
+                    } else if viewModel.messages.isEmpty {
+                        ContentUnavailableView(
+                            "No Messages",
+                            systemImage: "bubble.left",
+                            description: Text("Start the conversation by sending a message")
+                        )
+                        .padding()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ForEach(viewModel.messages.sorted(by: { $0.timestamp < $1.timestamp }))
+                        {
+                            message in
+                            MessageView(
+                                message: message,
+                                onImageTapped: onImageTapped,
+                                onDelete: {
+                                    Task {
+                                        await viewModel.deleteMessage(message.id)
+                                    }
+                                }
+                            )
+                            .padding(.horizontal)
+                            .id(message.id)
                         }
                     }
-                    .padding(.vertical)
                 }
-                .onAppear {
-                    self.proxy = proxy
-                    setupKeyboardObservers()
+                .padding(.vertical)
+            }
+            .onAppear {
+                self.proxy = proxy
+                setupKeyboardObservers()
+                scrollToBottom(proxy)
+            }
+            .onDisappear {
+                removeKeyboardObservers()
+            }
+            .onChange(of: isLoading) { newValue in
+                if !newValue {
+                    scrollToBottom(proxy)
                 }
-                .onDisappear {
-                    removeKeyboardObservers()
-                }
-                .onChange(of: isLoading) { newValue in
-                    if !newValue {
-                        scrollToBottom(proxy)
-                    }
-                }
+            }
+            .onChange(of: viewModel.messages) { newValue in
+                 scrollToBottom(proxy)
             }
         }
         .onTapGesture {
@@ -59,10 +70,10 @@ struct MessagesListView: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        guard let id = viewModel.messages.first?.id else { return }
+        guard let lastMessage = viewModel.messages.sorted(by: { $0.timestamp < $1.timestamp }).last else { return }
 
-        withAnimation(.easeOut(duration: 0.25)) {
-            proxy.scrollTo(id, anchor: .top)
+        withAnimation(.spring(duration: 0.3)) {
+            proxy.scrollTo(lastMessage.id, anchor: .bottom)
         }
     }
 
@@ -73,42 +84,16 @@ struct MessagesListView: View {
             from: nil,
             for: nil
         )
-        guard let proxy else { return }
-        withAnimation(.easeOut(duration: 0.3)) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                scrollToBottom(proxy)
-            }
-        }
     }
 
     private func setupKeyboardObservers() {
         NotificationCenter.default.addObserver(
             forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
-        ) { notification in
-            if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey]
-                as? CGRect
-            {
-                let duration =
-                    notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey]
-                    as? Double ?? 0.25
-
-                guard let proxy else { return }
-                withAnimation(.easeOut(duration: duration)) {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        scrollToBottom(proxy)
-                    }
-                }
-            }
-        }
-
-        NotificationCenter.default.addObserver(
-            forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
-        ) { notification in
-            let duration =
-                notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
-                ?? 0.25
-
-            withAnimation(.easeOut(duration: duration)) {
+        ) { _ in
+            guard let proxy else { return }
+            // Small delay to allow keyboard height change to affect ScrollView
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                scrollToBottom(proxy)
             }
         }
     }
@@ -116,7 +101,5 @@ struct MessagesListView: View {
     private func removeKeyboardObservers() {
         NotificationCenter.default.removeObserver(
             self, name: UIResponder.keyboardWillShowNotification, object: nil)
-        NotificationCenter.default.removeObserver(
-            self, name: UIResponder.keyboardWillHideNotification, object: nil)
     }
 }

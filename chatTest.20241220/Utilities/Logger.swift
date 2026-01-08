@@ -25,6 +25,10 @@ struct Logger {
         os_log("🔍 %@: %@", log: logger, type: .debug, category.name, message)
     }
 
+    static func warning(_ message: String, category: Category) {
+        os_log("⚠️ %@: %@", log: logger, type: .default, category.name, message)
+    }
+
     static func error(_ message: String, category: Category) {
         os_log("❌ %@: %@", log: logger, type: .error, category.name, message)
     }

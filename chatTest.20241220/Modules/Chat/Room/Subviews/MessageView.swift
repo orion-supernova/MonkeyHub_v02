@@ -4,6 +4,7 @@ import AVKit
 struct MessageView: View {
     let message: ChatMessage
     let onImageTapped: (URL) -> Void
+    let onDelete: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     private var isCurrentUser: Bool {
@@ -34,6 +35,15 @@ struct MessageView: View {
                                     ? Color.gray.opacity(0.3) : Color.gray.opacity(0.3))
                         )
                         .cornerRadius(12)
+                }
+            }
+            .contextMenu {
+                if isCurrentUser {
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
                 }
             }
 

@@ -99,6 +99,10 @@ class LoginViewModel: ObservableObject {
             cloudKit.isAuthenticated = true
             userDefaults.set(iCloudId.recordName, forKey: userIdUserDefaultsKey)
 
+            // Setup notifications for new user
+            await cloudKit.syncDeviceTokenWithCloudKit()
+            await cloudKit.subscribeToAllJoinedRooms()
+
             Logger.info("User created successfully", category: .auth)
         } catch let error {
             Logger.error("Failed to create user: \(error)", category: .auth)
@@ -113,6 +117,11 @@ class LoginViewModel: ObservableObject {
 
             userDefaults.set(id, forKey: userIdUserDefaultsKey)
             cloudKit.isAuthenticated = true
+            
+            // Setup notifications for existing user
+            await cloudKit.syncDeviceTokenWithCloudKit()
+            await cloudKit.subscribeToAllJoinedRooms()
+            
             Logger.info("User logged in successfully: \(id)", category: .auth)
         } catch {
             Logger.error("Failed to login user: \(error)", category: .auth)

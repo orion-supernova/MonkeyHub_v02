@@ -303,6 +303,9 @@ class CloudKitManager: ObservableObject {
         guard savedRecord != nil else {
             throw CloudKitError.operationFailed
         }
+        
+        // Automatically subscribe to notifications upon joining
+        try? await subscribeToMessages(in: room.id)
     }
 
     func leaveRoom(_ room: ChatRoom) async throws {
@@ -317,6 +320,9 @@ class CloudKitManager: ObservableObject {
         guard savedRecord != nil else {
             throw CloudKitError.operationFailed
         }
+        
+        // Unsubscribe from notifications upon leaving
+        try? await unsubscribeFromMessages(in: room.id)
     }
 
     // MARK: - Message Operations
@@ -374,7 +380,11 @@ class CloudKitManager: ObservableObject {
     // MARK: - Subscription Management
 
     func subscribeToMessages(in roomId: String) async throws {
+        // Predicate: all messages in this room. 
+        // We no longer exclude the sender so that messages sent from one device 
+        // trigger real-time updates on other devices owned by the same user.
         let predicate = NSPredicate(format: "%K == %@", ChatMessage.roomIdKey, roomId)
+
         let subscription = CKQuerySubscription(
             recordType: ChatMessage.recordType,
             predicate: predicate,
@@ -383,19 +393,130 @@ class CloudKitManager: ObservableObject {
         )
 
         let notificationInfo = CKSubscription.NotificationInfo()
-        notificationInfo.shouldSendContentAvailable = true
+
+        // Enable visible notifications with alert, sound, and badge
+        notificationInfo.alertBody = "New message"  // Will be replaced by service extension
+        notificationInfo.shouldSendContentAvailable = true  // Background refresh
+        notificationInfo.shouldBadge = true
+        notificationInfo.soundName = "default"
+
+        // Include message fields in notification payload for custom formatting
+        notificationInfo.desiredKeys = [
+            ChatMessage.senderIdKey,
+            ChatMessage.senderNameKey,
+            ChatMessage.contentKey,
+            ChatMessage.typeKey,
+            ChatMessage.roomIdKey,
+            ChatMessage.timestampKey
+        ]
+
         subscription.notificationInfo = notificationInfo
 
-        let savedSubscription = try await database.modifySubscriptions(
-            saving: [subscription], deleting: []
-        ).saveResults.first?.1.get()
-        guard savedSubscription != nil else {
-            throw CloudKitError.operationFailed
+        do {
+            let savedSubscription = try await database.modifySubscriptions(
+                saving: [subscription], deleting: []
+            ).saveResults.first?.1.get()
+
+            guard savedSubscription != nil else {
+                throw CloudKitError.operationFailed
+            }
+            Logger.info("✅ Successfully subscribed to messages in room \(roomId)", category: .cloudKit)
+        } catch let error as CKError {
+            // Some errors (like duplicate subscription) are expected and shouldn't be treated as failures
+            Logger.info("ℹ️ CloudKit subscription info for room \(roomId): \(error.localizedDescription) (Code: \(error.code.rawValue))", category: .cloudKit)
+        } catch {
+            Logger.error("❌ Subscription failed for room \(roomId): \(error)", category: .cloudKit)
+            throw error
         }
     }
 
     func unsubscribeFromMessages(in roomId: String) async throws {
         try await database.deleteSubscription(withID: "messages-\(roomId)")
+    }
+
+    func deleteChatMessage(_ messageId: String) async throws {
+        let predicate = NSPredicate(format: "%K == %@", ChatMessage.idKey, messageId)
+        let query = CKQuery(recordType: ChatMessage.recordType, predicate: predicate)
+        
+        let (records, _) = try await database.records(matching: query)
+        guard let (recordID, _) = records.first else {
+            throw CloudKitError.invalidRecord
+        }
+        
+        try await database.deleteRecord(withID: recordID)
+        Logger.info("✅ Deleted message: \(messageId)", category: .cloudKit)
+    }
+
+    // MARK: - Push Notification Management
+
+    /// Update the current user's device token in CloudKit
+    ///
+    /// This method syncs the APNs device token to the user's CloudKit record,
+    /// enabling push notifications for chatroom messages.
+    ///
+    /// - Parameter token: The APNs device token as a hex string
+    func updateDeviceToken(_ token: String) async {
+        // Store token locally first to ensure it survives if network fails or user is not logged in
+        userDefaults.set(token, forKey: "deviceToken")
+        
+        Logger.info("Updating device token in CloudKit", category: .cloudKit)
+
+        do {
+            let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+            guard !userId.isEmpty else {
+                Logger.warning("Cannot sync device token: userId is missing (user likely not logged in yet)", category: .cloudKit)
+                return
+            }
+            
+            let predicate = NSPredicate(format: "%K == %@", ChatUser.CodingKeys.id.rawValue, userId)
+            let query = CKQuery(recordType: ChatUser.recordType, predicate: predicate)
+
+            let (records, _) = try await database.records(matching: query)
+            guard let existingRecord = try records.first?.1.get() else {
+                Logger.error("User record not found for device token update", category: .cloudKit)
+                return
+            }
+
+            // Only update if it changed
+            let currentToken = existingRecord[ChatUser.CodingKeys.deviceToken.rawValue] as? String
+            if currentToken != token {
+                existingRecord[ChatUser.CodingKeys.deviceToken.rawValue] = token
+                try await database.modifyRecords(saving: [existingRecord], deleting: [])
+                Logger.info("Device token updated successfully in CloudKit", category: .cloudKit)
+            } else {
+                Logger.info("Device token already up to date in CloudKit", category: .cloudKit)
+            }
+        } catch {
+            Logger.error("Failed to update device token: \(error)", category: .cloudKit)
+        }
+    }
+
+    /// Sync the locally stored device token with CloudKit
+    ///
+    /// This should be called after a successful login to ensure the token
+    /// received during app launch is associated with the user record.
+    func syncDeviceTokenWithCloudKit() async {
+        guard let token = userDefaults.string(forKey: "deviceToken") else {
+            Logger.info("No local device token to sync", category: .cloudKit)
+            return
+        }
+        await updateDeviceToken(token)
+    }
+
+    /// Subscribe to all rooms the user has joined
+    ///
+    /// This is useful after a reinstall to restore push notification subscriptions.
+    func subscribeToAllJoinedRooms() async {
+        Logger.info("Restoring subscriptions for all joined rooms", category: .cloudKit)
+        do {
+            let rooms = try await fetchUserRooms()
+            for room in rooms {
+                try? await subscribeToMessages(in: room.id)
+            }
+            Logger.info("Restored \(rooms.count) room subscriptions", category: .cloudKit)
+        } catch {
+            Logger.error("Failed to restore room subscriptions: \(error)", category: .cloudKit)
+        }
     }
 
     /// Check schema version and run migrations if needed

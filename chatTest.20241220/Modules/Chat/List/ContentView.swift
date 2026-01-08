@@ -11,7 +11,7 @@ import SwiftUI
 struct ContentView: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @StateObject private var cloudKit = CloudKitManager.shared
-    @State private var myRooms: [ChatRoom] = []
+    @StateObject private var viewModel = ChatListViewModel()
     @State private var isShowingNewRoomSheet = false
     @State private var newRoomName = ""
     @State private var showingSignOutAlert = false
@@ -24,11 +24,7 @@ struct ContentView: View {
 
     // MARK: - Room Operations
     private func loadData() async {
-        do {
-            myRooms = try await cloudKit.fetchChatRooms()
-        } catch let error {
-            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
-        }
+        await viewModel.loadRooms()
     }
 
     private func createRoom(type: RoomType, messageLifetime: TimeInterval?) async {
@@ -122,7 +118,7 @@ struct ContentView: View {
                                                 selectedTheme.colors(for: colorScheme).text)
 
                                         Text(
-                                            "\(myRooms.count) Active Room\(myRooms.count == 1 ? "" : "s")"
+                                            "\(viewModel.myRooms.count) Active Room\(viewModel.myRooms.count == 1 ? "" : "s")"
                                         )
                                         .font(.subheadline)
                                         .foregroundStyle(
@@ -216,7 +212,7 @@ struct ContentView: View {
 
                             // Rooms list
                             LazyVStack(spacing: 16) {
-                                if myRooms.isEmpty {
+                                if viewModel.myRooms.isEmpty {
                                     VStack(spacing: 16) {
                                         Image(systemName: "bubble.left.circle.fill")
                                             .font(.system(size: 60))
@@ -256,7 +252,7 @@ struct ContentView: View {
 
                                             Spacer()
 
-                                            Text("\(myRooms.count) Total")
+                                            Text("\(viewModel.myRooms.count) Total")
                                                 .font(.subheadline)
                                                 .foregroundStyle(
                                                     selectedTheme.colors(for: colorScheme)
@@ -268,11 +264,14 @@ struct ContentView: View {
 
                                         // Rooms grid
                                         LazyVGrid(columns: gridColumns, spacing: 16) {
-                                            ForEach(myRooms) { room in
+                                            ForEach(viewModel.myRooms) { room in
                                                 NavigationLink(
                                                     destination: ChatRoomView(room: room)
+                                                        .onAppear {
+                                                            viewModel.clearUnread(for: room.id)
+                                                        }
                                                 ) {
-                                                    EnhancedRoomCard(room: room) {
+                                                    EnhancedRoomCard(room: room, unreadCount: viewModel.unreadCounts[room.id] ?? 0) {
                                                         Task {
 //                                                            await leaveRoom(room)
                                                         }
@@ -463,6 +462,7 @@ struct ContentView: View {
 
 struct EnhancedRoomCard: View {
     let room: ChatRoom
+    let unreadCount: Int
     let action: () -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
@@ -493,14 +493,28 @@ struct EnhancedRoomCard: View {
 
                 Spacer()
 
-                // Leave button
-                Button(action: action) {
-                    Image(systemName: "door.left.hand.open")
-                        .font(.headline)
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
-                        .frame(width: 32, height: 32)
-                        .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))
-                        .clipShape(Circle())
+                // Header right side (Badges + Action)
+                HStack(spacing: 8) {
+                    if unreadCount > 0 {
+                        Text("\(unreadCount)")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.red)
+                            .clipShape(Capsule())
+                            .shadow(color: .red.opacity(0.3), radius: 3)
+                    }
+
+                    // Leave button
+                    Button(action: action) {
+                        Image(systemName: "door.left.hand.open")
+                            .font(.headline)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
+                            .frame(width: 32, height: 32)
+                            .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))
+                            .clipShape(Circle())
+                    }
                 }
             }
 

@@ -26,6 +26,7 @@ class MigrationManifest {
         // Register all migrations here
         // Add new migrations below in sequential order
         register(Migration_v1_to_v2())
+        register(Migration_v2_to_v3_DeviceToken())
 
         Logger.info(
             "MigrationManifest initialized with \(migrations.count) migrations", category: .cloudKit

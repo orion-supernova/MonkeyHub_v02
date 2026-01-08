@@ -12,7 +12,6 @@ struct ChatRoomView: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
     @State private var isLoading = true
-    @State private var keyboardHeight: CGFloat = 0
     @State private var selectedImageUrl: URL?
     @State private var showCamera = false
     @State private var showVoiceRecorder = false
@@ -24,43 +23,38 @@ struct ChatRoomView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                MessagesListView(
-                    viewModel: viewModel,
-                    isLoading: isLoading,
-                    onImageTapped: { url in
-                        selectedImageUrl = url
-                    }
-                )
+        VStack(spacing: 0) {
+            MessagesListView(
+                viewModel: viewModel,
+                isLoading: isLoading,
+                onImageTapped: { url in
+                    selectedImageUrl = url
+                }
+            )
 
-                Divider()
-
-                MessageInputView(
-                    messageText: $messageText,
-                    showImagePicker: $showImagePicker,
-                    isShowingAttachmentMenu: $isShowingAttachmentMenu,
-                    onSendMessage: {
-                        await viewModel.sendMessage(messageText)
-                        messageText = ""
-                    },
-                    onTakePhoto: {
-                        isShowingAttachmentMenu = false
-                        showCamera = true
-                    },
-                    onTakeVideo: {
-                        isShowingAttachmentMenu = false
-                        showCamera = true
-                    },
-                    onRecordAudio: {
-                        isShowingAttachmentMenu = false
-                        showVoiceRecorder = true
-                    }
-                )
-            }
-            .padding(.bottom, keyboardHeight)
+            MessageInputView(
+                messageText: $messageText,
+                showImagePicker: $showImagePicker,
+                isShowingAttachmentMenu: $isShowingAttachmentMenu,
+                onSendMessage: {
+                    await viewModel.sendMessage(messageText)
+                    messageText = ""
+                },
+                onTakePhoto: {
+                    isShowingAttachmentMenu = false
+                    showCamera = true
+                },
+                onTakeVideo: {
+                    isShowingAttachmentMenu = false
+                    showCamera = true
+                },
+                onRecordAudio: {
+                    isShowingAttachmentMenu = false
+                    showVoiceRecorder = true
+                }
+            )
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .navigationTitle(room.name)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Token") {
@@ -80,18 +74,17 @@ struct ChatRoomView: View {
                 }
             }
         }
-        .navigationTitle(room.name)
         .task {
             await viewModel.loadMessages()
             isLoading = false
         }
         .onAppear {
             navigationState.currentScreen = .chatRoom
-            setupKeyboardObservers()
+            navigationState.currentRoomId = room.id  // Track active room for notification suppression
         }
         .onDisappear {
             navigationState.currentScreen = .home
-            removeKeyboardObservers()
+            navigationState.currentRoomId = nil  // Clear active room
         }
         .fullScreenCover(isPresented: $showCamera) {
             CameraView(isPresented: $showCamera) { url, isVideo in
@@ -120,7 +113,6 @@ struct ChatRoomView: View {
                 }
             }
         }
-        .animation(.easeOut, value: keyboardHeight)
         .fullScreenCover(item: $selectedImageUrl) { url in
             FullscreenImageView(url: url)
         }
@@ -154,43 +146,6 @@ struct ChatRoomView: View {
 
     private func getDeviceToken() -> String {
         return UserDefaults.standard.string(forKey: "deviceToken") ?? "Token not available"
-    }
-
-    private func setupKeyboardObservers() {
-        NotificationCenter.default.addObserver(
-            forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
-        ) { notification in
-            if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey]
-                as? CGRect
-            {
-                let duration =
-                    notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey]
-                    as? Double ?? 0.25
-
-                withAnimation(.easeOut(duration: duration)) {
-                    keyboardHeight = keyboardFrame.height
-                }
-            }
-        }
-
-        NotificationCenter.default.addObserver(
-            forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
-        ) { notification in
-            let duration =
-                notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
-                ?? 0.25
-
-            withAnimation(.easeOut(duration: duration)) {
-                keyboardHeight = 0
-            }
-        }
-    }
-
-    private func removeKeyboardObservers() {
-        NotificationCenter.default.removeObserver(
-            self, name: UIResponder.keyboardWillShowNotification, object: nil)
-        NotificationCenter.default.removeObserver(
-            self, name: UIResponder.keyboardWillHideNotification, object: nil)
     }
 }
 

@@ -11,6 +11,7 @@ class NavigationStateManager: ObservableObject {
     }
 
     @Published var currentScreen: Screen = .home
+    @Published var currentRoomId: String? = nil  // Track active chatroom for notification suppression
 
     private init() {}
 

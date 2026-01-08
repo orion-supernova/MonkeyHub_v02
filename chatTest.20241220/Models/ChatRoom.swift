@@ -11,8 +11,8 @@ struct ChatRoom: Identifiable {
     let name: String
     let createdBy: String
     let createdAt: Date
-    let lastMessage: String?
-    let lastMessageDate: Date?
+    var lastMessage: String?
+    var lastMessageDate: Date?
     let participants: [String]
     let description: String?
     let isPrivate: Bool?

@@ -10,6 +10,7 @@ struct ChatUser: Identifiable, Hashable {
     let email: String
     let avatarAsset: CKAsset?
     let bio: String?  // Added in schema v2
+    let deviceToken: String?  // Added in schema v3
 
     enum CodingKeys: String {
         case id
@@ -19,6 +20,7 @@ struct ChatUser: Identifiable, Hashable {
         case email
         case avatar  // Note: using 'avatar' to match CloudKit field name
         case bio     // Added in schema v2
+        case deviceToken  // Added in schema v3
     }
 
     func hash(into hasher: inout Hasher) {
@@ -40,6 +42,7 @@ struct ChatUser: Identifiable, Hashable {
         self.email = record[CodingKeys.email.rawValue] as? String ?? ""
         self.avatarAsset = record[CodingKeys.avatar.rawValue] as? CKAsset
         self.bio = record[CodingKeys.bio.rawValue] as? String
+        self.deviceToken = record[CodingKeys.deviceToken.rawValue] as? String
     }
 
     init(id: String, name: String, email: String) {
@@ -49,6 +52,7 @@ struct ChatUser: Identifiable, Hashable {
         self.email = email
         self.avatarAsset = nil
         self.bio = nil
+        self.deviceToken = nil
     }
 
     init(from existing: ChatUser, name: String, username: String, email: String) {
@@ -58,6 +62,7 @@ struct ChatUser: Identifiable, Hashable {
         self.email = email
         self.avatarAsset = existing.avatarAsset
         self.bio = existing.bio
+        self.deviceToken = existing.deviceToken
     }
 }
 
@@ -76,6 +81,9 @@ extension ChatUser {
         }
         if let bio = bio {
             record[CodingKeys.bio.rawValue] = bio
+        }
+        if let deviceToken = deviceToken {
+            record[CodingKeys.deviceToken.rawValue] = deviceToken
         }
         return record
     }

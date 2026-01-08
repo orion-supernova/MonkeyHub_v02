@@ -2,6 +2,10 @@ import AuthenticationServices
 import CloudKit
 import SwiftUI
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 enum CloudKitError: LocalizedError {
     case recordNotFound
     case invalidRecord
@@ -82,7 +86,8 @@ class CloudKitManager: ObservableObject {
 
     // Schema versioning
     private let versionKey = "version"
-    private let currentSchemaVersion = 1
+    private let currentSchemaVersion = 2  // Updated for v1→v2 migration
+    private var hasAttemptedMigration = false  // Prevents duplicate migration attempts
 
     enum CloudKitStatus {
         case unknown
@@ -111,6 +116,29 @@ class CloudKitManager: ObservableObject {
             case .available:
                 Logger.info("iCloud is available", category: .cloudKit)
                 iCloudStatus = .available
+
+                // 🧪 DEBUG: Uncomment to reset schema version to v1 for testing
+                #if DEBUG
+//                do {
+//                    try await MigrationDebugHelper.resetSchemaVersionToV1(database: database)
+//                    Logger.info("🧪 DEBUG: Schema reset to v1", category: .cloudKit)
+//                } catch {
+//                    Logger.error("🧪 DEBUG: Failed to reset schema: \(error)", category: .cloudKit)
+//                }
+                #endif
+
+                // Run schema migrations if needed (only once per app session)
+                if !hasAttemptedMigration {
+                    hasAttemptedMigration = true
+                    do {
+                        try await updateSchemaIfNeeded()
+                    } catch {
+                        Logger.error("Schema migration failed: \(error)", category: .cloudKit)
+                        // Don't fail initialization, just log the error
+                    }
+                } else {
+                    Logger.info("⏭️ Skipping migration - already attempted in this session", category: .cloudKit)
+                }
 
             case .noAccount:
                 Logger.info("No iCloud account", category: .cloudKit)
@@ -370,46 +398,98 @@ class CloudKitManager: ObservableObject {
         try await database.deleteSubscription(withID: "messages-\(roomId)")
     }
 
-    private func updateSchemaIfNeeded() async throws {
+    /// Check schema version and run migrations if needed
+    ///
+    /// This function should be called during app initialization to ensure
+    /// the CloudKit schema is up to date.
+    func updateSchemaIfNeeded() async throws {
+        Logger.info("Checking schema version...", category: .cloudKit)
+
         do {
-            let query = CKQuery(recordType: "SchemaVersion", predicate: NSPredicate(value: true))
-            let (records, _) = try await database.records(matching: query)
-            let version = try records.first?.1.get()[versionKey] as? Int ?? 1
+            // Fetch current schema version
+            let recordID = CKRecord.ID(recordName: SchemaVersion.recordName)
+            let record = try await database.record(for: recordID)
+            let schemaVersion = try SchemaVersion(from: record)
 
-            if version < currentSchemaVersion {
-                try await migrateSchema(from: version, to: currentSchemaVersion)
+            Logger.info("Current schema version: \(schemaVersion.version)", category: .cloudKit)
 
-                // Update version
-                let versionRecord = CKRecord(recordType: "SchemaVersion")
-                versionRecord[versionKey] = currentSchemaVersion
-                _ = try await database.modifyRecords(
-                    saving: [versionRecord],
-                    deleting: records.map { try! $0.1.get().recordID }
-                )
+            // Check if migration is needed
+            if schemaVersion.version < currentSchemaVersion {
+                Logger.info(
+                    "Migration needed: v\(schemaVersion.version) → v\(currentSchemaVersion)",
+                    category: .cloudKit)
+                try await migrateSchema(from: schemaVersion.version, to: currentSchemaVersion)
+            } else {
+                Logger.info("Schema is up to date", category: .cloudKit)
             }
+
         } catch let error as CKError where error.code == .unknownItem {
-            // SchemaVersion record type doesn't exist yet, create initial version
-            Logger.info("Creating initial schema version", category: .cloudKit)
+            // SchemaVersion record doesn't exist yet - this is a fresh install
+            Logger.info("No schema version record found - creating initial version", category: .cloudKit)
 
-            let versionRecord = CKRecord(recordType: "SchemaVersion")
-            versionRecord[versionKey] = currentSchemaVersion
-
-            do {
-                _ = try await database.modifyRecords(saving: [versionRecord], deleting: [])
-                Logger.info("Schema version initialized", category: .cloudKit)
-            } catch {
-                Logger.error(error, category: .cloudKit)
-                throw CloudKitError.schemaError("Failed to initialize schema version")
+            // Get persistent device identifier
+            let deviceId: String
+            #if os(iOS) || os(tvOS)
+            if let uuid = UIDevice.current.identifierForVendor?.uuidString {
+                deviceId = String(uuid.prefix(8))
+            } else {
+                // Fallback: Use persistent identifier from UserDefaults
+                let key = "com.app.deviceIdentifier"
+                if let stored = UserDefaults.standard.string(forKey: key) {
+                    deviceId = stored
+                } else {
+                    let newId = "Device-\(UUID().uuidString.prefix(8))"
+                    UserDefaults.standard.set(newId, forKey: key)
+                    deviceId = newId
+                }
             }
+            #else
+            // macOS/visionOS: Use persistent identifier from UserDefaults
+            let key = "com.app.deviceIdentifier"
+            if let stored = UserDefaults.standard.string(forKey: key) {
+                deviceId = stored
+            } else {
+                let newId = "Device-\(UUID().uuidString.prefix(8))"
+                UserDefaults.standard.set(newId, forKey: key)
+                deviceId = newId
+            }
+            #endif
+
+            let schemaVersion = SchemaVersion(
+                version: currentSchemaVersion,
+                migrationHistory: "[]",
+                lastMigrationDate: Date(),
+                appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown",
+                deviceIdentifier: deviceId
+            )
+
+            let record = schemaVersion.toRecord()
+            _ = try await database.modifyRecords(saving: [record], deleting: [])
+            Logger.info("Schema version initialized to v\(currentSchemaVersion)", category: .cloudKit)
+
         } catch {
+            Logger.error("Failed to check schema version: \(error)", category: .cloudKit)
             throw error
         }
     }
 
+    /// Execute schema migration using MigrationRunner
+    ///
+    /// - Parameters:
+    ///   - oldVersion: Current schema version
+    ///   - newVersion: Target schema version
     private func migrateSchema(from oldVersion: Int, to newVersion: Int) async throws {
-        // Implement schema migration logic here if needed
-        Logger.info(
-            "Migrating schema from v\(oldVersion) to v\(newVersion)", category: .cloudKit)
+        Logger.info("Starting migration from v\(oldVersion) to v\(newVersion)", category: .cloudKit)
+
+        let runner = MigrationRunner(database: database)
+
+        do {
+            try await runner.migrate(to: newVersion)
+            Logger.info("Migration completed successfully", category: .cloudKit)
+        } catch {
+            Logger.error("Migration failed: \(error)", category: .cloudKit)
+            throw CloudKitError.schemaError("Migration failed: \(error.localizedDescription)")
+        }
     }
 
     func searchRooms(matching query: String) async throws -> [ChatRoom] {

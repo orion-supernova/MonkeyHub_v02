@@ -90,7 +90,7 @@ class LoginViewModel: ObservableObject {
             )
 
             do {
-                try await cloudKit.database.save(newUser.asCKRecord)
+                try await cloudKit.database.save(newUser.toRecord())
             } catch let error {
                 Logger.error(error.localizedDescription, category: .cloudKit)
                 throw CloudKitError.custom(error.localizedDescription)

@@ -9,6 +9,7 @@ struct ChatUser: Identifiable, Hashable {
     let username: String
     let email: String
     let avatarAsset: CKAsset?
+    let bio: String?  // Added in schema v2
 
     enum CodingKeys: String {
         case id
@@ -17,6 +18,7 @@ struct ChatUser: Identifiable, Hashable {
         case username
         case email
         case avatar  // Note: using 'avatar' to match CloudKit field name
+        case bio     // Added in schema v2
     }
 
     func hash(into hasher: inout Hasher) {
@@ -37,6 +39,7 @@ struct ChatUser: Identifiable, Hashable {
         self.username = record[CodingKeys.username.rawValue] as? String ?? ""
         self.email = record[CodingKeys.email.rawValue] as? String ?? ""
         self.avatarAsset = record[CodingKeys.avatar.rawValue] as? CKAsset
+        self.bio = record[CodingKeys.bio.rawValue] as? String
     }
 
     init(id: String, name: String, email: String) {
@@ -45,6 +48,7 @@ struct ChatUser: Identifiable, Hashable {
         self.username = ""
         self.email = email
         self.avatarAsset = nil
+        self.bio = nil
     }
 
     init(from existing: ChatUser, name: String, username: String, email: String) {
@@ -53,11 +57,15 @@ struct ChatUser: Identifiable, Hashable {
         self.username = username
         self.email = email
         self.avatarAsset = existing.avatarAsset
+        self.bio = existing.bio
     }
 }
 
 extension ChatUser {
-    var asCKRecord: CKRecord {
+    /// Convert to CloudKit record
+    ///
+    /// - Returns: CKRecord representation of this user
+    func toRecord() -> CKRecord {
         let record = CKRecord(recordType: Self.recordType)
         record[CodingKeys.id.rawValue] = id
         record[CodingKeys.name.rawValue] = name
@@ -65,6 +73,9 @@ extension ChatUser {
         record[CodingKeys.email.rawValue] = email
         if let avatar = avatarAsset {
             record[CodingKeys.avatar.rawValue] = avatar
+        }
+        if let bio = bio {
+            record[CodingKeys.bio.rawValue] = bio
         }
         return record
     }

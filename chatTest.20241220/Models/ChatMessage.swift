@@ -50,7 +50,11 @@ struct ChatMessage: Identifiable, Equatable {
         self.assetURL = assetURL
     }
 
-    init?(from record: CKRecord) {
+    /// Initialize from CloudKit record
+    ///
+    /// - Parameter record: The CloudKit record to parse
+    /// - Throws: CloudKitError.invalidRecord if required fields are missing
+    init(from record: CKRecord) throws {
         guard let id = record[ChatMessage.idKey] as? String,
             let senderId = record[ChatMessage.senderIdKey] as? String,
             let senderName = record[ChatMessage.senderNameKey] as? String,
@@ -60,7 +64,7 @@ struct ChatMessage: Identifiable, Equatable {
             let timestamp = record[ChatMessage.timestampKey] as? Date,
             let roomId = record[ChatMessage.roomIdKey] as? String
         else {
-            return nil
+            throw CloudKitError.invalidRecord
         }
 
         self.id = id

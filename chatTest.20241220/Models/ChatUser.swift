@@ -71,7 +71,9 @@ extension ChatUser {
     ///
     /// - Returns: CKRecord representation of this user
     func toRecord() -> CKRecord {
-        let record = CKRecord(recordType: Self.recordType)
+        let recordID = CKRecord.ID(recordName: id)
+        let record = CKRecord(recordType: Self.recordType, recordID: recordID)
+        
         record[CodingKeys.id.rawValue] = id
         record[CodingKeys.name.rawValue] = name
         record[CodingKeys.username.rawValue] = username

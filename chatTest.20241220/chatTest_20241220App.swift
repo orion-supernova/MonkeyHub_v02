@@ -42,18 +42,17 @@ struct MainView: View {
         } else {
             switch cloudKit.iCloudStatus {
             case .available:
-                if cloudKit.isAuthenticated {
+                let isLocallyAuthenticated = userDefaults.string(forKey: userIdUserDefaultsKey) != nil
+                
+                if cloudKit.isAuthenticated || isLocallyAuthenticated {
                     BaseView()
-                } else {
-                    let isAuthenticated = userDefaults.string(forKey: userIdUserDefaultsKey)
-                    if let isAuthenticated, !isAuthenticated.isEmpty {
-                        BaseView()
-                            .onAppear {
+                        .onAppear {
+                            if !cloudKit.isAuthenticated {
                                 cloudKit.isAuthenticated = true
                             }
-                    } else {
-                        LoginView()
-                    }
+                        }
+                } else {
+                    LoginView()
                 }
             case .noAccount:
                 ICloudErrorView(message: "Please sign in to iCloud in Settings")

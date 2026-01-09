@@ -37,8 +37,9 @@ struct ChatRoomView: View {
                 showImagePicker: $showImagePicker,
                 isShowingAttachmentMenu: $isShowingAttachmentMenu,
                 onSendMessage: {
-                    await viewModel.sendMessage(messageText)
+                    let textToSend = messageText
                     messageText = ""
+                    await viewModel.sendMessage(textToSend)
                 },
                 onTakePhoto: {
                     isShowingAttachmentMenu = false

@@ -12,10 +12,20 @@ class NavigationStateManager: ObservableObject {
 
     @Published var currentScreen: Screen = .home
     @Published var currentRoomId: String? = nil  // Track active chatroom for notification suppression
+    @Published var path = NavigationPath()
 
     private init() {}
 
+    func navigateToRoom(id: String) {
+        NotificationCenter.default.post(
+            name: NSNotification.Name("OpenChatRoom"),
+            object: nil,
+            userInfo: ["roomId": id]
+        )
+    }
+
     var shouldShowFloatingMenu: Bool {
-        currentScreen == .home || currentScreen == .feedView || currentScreen == .settings
+        // Only show if we are on root View and not deep in navigation
+        return (currentScreen == .home || currentScreen == .feedView || currentScreen == .settings) && path.isEmpty
     }
 }

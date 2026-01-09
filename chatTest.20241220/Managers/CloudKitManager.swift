@@ -108,66 +108,82 @@ class CloudKitManager: ObservableObject {
     func initialize() async {
         Logger.info("Starting CloudKit initialization...", category: .cloudKit)
 
-        do {
-            // 1. Check iCloud availability
-            let accountStatus = try await container.accountStatus()
-
-            switch accountStatus {
-            case .available:
-                Logger.info("iCloud is available", category: .cloudKit)
-                iCloudStatus = .available
-
-                // 🧪 DEBUG: Uncomment to reset schema version to v1 for testing
-                #if DEBUG
-//                do {
-//                    try await MigrationDebugHelper.resetSchemaVersionToV1(database: database)
-//                    Logger.info("🧪 DEBUG: Schema reset to v1", category: .cloudKit)
-//                } catch {
-//                    Logger.error("🧪 DEBUG: Failed to reset schema: \(error)", category: .cloudKit)
-//                }
-                #endif
-
-                // Run schema migrations if needed (only once per app session)
-                if !hasAttemptedMigration {
-                    hasAttemptedMigration = true
-                    do {
-                        try await updateSchemaIfNeeded()
-                    } catch {
-                        Logger.error("Schema migration failed: \(error)", category: .cloudKit)
-                        // Don't fail initialization, just log the error
-                    }
-                } else {
-                    Logger.info("⏭️ Skipping migration - already attempted in this session", category: .cloudKit)
-                }
-
-            case .noAccount:
-                Logger.info("No iCloud account", category: .cloudKit)
-                iCloudStatus = .noAccount
-
-            case .restricted:
-                Logger.error(CloudKitError.permissionDenied, category: .cloudKit)
-                iCloudStatus = .restricted
-
-            case .couldNotDetermine:
-                Logger.error(CloudKitError.networkError, category: .cloudKit)
-                iCloudStatus = .noInternet
-
-            case .temporarilyUnavailable:
-                Logger.error(CloudKitError.networkError, category: .cloudKit)
-                iCloudStatus = .temporarilyUnavailable
-
-            @unknown default:
-                let error = CloudKitError.unknown(NSError())
-                Logger.error(error, category: .cloudKit)
-                iCloudStatus = .error(error)
-            }
-
-        } catch {
-            Logger.error(error, category: .cloudKit)
-            iCloudStatus = .error(error)
+        // FAST PATH: If we have a stored user ID, assume we are good to go for UI purposes
+        if userDefaults.string(forKey: userIdUserDefaultsKey) != nil {
+            Logger.info("⚡️ Fast Path: Local user found, unblocking UI immediateley", category: .cloudKit)
+            self.isAuthenticated = true
+            self.iCloudStatus = .available
+            self.isInitialized = true
+        } else {
+             // If no user, we must block to check status (otherwise LoginView won't know what to show)
+             // But we can still be optimistic
         }
 
-        isInitialized = true
+        // BACKGROUND CHECK: Verify status without blocking (unless we had no user)
+        let checkingTask = Task {
+            do {
+                // 1. Check iCloud availability
+                let accountStatus = try await container.accountStatus()
+
+                await MainActor.run {
+                    switch accountStatus {
+                    case .available:
+                        Logger.info("iCloud is available", category: .cloudKit)
+                        self.iCloudStatus = .available
+                        
+                        // Run schema migrations if needed (only once per app session)
+                        if !self.hasAttemptedMigration {
+                            self.hasAttemptedMigration = true
+                            Task {
+                                try? await self.updateSchemaIfNeeded()
+                            }
+                        } else {
+                            Logger.info("⏭️ Skipping migration - already attempted in this session", category: .cloudKit)
+                        }
+
+                    case .noAccount:
+                        Logger.info("No iCloud account", category: .cloudKit)
+                        self.iCloudStatus = .noAccount
+                        self.isAuthenticated = false 
+
+                    case .restricted:
+                        Logger.error(CloudKitError.permissionDenied, category: .cloudKit)
+                        self.iCloudStatus = .restricted
+                        self.isAuthenticated = false
+
+                    case .couldNotDetermine:
+                        Logger.error(CloudKitError.networkError, category: .cloudKit)
+                        self.iCloudStatus = .noInternet
+
+                    case .temporarilyUnavailable:
+                        Logger.error(CloudKitError.networkError, category: .cloudKit)
+                        self.iCloudStatus = .temporarilyUnavailable
+
+                    @unknown default:
+                        let error = CloudKitError.unknown(NSError())
+                        Logger.error(error, category: .cloudKit)
+                        self.iCloudStatus = .error(error)
+                    }
+                    
+                    // Finalize initialization if not already done via fast path
+                    if !self.isInitialized {
+                        self.isInitialized = true
+                    }
+                }
+
+            } catch {
+                Logger.error(error, category: .cloudKit)
+                await MainActor.run {
+                    self.iCloudStatus = .error(error)
+                    self.isInitialized = true
+                }
+            }
+        }
+        
+        // If we didn't take the fast path, await the check (so we don't flash empty UI)
+        if !self.isInitialized {
+            _ = await checkingTask.result
+        }
     }
 
     // MARK: - Authentication
@@ -293,16 +309,14 @@ class CloudKitManager: ObservableObject {
 
     func joinRoom(_ room: ChatRoom) async throws {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-        let record = room.toRecord()
-        var participants = room.participants
-        participants.append(userId)
-        record[ChatRoom.participantsKey] = participants
-
-        let savedRecord = try await database.modifyRecords(saving: [record], deleting: [])
-            .saveResults.first?.1.get()
-        guard savedRecord != nil else {
-            throw CloudKitError.operationFailed
+        var updatedRoom = room
+        if !updatedRoom.participants.contains(userId) {
+            updatedRoom.participants.append(userId)
         }
+        
+        let record = updatedRoom.toRecord()
+        _ = try await database.modifyRecords(saving: [record], deleting: [])
+            .saveResults.first?.1.get()
         
         // Automatically subscribe to notifications upon joining
         try? await subscribeToMessages(in: room.id)
@@ -310,16 +324,12 @@ class CloudKitManager: ObservableObject {
 
     func leaveRoom(_ room: ChatRoom) async throws {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-        let record = room.toRecord()
-        var participants = room.participants
-        participants.removeAll { $0 == userId }
-        record[ChatRoom.participantsKey] = participants
-
-        let savedRecord = try await database.modifyRecords(saving: [record], deleting: [])
+        var updatedRoom = room
+        updatedRoom.participants.removeAll { $0 == userId }
+        
+        let record = updatedRoom.toRecord()
+        _ = try await database.modifyRecords(saving: [record], deleting: [])
             .saveResults.first?.1.get()
-        guard savedRecord != nil else {
-            throw CloudKitError.operationFailed
-        }
         
         // Unsubscribe from notifications upon leaving
         try? await unsubscribeFromMessages(in: room.id)
@@ -393,23 +403,23 @@ class CloudKitManager: ObservableObject {
         )
 
         let notificationInfo = CKSubscription.NotificationInfo()
-
-        // Enable visible notifications with alert, sound, and badge
-        notificationInfo.alertBody = "New message"  // Will be replaced by service extension
+        
+        // Enable dynamic notifications with localization templates
+        // Template: "%1$@: %2$@" -> "Sender Name: Message Content"
+        notificationInfo.alertLocalizationKey = "%1$@: %2$@"
+        notificationInfo.alertLocalizationArgs = [ChatMessage.senderNameKey, ChatMessage.contentKey]
+        
         notificationInfo.shouldSendContentAvailable = true  // Background refresh
         notificationInfo.shouldBadge = true
         notificationInfo.soundName = "default"
-
-        // Include message fields in notification payload for custom formatting
+        
+        // Include minimal message fields in notification payload to avoid "limit exceeded" error
         notificationInfo.desiredKeys = [
-            ChatMessage.senderIdKey,
             ChatMessage.senderNameKey,
             ChatMessage.contentKey,
-            ChatMessage.typeKey,
-            ChatMessage.roomIdKey,
-            ChatMessage.timestampKey
+            ChatMessage.roomIdKey
         ]
-
+        
         subscription.notificationInfo = notificationInfo
 
         do {

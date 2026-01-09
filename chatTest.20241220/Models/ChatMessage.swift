@@ -9,6 +9,12 @@ enum MessageType: String, Codable {
     case audio
 }
 
+enum MessageStatus {
+    case pending
+    case sent
+    case error
+}
+
 struct ChatMessage: Identifiable, Equatable {
     let id: String
     let senderId: String
@@ -18,6 +24,7 @@ struct ChatMessage: Identifiable, Equatable {
     let timestamp: Date
     let roomId: String
     let assetURL: URL?
+    var status: MessageStatus
 
     // CloudKit record keys
     static let recordType = "ChatMessage"
@@ -38,7 +45,8 @@ struct ChatMessage: Identifiable, Equatable {
         type: MessageType,
         timestamp: Date = Date(),
         roomId: String,
-        assetURL: URL? = nil
+        assetURL: URL? = nil,
+        status: MessageStatus = .sent
     ) {
         self.id = id
         self.senderId = senderId
@@ -48,6 +56,7 @@ struct ChatMessage: Identifiable, Equatable {
         self.timestamp = timestamp
         self.roomId = roomId
         self.assetURL = assetURL
+        self.status = status
     }
 
     /// Initialize from CloudKit record
@@ -80,10 +89,14 @@ struct ChatMessage: Identifiable, Equatable {
         } else {
             self.assetURL = nil
         }
+        
+        self.status = .sent
     }
 
     func toRecord() -> CKRecord {
-        let record = CKRecord(recordType: ChatMessage.recordType)
+        let recordID = CKRecord.ID(recordName: id)
+        let record = CKRecord(recordType: ChatMessage.recordType, recordID: recordID)
+        
         record[ChatMessage.idKey] = id
         record[ChatMessage.senderIdKey] = senderId
         record[ChatMessage.senderNameKey] = senderName

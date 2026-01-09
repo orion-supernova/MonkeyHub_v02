@@ -11,6 +11,11 @@ import CloudKit
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     
+    // Deduplication tracker for CloudKit notifications
+    private var processedNotificationIDs = Set<String>()
+    private var processedRecordIDs = Set<String>()
+    private var lastCleanupDate = Date()
+    
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         registerForPushNotifications()
         return true
@@ -144,37 +149,52 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     /// Helper to broadcast chat message notifications to the active view models
     private func handleChatMessageNotification(userInfo: [AnyHashable: Any]) {
-        print("🔔 Received notification payload: \(userInfo)")
-        
         guard let cloudKitNotification = CKNotification(fromRemoteNotificationDictionary: userInfo) else {
-            print("⚠️ Not a CloudKit notification")
             return
         }
         
+        // Use notificationID to deduplicate multiple calls for the same event
+        if let id = cloudKitNotification.notificationID {
+            let notificationID = "\(id)"
+            if processedNotificationIDs.contains(notificationID) {
+                print("♻️ Skipping already processed notificationID: \(notificationID)")
+                return
+            }
+            processedNotificationIDs.insert(notificationID)
+            print("🆕 Processing new notificationID: \(notificationID)")
+            
+            // Periodically clean up old IDs (every 10 seconds)
+            if Date().timeIntervalSince(lastCleanupDate) > 10 {
+                processedNotificationIDs.removeAll()
+                processedRecordIDs.removeAll()
+                lastCleanupDate = Date()
+            }
+        }
+
         guard let queryNotification = cloudKitNotification as? CKQueryNotification else {
-            print("⚠️ Not a query notification (Type: \(cloudKitNotification.notificationType))")
             return
         }
         
+        // Secondary deduplication by Record ID (most reliable)
+        if let recordID = queryNotification.recordID?.recordName {
+            if processedRecordIDs.contains(recordID) {
+                print("♻️ Skipping already processed recordID: \(recordID)")
+                return
+            }
+            processedRecordIDs.insert(recordID)
+        }
+
         guard let recordFields = queryNotification.recordFields,
               let roomId = recordFields[ChatMessage.roomIdKey] as? String else {
-            print("⚠️ Missing roomId in notification fields. Available fields: \(queryNotification.recordFields ?? [:])")
+            print("⚠️ Missing roomId in notification fields")
             return
         }
 
-        print("🚀 Broadcasting internal update for room: \(roomId)")
+        print("🚀 Passing valid notification data to ChatRepository for room: \(roomId)")
         
-        // Pass the full record fields so ViewModel can update instantly
-        var messageData = recordFields
-        messageData["recordID"] = queryNotification.recordID?.recordName
-        
-        NotificationCenter.default.post(
-            name: NSNotification.Name("DidReceiveChatMessage"),
-            object: nil,
-            userInfo: [
-                "roomId": roomId,
-                "messageData": messageData
-            ]
-        )
+        // Pass the raw userInfo (validated by deduplication) to the Repository
+        Task { @MainActor in
+            ChatRepository.shared.handleIncomingNotification(userInfo)
+        }
     }
 }

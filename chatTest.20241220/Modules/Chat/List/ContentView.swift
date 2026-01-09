@@ -21,6 +21,7 @@ struct ContentView: View {
     @State private var isShowingJoinRoomSheet = false
     @State private var availableRooms: [ChatRoom] = []
     @State private var isShowingSearchView = false
+    @StateObject private var navigationState = NavigationStateManager.shared
 
     // MARK: - Room Operations
     private func loadData() async {
@@ -83,7 +84,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationState.path) {
             ZStack(alignment: .top) {
                 // Header background that covers status bar and header content
                 LinearGradient(
@@ -265,12 +266,7 @@ struct ContentView: View {
                                         // Rooms grid
                                         LazyVGrid(columns: gridColumns, spacing: 16) {
                                             ForEach(viewModel.myRooms) { room in
-                                                NavigationLink(
-                                                    destination: ChatRoomView(room: room)
-                                                        .onAppear {
-                                                            viewModel.clearUnread(for: room.id)
-                                                        }
-                                                ) {
+                                                NavigationLink(value: room) {
                                                     EnhancedRoomCard(room: room, unreadCount: viewModel.unreadCounts[room.id] ?? 0) {
                                                         Task {
 //                                                            await leaveRoom(room)
@@ -308,6 +304,19 @@ struct ContentView: View {
                             .offset(y: -40)  // Increased overlap with header
                             .padding(.top, 40)  // Adjusted padding to compensate
                         }
+                    }
+                }
+            }
+            .navigationDestination(for: ChatRoom.self) { room in
+                ChatRoomView(room: room)
+                    .onAppear {
+                        viewModel.clearUnread(for: room.id)
+                    }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenChatRoom"))) { notification in
+                if let roomId = notification.userInfo?["roomId"] as? String {
+                    if let room = viewModel.myRooms.first(where: { $0.id == roomId }) {
+                        navigationState.path.append(room)
                     }
                 }
             }

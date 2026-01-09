@@ -48,6 +48,24 @@ struct MessageView: View {
             }
 
             if !isCurrentUser { Spacer() }
+            
+            // Status Indicator (Only for current user)
+            if isCurrentUser {
+                switch message.status {
+                case .pending:
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 12, height: 12)
+                        .padding(.trailing, 4)
+                case .error:
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundColor(.red)
+                        .font(.caption)
+                        .padding(.trailing, 4)
+                case .sent:
+                    EmptyView()
+                }
+            }
         }
     }
 

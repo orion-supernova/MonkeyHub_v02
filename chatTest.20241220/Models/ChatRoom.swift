@@ -6,14 +6,14 @@ enum RoomType: String, Codable {
     case secret = "Chamber of Secrets"
 }
 
-struct ChatRoom: Identifiable {
+struct ChatRoom: Identifiable, Hashable, Codable {
     let id: String
     let name: String
     let createdBy: String
     let createdAt: Date
     var lastMessage: String?
     var lastMessageDate: Date?
-    let participants: [String]
+    var participants: [String]
     let description: String?
     let isPrivate: Bool?
     let type: RoomType
@@ -85,7 +85,9 @@ struct ChatRoom: Identifiable {
     }
 
     func toRecord() -> CKRecord {
-        let record = CKRecord(recordType: ChatRoom.recordType)
+        let recordID = CKRecord.ID(recordName: id)
+        let record = CKRecord(recordType: ChatRoom.recordType, recordID: recordID)
+        
         record[ChatRoom.idKey] = id
         record[ChatRoom.nameKey] = name
         record[ChatRoom.createdByKey] = createdBy
@@ -104,5 +106,14 @@ struct ChatRoom: Identifiable {
             record[ChatRoom.messageLifetimeKey] = messageLifetime
         }
         return record
+    }
+
+    // MARK: - Hashable
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: ChatRoom, rhs: ChatRoom) -> Bool {
+        lhs.id == rhs.id
     }
 }

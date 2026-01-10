@@ -25,6 +25,7 @@ class ChatRoomViewModel: ObservableObject {
         self.userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         
         setupBindings()
+        repository.setActiveRoom(roomId)
     }
     
     deinit {
@@ -39,6 +40,10 @@ class ChatRoomViewModel: ObservableObject {
         // Bind to Repository messages
         repository.$activeRoomMessages
             .receive(on: DispatchQueue.main)
+            .map { [roomId] messages in
+                // Only accept messages belonging to this room
+                messages.filter { $0.roomId == roomId }
+            }
             .assign(to: \.messages, on: self)
             .store(in: &cancellables)
     }
@@ -52,8 +57,6 @@ class ChatRoomViewModel: ObservableObject {
 
     func loadMessages() async {
         await loadUserData()
-        // Tell repo we are active in this room
-        repository.setActiveRoom(roomId)
         // Explicitly wait for fetch to ensure loading state remains true
         await repository.fetchMessages(for: roomId)
         try? await cloudKit.subscribeToMessages(in: roomId)

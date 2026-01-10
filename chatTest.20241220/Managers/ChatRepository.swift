@@ -19,7 +19,73 @@ class ChatRepository: ObservableObject {
     private let userIdUserDefaultsKey = "userId"
     private var activeRoomId: String?
     
-    private init() {}
+    private init() {
+        loadRoomsFromDisk()
+    }
+    
+    // MARK: - Persistence Helpers
+    
+    private func getDocumentsDirectory() -> URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+    
+    private func roomsFileURL() -> URL {
+        getDocumentsDirectory().appendingPathComponent("cached_rooms.json")
+    }
+    
+    private func messagesFileURL(for roomId: String) -> URL {
+        getDocumentsDirectory().appendingPathComponent("cached_messages_\(roomId).json")
+    }
+    
+    private func saveRoomsToDisk() {
+        Task {
+            do {
+                let data = try JSONEncoder().encode(rooms)
+                try data.write(to: roomsFileURL())
+                print("💾 ChatRepository: Saved \(rooms.count) rooms to disk")
+            } catch {
+                print("❌ ChatRepository: Failed to save rooms: \(error)")
+            }
+        }
+    }
+    
+    private func loadRoomsFromDisk() {
+        do {
+            let data = try Data(contentsOf: roomsFileURL())
+            let loadedRooms = try JSONDecoder().decode([ChatRoom].self, from: data)
+            self.rooms = loadedRooms
+            print("📂 ChatRepository: Loaded \(loadedRooms.count) rooms from disk")
+        } catch {
+            print("⚠️ ChatRepository: No cached rooms found or decode failed")
+        }
+    }
+    
+    private func saveMessagesToDisk(for roomId: String) {
+        Task {
+            do {
+                let data = try JSONEncoder().encode(activeRoomMessages)
+                try data.write(to: messagesFileURL(for: roomId))
+                print("💾 ChatRepository: Saved \(activeRoomMessages.count) messages for room \(roomId)")
+            } catch {
+                print("❌ ChatRepository: Failed to save messages: \(error)")
+            }
+        }
+    }
+    
+    private func loadMessagesFromDisk(for roomId: String) {
+        do {
+            let data = try Data(contentsOf: messagesFileURL(for: roomId))
+            let loadedMessages = try JSONDecoder().decode([ChatMessage].self, from: data)
+            // Verify we are still in the same room before updating
+            if activeRoomId == roomId {
+                self.activeRoomMessages = loadedMessages
+                print("📂 ChatRepository: Loaded \(loadedMessages.count) messages for room \(roomId)")
+            }
+        } catch {
+             print("⚠️ ChatRepository: No cached messages found for room \(roomId)")
+        }
+    }
+
     
     // MARK: - Room Management
     
@@ -27,6 +93,7 @@ class ChatRepository: ObservableObject {
         do {
             let fetchedRooms = try await cloudKit.fetchChatRooms()
             self.rooms = fetchedRooms
+            self.saveRoomsToDisk()
             print("✅ ChatRepository: Fetched \(fetchedRooms.count) rooms")
         } catch {
             print("❌ ChatRepository: Failed to fetch rooms: \(error)")
@@ -38,8 +105,8 @@ class ChatRepository: ObservableObject {
         if let roomId = roomId {
             // Check for unread marker clearing could go here
             unreadCounts[roomId] = 0
-            // Load messages for this room
-            Task { await fetchMessages(for: roomId) }
+            // Load cached messages immediately
+            loadMessagesFromDisk(for: roomId)
         } else {
             // Exiting a room
             self.activeRoomMessages = []
@@ -54,7 +121,22 @@ class ChatRepository: ObservableObject {
         do {
             let messages = try await cloudKit.fetchMessages(for: roomId)
             if self.activeRoomId == roomId {
-                 self.activeRoomMessages = messages
+                // Preserve pending messages
+                let pendingMessages = self.activeRoomMessages.filter { $0.status == .pending }
+                
+                // Merge: fetched messages + pending messages
+                // Start with fetched, then insert pending at the top
+                var mergedMessages = messages
+                
+                // Add pending messages that aren't already in the fetched list (by ID)
+                for pending in pendingMessages.reversed() { // Reverse to maintain order when inserting at 0
+                    if !mergedMessages.contains(where: { $0.id == pending.id }) {
+                        mergedMessages.insert(pending, at: 0)
+                    }
+                }
+                
+                self.activeRoomMessages = mergedMessages
+                self.saveMessagesToDisk(for: roomId)
             }
         } catch {
             print("❌ ChatRepository: Failed to fetch messages for room \(roomId): \(error)")
@@ -69,6 +151,7 @@ class ChatRepository: ObservableObject {
         if message.roomId == activeRoomId {
             withAnimation {
                 activeRoomMessages.insert(pendingMessage, at: 0)
+                saveMessagesToDisk(for: message.roomId)
             }
         }
         
@@ -80,6 +163,7 @@ class ChatRepository: ObservableObject {
             if let index = activeRoomMessages.firstIndex(where: { $0.id == message.id }) {
                 withAnimation {
                     activeRoomMessages[index].status = .sent
+                    saveMessagesToDisk(for: message.roomId)
                 }
             }
             
@@ -91,6 +175,7 @@ class ChatRepository: ObservableObject {
             if let index = activeRoomMessages.firstIndex(where: { $0.id == message.id }) {
                 withAnimation {
                     activeRoomMessages[index].status = .error
+                    saveMessagesToDisk(for: message.roomId)
                 }
             }
         }
@@ -124,6 +209,7 @@ class ChatRepository: ObservableObject {
                 // Move to top
                 let r = rooms.remove(at: index)
                 rooms.insert(r, at: 0)
+                saveRoomsToDisk()
             }
             
             // Increment unread count if not active room and not from me
@@ -156,6 +242,7 @@ class ChatRepository: ObservableObject {
                 // Avoid duplicates in the message list
                 if !activeRoomMessages.contains(where: { $0.id == recordID }) {
                      activeRoomMessages.insert(message, at: 0)
+                     saveMessagesToDisk(for: roomId)
                 }
             }
         }

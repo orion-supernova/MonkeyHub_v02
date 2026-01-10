@@ -13,8 +13,8 @@ struct MessagesListView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 8) {
-                    if isLoading {
+                VStack(spacing: 8) {
+                    if isLoading && viewModel.messages.isEmpty {
                         Spacer()
                         ProgressView("Loading messages...")
                             .padding()
@@ -28,9 +28,7 @@ struct MessagesListView: View {
                         .padding()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        ForEach(viewModel.messages.sorted(by: { $0.timestamp < $1.timestamp }))
-                        {
-                            message in
+                        ForEach(viewModel.messages.sorted(by: { $0.timestamp < $1.timestamp })) { message in
                             MessageView(
                                 message: message,
                                 onImageTapped: onImageTapped,
@@ -43,25 +41,30 @@ struct MessagesListView: View {
                             .padding(.horizontal)
                             .id(message.id)
                         }
+                        
+                        // Footer spacer for comfortable scrolling
+                        Color.clear
+                            .frame(height: 20)
+                            .id("bottomSpacer")
                     }
                 }
                 .padding(.vertical)
             }
+            .scrollDismissesKeyboard(.interactively) // Native keyboard handling
             .onAppear {
                 self.proxy = proxy
-                setupKeyboardObservers()
-                scrollToBottom(proxy)
-            }
-            .onDisappear {
-                removeKeyboardObservers()
+                scrollToBottom(proxy, animated: false)
             }
             .onChange(of: isLoading) { newValue in
                 if !newValue {
-                    scrollToBottom(proxy)
+                    scrollToBottom(proxy, animated: false)
                 }
             }
             .onChange(of: viewModel.messages) { newValue in
-                 scrollToBottom(proxy)
+                 scrollToBottom(proxy, animated: true)
+            }
+            .onChange(of: viewModel.messages.count) { _ in
+                 scrollToBottom(proxy, animated: true)
             }
         }
         .onTapGesture {
@@ -69,11 +72,13 @@ struct MessagesListView: View {
         }
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        guard let lastMessage = viewModel.messages.sorted(by: { $0.timestamp < $1.timestamp }).last else { return }
-
-        withAnimation(.spring(duration: 0.3)) {
-            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
+        if animated {
+            withAnimation(.spring(duration: 0.3)) {
+                proxy.scrollTo("bottomSpacer", anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo("bottomSpacer", anchor: .bottom)
         }
     }
 
@@ -84,22 +89,5 @@ struct MessagesListView: View {
             from: nil,
             for: nil
         )
-    }
-
-    private func setupKeyboardObservers() {
-        NotificationCenter.default.addObserver(
-            forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
-        ) { _ in
-            guard let proxy else { return }
-            // Small delay to allow keyboard height change to affect ScrollView
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                scrollToBottom(proxy)
-            }
-        }
-    }
-
-    private func removeKeyboardObservers() {
-        NotificationCenter.default.removeObserver(
-            self, name: UIResponder.keyboardWillShowNotification, object: nil)
     }
 }

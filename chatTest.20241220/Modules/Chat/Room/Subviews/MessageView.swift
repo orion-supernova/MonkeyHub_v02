@@ -50,7 +50,7 @@ struct MessageView: View {
             if !isCurrentUser { Spacer() }
             
             // Status Indicator (Only for current user)
-            if isCurrentUser {
+            if isCurrentUser && message.status != .sent {
                 switch message.status {
                 case .pending:
                     ProgressView()
@@ -62,7 +62,7 @@ struct MessageView: View {
                         .foregroundColor(.red)
                         .font(.caption)
                         .padding(.trailing, 4)
-                case .sent:
+                default:
                     EmptyView()
                 }
             }
@@ -86,7 +86,11 @@ struct MessageView: View {
                             onImageTapped(url)
                         }
                 } placeholder: {
-                    ProgressView()
+                    ZStack {
+                        Color.gray.opacity(0.1)
+                        ProgressView()
+                    }
+                    .frame(width: 200, height: 200)
                 }
                 .frame(maxWidth: 200, maxHeight: 200)
             }

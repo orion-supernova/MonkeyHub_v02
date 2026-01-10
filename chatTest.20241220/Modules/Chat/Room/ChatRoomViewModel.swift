@@ -53,6 +53,8 @@ class ChatRoomViewModel: ObservableObject {
         await loadUserData()
         // Tell repo we are active in this room
         repository.setActiveRoom(roomId)
+        // Explicitly wait for fetch to ensure loading state remains true
+        await repository.fetchMessages(for: roomId)
         try? await cloudKit.subscribeToMessages(in: roomId)
     }
 
@@ -68,79 +70,67 @@ class ChatRoomViewModel: ObservableObject {
     }
     
     // MARK: - Asset Sending
-    // Note: For now, we keep these direct or delegating to CloudKit. 
-    // Ideally, Repository would handle asset uploads too, but to keep the refactor focused on text sync first:
+    
+    private func saveTempImage(_ image: UIImage) -> URL? {
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileName = UUID().uuidString + ".jpg"
+        let fileURL = tempDir.appendingPathComponent(fileName)
+        
+        if let data = image.jpegData(compressionQuality: 0.7) {
+            do {
+                try data.write(to: fileURL)
+                return fileURL
+            } catch {
+                print("Error saving temp image: \(error)")
+                return nil
+            }
+        }
+        return nil
+    }
     
     func sendImage(_ image: UIImage) async {
-        do {
-            let fileURL = try await cloudKit.uploadAsset(
-                data: image.jpegData(compressionQuality: 0.7) ?? Data(),
-                fileExtension: "jpg")
-
-            let message = ChatMessage(
-                senderId: userId,
-                senderName: userName,
-                content: " Photo",
-                type: .image,
-                roomId: roomId,
-                assetURL: fileURL
-            )
-
-            await repository.sendMessage(message)
-        } catch {
-            print("Error sending image: \(error)")
-        }
+        guard let url = saveTempImage(image) else { return }
+        await sendImage(from: url)
     }
 
     func sendImage(from url: URL) async {
-        do {
-            let message = ChatMessage(
-                senderId: userId,
-                senderName: userName,
-                content: " Photo",
-                type: .image,
-                roomId: roomId,
-                assetURL: url
-            )
+        let message = ChatMessage(
+            senderId: userId,
+            senderName: userName,
+            content: " Photo",
+            type: .image,
+            roomId: roomId,
+            assetURL: url
+        )
 
-            await repository.sendMessage(message)
-        } catch {
-            print("Error sending image: \(error)")
-        }
+        // Repository will handle optimistic update (PENDING) -> CloudKit Upload -> Success (SENT)
+        await repository.sendMessage(message)
     }
 
     func sendVideo(_ url: URL) async {
-        do {
-            let message = ChatMessage(
-                senderId: userId,
-                senderName: userName,
-                content: " Video",
-                type: .video,
-                roomId: roomId,
-                assetURL: url
-            )
+        let message = ChatMessage(
+            senderId: userId,
+            senderName: userName,
+            content: " Video",
+            type: .video,
+            roomId: roomId,
+            assetURL: url
+        )
 
-            await repository.sendMessage(message)
-        } catch {
-            print("Error sending video: \(error)")
-        }
+        await repository.sendMessage(message)
     }
 
     func sendAudio(_ url: URL) async {
-        do {
-            let message = ChatMessage(
-                senderId: userId,
-                senderName: userName,
-                content: " Voice Message",
-                type: .audio,
-                roomId: roomId,
-                assetURL: url
-            )
+        let message = ChatMessage(
+            senderId: userId,
+            senderName: userName,
+            content: " Voice Message",
+            type: .audio,
+            roomId: roomId,
+            assetURL: url
+        )
 
-            await repository.sendMessage(message)
-        } catch {
-            print("Error sending audio: \(error)")
-        }
+        await repository.sendMessage(message)
     }
 
     func deleteMessage(_ messageId: String) async {

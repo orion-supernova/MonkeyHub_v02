@@ -9,13 +9,13 @@ enum MessageType: String, Codable {
     case audio
 }
 
-enum MessageStatus {
+enum MessageStatus: String, Codable {
     case pending
     case sent
     case error
 }
 
-struct ChatMessage: Identifiable, Equatable {
+struct ChatMessage: Identifiable, Equatable, Codable {
     let id: String
     let senderId: String
     let senderName: String

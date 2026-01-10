@@ -214,33 +214,45 @@ struct ContentView: View {
                             // Rooms list
                             LazyVStack(spacing: 16) {
                                 if viewModel.myRooms.isEmpty {
-                                    VStack(spacing: 16) {
-                                        Image(systemName: "bubble.left.circle.fill")
-                                            .font(.system(size: 60))
-                                            .foregroundStyle(
-                                                LinearGradient(
-                                                    colors: selectedTheme.colors(for: colorScheme)
-                                                        .primary,
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
+                                    if viewModel.isLoading {
+                                        VStack(spacing: 16) {
+                                            ProgressView()
+                                                .scaleEffect(1.5)
+                                            Text("Loading Rooms...")
+                                                .font(.subheadline)
+                                                .foregroundStyle(.gray)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(40)
+                                    } else {
+                                        VStack(spacing: 16) {
+                                            Image(systemName: "bubble.left.circle.fill")
+                                                .font(.system(size: 60))
+                                                .foregroundStyle(
+                                                    LinearGradient(
+                                                        colors: selectedTheme.colors(for: colorScheme)
+                                                            .primary,
+                                                        startPoint: .topLeading,
+                                                        endPoint: .bottomTrailing
+                                                    )
                                                 )
-                                            )
-                                            .padding(.bottom, 8)
+                                                .padding(.bottom, 8)
 
-                                        Text("No Active Rooms")
-                                            .font(.title2.bold())
-                                            .foregroundStyle(
-                                                selectedTheme.colors(for: colorScheme).textPrimary)
+                                            Text("No Active Rooms")
+                                                .font(.title2.bold())
+                                                .foregroundStyle(
+                                                    selectedTheme.colors(for: colorScheme).textPrimary)
 
-                                        Text("Create a new room to start chatting")
-                                            .font(.subheadline)
-                                            .foregroundStyle(
-                                                selectedTheme.colors(for: colorScheme).textSecondary
-                                            )
-                                            .multilineTextAlignment(.center)
+                                            Text("Create a new room to start chatting")
+                                                .font(.subheadline)
+                                                .foregroundStyle(
+                                                    selectedTheme.colors(for: colorScheme).textSecondary
+                                                )
+                                                .multilineTextAlignment(.center)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(40)
                                     }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(40)
                                 } else {
                                     VStack(spacing: 24) {
                                         // Section header

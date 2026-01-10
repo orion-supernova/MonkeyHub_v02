@@ -6,6 +6,7 @@ import Combine
 class ChatListViewModel: ObservableObject {
     @Published var myRooms: [ChatRoom] = []
     @Published var unreadCounts: [String: Int] = [:]
+    @Published var isLoading = false
     
     private let repository = ChatRepository.shared
     private var cancellables = Set<AnyCancellable>()
@@ -34,7 +35,9 @@ class ChatListViewModel: ObservableObject {
     }
     
     func loadRooms() async {
+        isLoading = true
         await repository.fetchRooms()
+        isLoading = false
     }
     
     func clearUnread(for roomId: String) {

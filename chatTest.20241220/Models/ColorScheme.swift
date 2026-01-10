@@ -15,12 +15,12 @@ enum AppTheme: String, CaseIterable {
                 secondary: [Color(hex: "007AFF").opacity(0.2), Color(hex: "007AFF").opacity(0.1)],
                 accent: Color(hex: "007AFF"),
                 text: .white,
-                background: scheme == .dark ? Color(.systemBackground) : .white,
+                background: scheme == .dark ? .platformBackground : .white,
                 cardBackground: scheme == .dark
-                    ? Color(.secondarySystemGroupedBackground) : Color(.systemGray6),
+                    ? .secondarySystemGroupedBackground : .systemGray6,
                 destructive: Color(hex: "FF3B30"),
-                textPrimary: scheme == .dark ? .white : Color(.label),
-                textSecondary: scheme == .dark ? Color(.secondaryLabel) : Color(.secondaryLabel),
+                textPrimary: scheme == .dark ? .white : .platformLabel,
+                textSecondary: .platformSecondaryLabel,
                 headerBackground: [Color(hex: "007AFF"), Color(hex: "2B95FF")],
                 headerOverlay: Color.white.opacity(0.1)
             )
@@ -111,6 +111,46 @@ struct ThemeColors {
 }
 
 extension Color {
+    static var platformBackground: Color {
+        #if canImport(UIKit)
+        return Color(UIColor.systemBackground)
+        #else
+        return Color(NSColor.windowBackgroundColor)
+        #endif
+    }
+
+    static var secondarySystemGroupedBackground: Color {
+        #if canImport(UIKit)
+        return Color(UIColor.secondarySystemGroupedBackground)
+        #else
+        return Color(NSColor.controlBackgroundColor)
+        #endif
+    }
+
+    static var systemGray6: Color {
+        #if canImport(UIKit)
+        return Color(UIColor.systemGray6)
+        #else
+        return Color(NSColor.controlBackgroundColor).opacity(0.8)
+        #endif
+    }
+
+    static var platformLabel: Color {
+        #if canImport(UIKit)
+        return Color(UIColor.label)
+        #else
+        return Color(NSColor.labelColor)
+        #endif
+    }
+
+    static var platformSecondaryLabel: Color {
+        #if canImport(UIKit)
+        return Color(UIColor.secondaryLabel)
+        #else
+        return Color(NSColor.secondaryLabelColor)
+        #endif
+    }
+
     init(hex: String) {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0

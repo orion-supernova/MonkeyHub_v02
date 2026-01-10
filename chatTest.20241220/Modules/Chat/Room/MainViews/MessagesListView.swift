@@ -46,13 +46,17 @@ struct MessagesListView: View {
             .padding(.vertical)
         }
         .rotationEffect(.degrees(180)) // Flip the entire scroll view
-        .background(Color(uiColor: .systemBackground))
+
+        .background(Color.primary.colorInvert()) // Simple platform-agnostic alternative to systemBackground
         .scrollDismissesKeyboard(.interactively)
         .onTapGesture {
+            #if canImport(UIKit)
             hideKeyboard()
+            #endif
         }
     }
 
+    #if canImport(UIKit)
     private func hideKeyboard() {
         UIApplication.shared.sendAction(
             #selector(UIResponder.resignFirstResponder),
@@ -61,9 +65,11 @@ struct MessagesListView: View {
             for: nil
         )
     }
+    #endif
 }
 
 // MARK: - Keyboard Height Publisher
+#if canImport(UIKit)
 extension Publishers {
     static var keyboardHeight: AnyPublisher<CGFloat, Never> {
         let willShow = NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
@@ -78,4 +84,5 @@ extension Publishers {
             .eraseToAnyPublisher()
     }
 }
+#endif
 

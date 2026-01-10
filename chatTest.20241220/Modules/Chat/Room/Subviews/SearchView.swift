@@ -34,14 +34,25 @@ struct SearchView: View {
             }
             .background(selectedTheme.colors(for: colorScheme).background)
             .navigationTitle("Search")
+            #if canImport(UIKit)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
+                #if canImport(UIKit)
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
                         dismiss()
                     }
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
                 }
+                #else
+                ToolbarItem(placement: .automatic) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                }
+                #endif
             }
         }
     }

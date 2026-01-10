@@ -81,7 +81,9 @@ class LoginViewModel: ObservableObject {
         email: String
     ) async throws {
         do {
+            Logger.info("Creating new user: \(name) (\(email))", category: .auth)
             let iCloudId = try await cloudKit.container.userRecordID()
+            Logger.info("Fetched iCloud ID: \(iCloudId.recordName)", category: .auth)
 
             let newUser = ChatUser(
                 id: iCloudId.recordName,
@@ -91,8 +93,13 @@ class LoginViewModel: ObservableObject {
 
             do {
                 try await cloudKit.database.save(newUser.toRecord())
+                Logger.info("CloudKit save successful for user \(iCloudId.recordName)", category: .cloudKit)
             } catch let error {
-                Logger.error(error.localizedDescription, category: .cloudKit)
+                Logger.error("CloudKit Save Error: \(error.localizedDescription)", category: .cloudKit)
+                // If the error contains specific info about why it failed
+                if let ckError = error as? CKError {
+                    Logger.error("CKError Code: \(ckError.code.rawValue)", category: .cloudKit)
+                }
                 throw CloudKitError.custom(error.localizedDescription)
             }
 
@@ -105,7 +112,7 @@ class LoginViewModel: ObservableObject {
 
             Logger.info("User created successfully", category: .auth)
         } catch let error {
-            Logger.error("Failed to create user: \(error)", category: .auth)
+            Logger.error("CRITICAL: Failed to create user: \(error)", category: .auth)
             throw AuthError.userCreationFailed
         }
     }

@@ -208,9 +208,15 @@ struct ICloudErrorView: View {
     }
 
     private func openSettings() {
+        #if canImport(UIKit)
         if let settingsUrl = URL(string: "App-prefs:") {
             UIApplication.shared.open(settingsUrl)
         }
+        #elseif canImport(AppKit)
+        if let settingsUrl = URL(string: "x-apple.systempreferences:com.apple.preferences.icloud") {
+            NSWorkspace.shared.open(settingsUrl)
+        }
+        #endif
     }
 }
 

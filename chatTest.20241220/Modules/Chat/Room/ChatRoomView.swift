@@ -6,7 +6,7 @@ struct ChatRoomView: View {
     @StateObject private var viewModel: ChatRoomViewModel
     @State private var messageText = ""
     @State private var showImagePicker = false
-    @State private var selectedImage: UIImage?
+    @State private var selectedImage: PlatformImage?
     @State private var isShowingAttachmentOptions = false
     @StateObject private var navigationState = NavigationStateManager.shared
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
@@ -56,12 +56,12 @@ struct ChatRoomView: View {
                     }
                 )
             }
-            .background(Color(uiColor: .systemBackground))
+            .background(Color.platformBackground)
 
             if isLoading && viewModel.messages.isEmpty {
                 ProgressView("Loading messages...")
                     .padding()
-                    .background(Color(uiColor: .secondarySystemBackground))
+                    .background(Color.secondarySystemGroupedBackground)
                     .cornerRadius(10)
             } else if viewModel.messages.isEmpty {
                 ContentUnavailableView(
@@ -73,11 +73,23 @@ struct ChatRoomView: View {
         }
         .navigationTitle(room.name)
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItem(placement: {
+                #if canImport(UIKit)
+                return .navigationBarTrailing
+                #else
+                return .automatic
+                #endif
+            }()) {
                 Button("Token") {
                     let token = getDeviceToken()
                     print("Device Token: \(token)")
+                    
+                    #if canImport(UIKit)
                     UIPasteboard.general.string = token  // Copy to clipboard
+                    #elseif canImport(AppKit)
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(token, forType: .string)
+                    #endif
 
                     // Optional: Show an alert that token was copied
                     let alertMessage =
@@ -103,11 +115,14 @@ struct ChatRoomView: View {
             navigationState.currentScreen = .home
             navigationState.currentRoomId = nil  // Clear active room
         }
+        #if canImport(UIKit)
         .fullScreenCover(isPresented: $showCamera) {
             CameraEditorView(isPresented: $showCamera) { image in
                 Task {
                     isShowingAttachmentMenu = false
-                    await viewModel.sendImage(image)
+                    if let platformImage = image as? PlatformImage {
+                        await viewModel.sendImage(platformImage)
+                    }
                 }
             }
         }
@@ -119,6 +134,22 @@ struct ChatRoomView: View {
                 }
             }
         }
+        #else
+        .sheet(isPresented: $showCamera) {
+            CameraEditorView(isPresented: $showCamera) { image in
+                Task {
+                    isShowingAttachmentMenu = false
+                }
+            }
+        }
+        .sheet(isPresented: $showVoiceRecorder) {
+            VoiceRecorderView(isPresented: $showVoiceRecorder) { url in
+                Task {
+                    isShowingAttachmentMenu = false
+                }
+            }
+        }
+        #endif
         .onChange(of: selectedImage) { newImage in
             if let image = newImage {
                 Task {
@@ -128,9 +159,15 @@ struct ChatRoomView: View {
                 }
             }
         }
+        #if canImport(UIKit)
         .fullScreenCover(item: $selectedImageUrl) { url in
             FullscreenImageView(url: url)
         }
+        #else
+        .sheet(item: $selectedImageUrl) { url in
+            FullscreenImageView(url: url)
+        }
+        #endif
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(image: $selectedImage)
         }

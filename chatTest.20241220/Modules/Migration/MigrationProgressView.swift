@@ -42,7 +42,7 @@ struct MigrationProgressView: View {
             .padding(32)
             .background(
                 RoundedRectangle(cornerRadius: 20)
-                    .fill(colorScheme == .dark ? Color(.systemGray6) : Color.white)
+                    .fill(colorScheme == .dark ? Color.systemGray6 : Color.white)
                     .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
             )
             .padding(.horizontal, 40)

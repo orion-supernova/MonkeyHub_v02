@@ -44,7 +44,7 @@ struct MessageInputView: View {
             .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding()
-        .background(Color(uiColor: .systemBackground))
+        .background(Color.platformBackground)
         .overlay(
             Divider(),
             alignment: .top

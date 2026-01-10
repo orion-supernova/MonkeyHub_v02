@@ -14,13 +14,9 @@ struct SettingsView: View {
     @State private var editingUsername = ""
     @State private var editingEmail = ""
     @State private var isImagePickerPresented = false
-    @State private var selectedImage: UIImage?
+    @State private var selectedImage: PlatformImage?
     @StateObject private var navigationState = NavigationStateManager.shared
 
-    private var headerHeight: CGFloat {
-        let screenHeight = UIScreen.main.bounds.height
-        return screenHeight * 0.4  // 40% of screen height
-    }
 
     private func signOut() async {
         userDefaults.set(nil, forKey: userIdUserDefaultsKey)
@@ -87,10 +83,10 @@ struct SettingsView: View {
             // Profile Picture with edit button
             ZStack {
                 if let selectedImage = selectedImage {
-                    Image(uiImage: selectedImage)
+                    Image(platformImage: selectedImage)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 100, height: 100)
+                        .frame(width: 80, height: 80)
                         .clipShape(Circle())
                         .shadow(
                             color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
@@ -100,9 +96,9 @@ struct SettingsView: View {
                 } else if let avatarAsset = currentUser?.avatarAsset,
                     let avatarUrl = avatarAsset.fileURL,
                     let imageData = try? Data(contentsOf: avatarUrl),
-                    let image = UIImage(data: imageData)
+                    let image = PlatformImage.fromData(imageData)
                 {
-                    Image(uiImage: image)
+                    Image(platformImage: image)
                         .resizable()
                         .scaledToFill()
                         .frame(width: 100, height: 100)
@@ -309,65 +305,69 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .top) {
-                // Header background
-                LinearGradient(
-                    colors: selectedTheme.colors(for: colorScheme).headerBackground,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
-                .frame(height: headerHeight)
+            GeometryReader { geometry in
+                ZStack(alignment: .top) {
+                    let headerHeight = geometry.size.height * 0.4
+                    
+                    // Header background
+                    LinearGradient(
+                        colors: selectedTheme.colors(for: colorScheme).headerBackground,
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .ignoresSafeArea()
+                    .frame(height: headerHeight)
 
-                ScrollView {
-                    VStack(spacing: 0) {
-                        // Profile Section
-                        profileSection
-                            .padding(.top, 40)
-                            .padding(.bottom, 32)
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            // Profile Section
+                            profileSection
+                                .padding(.top, 40)
+                                .padding(.bottom, 32)
 
-                        // Settings Sections
-                        VStack(spacing: 24) {
-                            themeSection
-                            accountSection
-                        }
-                        .padding(.horizontal, 16)
-                        .background(
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 32)
-                                    .fill(selectedTheme.colors(for: colorScheme).background)
-                                    .shadow(
-                                        color: selectedTheme.colors(for: colorScheme).primary[0]
-                                            .opacity(0.2),
-                                        radius: 32,
-                                        y: -16
-                                    )
-
-                                VStack(spacing: 0) {
-                                    LinearGradient(
-                                        colors: [
-                                            selectedTheme.colors(for: colorScheme).background,
-                                            selectedTheme.colors(for: colorScheme).background
-                                                .opacity(0),
-                                        ],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                    .frame(height: 40)
-                                    .offset(y: -20)
-
-                                    Rectangle()
-                                        .fill(selectedTheme.colors(for: colorScheme).background)
-                                }
-                                .mask(RoundedRectangle(cornerRadius: 32))
+                            // Settings Sections
+                            VStack(spacing: 24) {
+                                themeSection
+                                accountSection
                             }
-                        )
-                        .mask(RoundedRectangle(cornerRadius: 32))
-                        .offset(y: -60)
-                        .padding(.top, 60)
+                            .padding(.horizontal, 16)
+                            .background(
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 32)
+                                        .fill(selectedTheme.colors(for: colorScheme).background)
+                                        .shadow(
+                                            color: selectedTheme.colors(for: colorScheme).primary[0]
+                                                .opacity(0.2),
+                                            radius: 32,
+                                            y: -16
+                                        )
+
+                                    VStack(spacing: 0) {
+                                        LinearGradient(
+                                            colors: [
+                                                selectedTheme.colors(for: colorScheme).background,
+                                                selectedTheme.colors(for: colorScheme).background
+                                                    .opacity(0),
+                                            ],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                        .frame(height: 40)
+                                        .offset(y: -20)
+
+                                        Rectangle()
+                                            .fill(selectedTheme.colors(for: colorScheme).background)
+                                    }
+                                    .mask(RoundedRectangle(cornerRadius: 32))
+                                }
+                            )
+                            .mask(RoundedRectangle(cornerRadius: 32))
+                            .offset(y: -60)
+                            .padding(.top, 60)
+                        }
                     }
+                    .scrollIndicators(.hidden)
                 }
-                .scrollIndicators(.hidden)
             }
             .background(selectedTheme.colors(for: colorScheme).background)
             .alert("Sign Out", isPresented: $showingSignOutAlert) {
@@ -722,10 +722,14 @@ private struct ProfileTextField: View {
 
             TextField(title, text: $text)
                 .textFieldStyle(.plain)
+                #if canImport(UIKit)
                 .textInputAutocapitalization(.never)
+                #endif
                 .autocorrectionDisabled()
+                #if canImport(UIKit)
                 .autocapitalization(.none)
                 .keyboardType(icon == "at" || icon == "envelope.fill" ? .emailAddress : .default)
+                #endif
         }
         .padding()
         .background(

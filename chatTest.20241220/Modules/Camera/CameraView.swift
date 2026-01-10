@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 
+#if canImport(UIKit)
 struct CameraView: UIViewControllerRepresentable {
     @Binding var isPresented: Bool
     var onMediaCaptured: (URL, Bool) -> Void
@@ -50,3 +51,17 @@ struct CameraView: UIViewControllerRepresentable {
         }
     }
 }
+#else
+struct CameraView: View {
+    @Binding var isPresented: Bool
+    var onMediaCaptured: (URL, Bool) -> Void
+
+    var body: some View {
+        VStack {
+            Text("Camera is not available on native macOS.")
+            Button("Close") { isPresented = false }
+        }
+        .padding()
+    }
+}
+#endif

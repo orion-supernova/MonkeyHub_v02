@@ -14,21 +14,23 @@ struct CustomBottomSheet<Content: View>: View {
     }
 
     var body: some View {
-        VStack {
-            Spacer()
+        GeometryReader { geometry in
             VStack {
-                Capsule()
-                    .frame(width: 40, height: 6)
-                    .foregroundColor(.gray)
-                    .padding(.top, 8)
+                Spacer()
+                VStack {
+                    Capsule()
+                        .frame(width: 40, height: 6)
+                        .foregroundColor(.gray)
+                        .padding(.top, 8)
 
-                content
+                    content
+                }
+                .frame(maxWidth: .infinity)
+                .background(background)
+                .cornerRadius(cornerRadius)
+                .offset(y: isPresented ? 0 : geometry.size.height)
+                .animation(.spring(), value: isPresented)
             }
-            .frame(maxWidth: .infinity)
-            .background(background)
-            .cornerRadius(cornerRadius)
-            .offset(y: isPresented ? 0 : UIScreen.main.bounds.height)
-            .animation(.spring(), value: isPresented)
         }
         .ignoresSafeArea()
         .background(

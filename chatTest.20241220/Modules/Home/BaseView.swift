@@ -1,5 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit  // For UIImpactFeedbackGenerator
+#endif
 
 struct BaseView: View {
     @State private var selectedTab: Tab = .chat
@@ -91,8 +93,10 @@ struct FloatingMenu: View {
                 }
 
                 // Haptic feedback
+                #if canImport(UIKit)
                 let generator = UIImpactFeedbackGenerator(style: .medium)
                 generator.impactOccurred()
+                #endif
             } label: {
                 ZStack {
                     Circle()

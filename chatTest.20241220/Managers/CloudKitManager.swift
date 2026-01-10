@@ -1,6 +1,7 @@
 import AuthenticationServices
-import CloudKit
 import SwiftUI
+import CloudKit
+import Combine
 
 #if canImport(UIKit)
 import UIKit
@@ -769,21 +770,21 @@ class CloudKitManager: ObservableObject {
         }
     }
 
-    private func createAsset(from image: UIImage) throws -> CKAsset {
-        guard let imageData = image.jpegData(compressionQuality: 0.7) else {
-            throw CloudKitError.custom("Failed to compress image")
+    private func createAsset(from image: PlatformImage) throws -> CKAsset {
+        guard let data = image.toData() else {
+            throw CloudKitError.operationFailed
         }
 
         let tempDirectory = FileManager.default.temporaryDirectory
         let fileName = UUID().uuidString + ".jpg"
         let fileURL = tempDirectory.appendingPathComponent(fileName)
 
-        try imageData.write(to: fileURL)
+        try data.write(to: fileURL)
 
         return CKAsset(fileURL: fileURL)
     }
 
-    func updateUserProfilePicture(_ user: ChatUser, image: UIImage?) async throws {
+    func updateUserProfilePicture(_ user: ChatUser, image: PlatformImage?) async throws {
         let predicate = NSPredicate(format: "%K == %@", ChatUser.CodingKeys.id.rawValue, user.id)
         let query = CKQuery(recordType: ChatUser.recordType, predicate: predicate)
 

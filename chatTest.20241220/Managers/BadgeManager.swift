@@ -1,6 +1,8 @@
 import Foundation
 import UserNotifications
+#if canImport(UIKit)
 import UIKit
+#endif
 
 /// Manages the application icon badge count.
 /// Following SOLID principles: Single Responsibility for OS-level badge updates.

@@ -5,17 +5,26 @@
 //  Created by muratcankoc on 19/04/2025.
 //
 
+#if canImport(UIKit)
 import UIKit
+#endif
 import UserNotifications
 import CloudKit
 
-class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+#if canImport(UIKit)
+typealias BaseAppDelegate = UIApplicationDelegate
+#else
+protocol BaseAppDelegate {}
+#endif
+
+class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
     
     // Deduplication tracker for CloudKit notifications
     private var processedNotificationIDs = Set<String>()
     private var processedRecordIDs = Set<String>()
     private var lastCleanupDate = Date()
     
+    #if canImport(UIKit)
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         registerForPushNotifications()
         return true
@@ -51,8 +60,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         print("Failed to register for notifications: \(error.localizedDescription)")
     }
+    #endif
 
     // MARK: - UNUserNotificationCenterDelegate
+    // Note: This delegate is cross-platform (supported on macOS)
 
     /// Handle notification when app is in FOREGROUND
     func userNotificationCenter(
@@ -72,7 +83,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             print("Notification suppressed - user in active chatroom")
         } else {
             // Show banner and play sound
+            #if canImport(UIKit)
             completionHandler([.banner, .sound, .badge])
+            #else
+            completionHandler([.banner, .sound, .badge]) // Also works on macOS
+            #endif
             print("Notification presented in foreground")
         }
     }
@@ -126,7 +141,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         )
     }
 
-    /// Handle background notifications
+    #if canImport(UIKit)
+    /// Handle background notifications (iOS specific)
     func application(
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
@@ -146,8 +162,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         completionHandler(.noData)
     }
+    #endif
 
-    /// Helper to broadcast chat message notifications to the active view models
+    /// Helper (Cross-platform)
     private func handleChatMessageNotification(userInfo: [AnyHashable: Any]) {
         guard let cloudKitNotification = CKNotification(fromRemoteNotificationDictionary: userInfo) else {
             return

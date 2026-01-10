@@ -26,8 +26,11 @@ struct ThemeSelectionSheet: View {
                 .padding(24)
             }
             .navigationTitle("Select Theme")
+            #if canImport(UIKit)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
+                #if canImport(UIKit)
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         withAnimation {
@@ -40,6 +43,20 @@ struct ThemeSelectionSheet: View {
                             .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
                     }
                 }
+                #else
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        withAnimation {
+                            isShowingSheet = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                    }
+                }
+                #endif
             }
         }
         .onAppear {

@@ -12,17 +12,24 @@ import SwiftUI
 struct chatTest_20241220App: App {
     @StateObject private var cloudKit = CloudKitManager.shared
     
+    #if canImport(UIKit)
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    #endif
+
+    private var activeNotification: Notification.Name {
+        #if canImport(UIKit)
+        return UIApplication.didBecomeActiveNotification
+        #else
+        return NSApplication.didBecomeActiveNotification
+        #endif
+    }
     
     var body: some Scene {
         WindowGroup {
             // The view that checks for iCloud status and shows different views
             MainView()
                 .environmentObject(cloudKit)
-                .onReceive(
-                    NotificationCenter.default.publisher(
-                        for: UIApplication.didBecomeActiveNotification)
-                ) { _ in
+                .onReceive(NotificationCenter.default.publisher(for: activeNotification)) { _ in
                     // Trigger the initialization of CloudKit whenever the app becomes active
                     Task {
                         await cloudKit.initialize()

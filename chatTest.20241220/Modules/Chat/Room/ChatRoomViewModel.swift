@@ -84,7 +84,7 @@ class ChatRoomViewModel: ObservableObject {
     
     // MARK: - Asset Sending
     
-    private func saveTempImage(_ image: UIImage) -> URL? {
+    private func saveTempImage(_ image: PlatformImage) -> URL? {
         let fileManager = FileManager.default
         let paths = fileManager.urls(for: .documentDirectory, in: .userDomainMask)
         let assetsDir = paths[0].appendingPathComponent("ChatAssets", isDirectory: true)
@@ -96,7 +96,7 @@ class ChatRoomViewModel: ObservableObject {
         let fileName = UUID().uuidString + ".jpg"
         let fileURL = assetsDir.appendingPathComponent(fileName)
         
-        if let data = image.jpegData(compressionQuality: 0.7) {
+        if let data = image.toData() {
             do {
                 try data.write(to: fileURL)
                 return fileURL
@@ -108,7 +108,7 @@ class ChatRoomViewModel: ObservableObject {
         return nil
     }
     
-    func sendImage(_ image: UIImage) async {
+    func sendImage(_ image: PlatformImage) async {
         guard let url = saveTempImage(image) else { return }
         await sendImage(from: url)
     }

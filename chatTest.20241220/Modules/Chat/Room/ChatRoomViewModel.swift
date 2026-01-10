@@ -5,6 +5,7 @@ import Combine
 @MainActor
 class ChatRoomViewModel: ObservableObject {
     @Published private(set) var messages: [ChatMessage] = []
+    @Published private(set) var isFetchingOlderMessages = false
     
     // Dependencies
     private let repository = ChatRepository.shared
@@ -30,10 +31,10 @@ class ChatRoomViewModel: ObservableObject {
         print("💀 ChatRoomViewModel deinit (\(roomId))")
         // Notify repo that we are leaving
         Task { @MainActor in
-            repository.setActiveRoom(nil)
+            ChatRepository.shared.setActiveRoom(nil)
         }
     }
-    
+
     private func setupBindings() {
         // Bind to Repository messages
         repository.$activeRoomMessages
@@ -58,6 +59,15 @@ class ChatRoomViewModel: ObservableObject {
         try? await cloudKit.subscribeToMessages(in: roomId)
     }
 
+    func loadOlderMessages() async {
+        guard !isFetchingOlderMessages else { return }
+        isFetchingOlderMessages = true
+        
+        await repository.fetchOlderMessages(for: roomId)
+        
+        isFetchingOlderMessages = false
+    }
+
     func sendMessage(_ text: String) async {
         let message = ChatMessage(
             senderId: userId,
@@ -72,16 +82,23 @@ class ChatRoomViewModel: ObservableObject {
     // MARK: - Asset Sending
     
     private func saveTempImage(_ image: UIImage) -> URL? {
-        let tempDir = FileManager.default.temporaryDirectory
+        let fileManager = FileManager.default
+        let paths = fileManager.urls(for: .documentDirectory, in: .userDomainMask)
+        let assetsDir = paths[0].appendingPathComponent("ChatAssets", isDirectory: true)
+        
+        if !fileManager.fileExists(atPath: assetsDir.path) {
+            try? fileManager.createDirectory(at: assetsDir, withIntermediateDirectories: true)
+        }
+        
         let fileName = UUID().uuidString + ".jpg"
-        let fileURL = tempDir.appendingPathComponent(fileName)
+        let fileURL = assetsDir.appendingPathComponent(fileName)
         
         if let data = image.jpegData(compressionQuality: 0.7) {
             do {
                 try data.write(to: fileURL)
                 return fileURL
             } catch {
-                print("Error saving temp image: \(error)")
+                print("Error saving image to assets: \(error)")
                 return nil
             }
         }

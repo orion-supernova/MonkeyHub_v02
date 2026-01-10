@@ -113,19 +113,18 @@ class ChatRepository: ObservableObject {
         guard roomId == activeRoomId else { return }
 
         do {
-            let messages = try await cloudKit.fetchMessages(for: roomId)
+            let messages = try await cloudKit.fetchRecentMessages(for: roomId, limit: 30)
             if self.activeRoomId == roomId {
                 // Preserve pending messages
                 let pendingMessages = self.activeRoomMessages.filter { $0.status == .pending }
 
-                // Clear and re-populate with fetched messages
+                // Clear and re-populate with fetched messages (limit to newest batch + pending)
                 self.activeRoomMessages = []
 
-                // Use upsertMessages for deduplication and proper ordering
                 withAnimation {
                     upsertMessages(messages, in: roomId, saveToDisk: false)
 
-                    // Re-add pending messages that haven't been confirmed
+                    // Re-add pending messages
                     for pending in pendingMessages {
                         if !self.activeRoomMessages.contains(where: { $0.id == pending.id }) {
                             upsertMessage(pending, in: roomId, saveToDisk: false)
@@ -133,13 +132,36 @@ class ChatRepository: ObservableObject {
                     }
                 }
 
-                // Save once after all updates
-                Task {
-                    await persistence.saveMessages(activeRoomMessages, for: roomId)
-                }
+                await persistence.saveMessages(activeRoomMessages, for: roomId)
             }
         } catch {
             print("❌ ChatRepository: Failed to fetch messages for room \(roomId): \(error)")
+        }
+    }
+
+    func fetchOlderMessages(for roomId: String) async {
+        guard roomId == activeRoomId, !activeRoomMessages.isEmpty else { return }
+
+        // Get the oldest message timestamp (messages are sorted newest first)
+        let oldestMessage = activeRoomMessages.last { $0.status != .pending }
+        guard let oldestDate = oldestMessage?.timestamp else { return }
+
+        print("📡 ChatRepository: Fetching messages before \(oldestDate)")
+
+        do {
+            let olderMessages = try await cloudKit.fetchRecentMessages(for: roomId, before: oldestDate, limit: 30)
+            guard !olderMessages.isEmpty else { 
+                print("🏁 ChatRepository: No older messages found")
+                return 
+            }
+
+            if self.activeRoomId == roomId {
+                withAnimation {
+                    upsertMessages(olderMessages, in: roomId, saveToDisk: true)
+                }
+            }
+        } catch {
+            print("❌ ChatRepository: Failed to fetch older messages for room \(roomId): \(error)")
         }
     }
     

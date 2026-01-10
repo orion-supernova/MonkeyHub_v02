@@ -23,37 +23,53 @@ struct ChatRoomView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            MessagesListView(
-                viewModel: viewModel,
-                isLoading: isLoading,
-                onImageTapped: { url in
-                    selectedImageUrl = url
-                }
-            )
+        ZStack {
+            VStack(spacing: 0) {
+                MessagesListView(
+                    viewModel: viewModel,
+                    isLoading: isLoading,
+                    onImageTapped: { url in
+                        selectedImageUrl = url
+                    }
+                )
 
-            MessageInputView(
-                messageText: $messageText,
-                showImagePicker: $showImagePicker,
-                isShowingAttachmentMenu: $isShowingAttachmentMenu,
-                onSendMessage: {
-                    let textToSend = messageText
-                    messageText = ""
-                    await viewModel.sendMessage(textToSend)
-                },
-                onTakePhoto: {
-                    isShowingAttachmentMenu = false
-                    showCamera = true
-                },
-                onTakeVideo: {
-                    isShowingAttachmentMenu = false
-                    showCamera = true
-                },
-                onRecordAudio: {
-                    isShowingAttachmentMenu = false
-                    showVoiceRecorder = true
-                }
-            )
+                MessageInputView(
+                    messageText: $messageText,
+                    showImagePicker: $showImagePicker,
+                    isShowingAttachmentMenu: $isShowingAttachmentMenu,
+                    onSendMessage: {
+                        let textToSend = messageText
+                        messageText = ""
+                        await viewModel.sendMessage(textToSend)
+                    },
+                    onTakePhoto: {
+                        isShowingAttachmentMenu = false
+                        showCamera = true
+                    },
+                    onTakeVideo: {
+                        isShowingAttachmentMenu = false
+                        showCamera = true
+                    },
+                    onRecordAudio: {
+                        isShowingAttachmentMenu = false
+                        showVoiceRecorder = true
+                    }
+                )
+            }
+            .background(Color(uiColor: .systemBackground))
+
+            if isLoading && viewModel.messages.isEmpty {
+                ProgressView("Loading messages...")
+                    .padding()
+                    .background(Color(uiColor: .secondarySystemBackground))
+                    .cornerRadius(10)
+            } else if viewModel.messages.isEmpty {
+                ContentUnavailableView(
+                    "No Messages",
+                    systemImage: "bubble.left",
+                    description: Text("Start the conversation by sending a message")
+                )
+            }
         }
         .navigationTitle(room.name)
         .toolbar {

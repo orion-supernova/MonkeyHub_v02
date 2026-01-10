@@ -85,7 +85,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         self.roomId = roomId
 
         if let asset = record[ChatMessage.assetKey] as? CKAsset {
-            self.assetURL = asset.fileURL
+            self.assetURL = AssetPersistenceService.shared.persistAsset(asset)
         } else {
             self.assetURL = nil
         }

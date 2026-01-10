@@ -97,7 +97,7 @@ class ChatRoomViewModel: ObservableObject {
         let message = ChatMessage(
             senderId: userId,
             senderName: userName,
-            content: " Photo",
+            content: "📷 Photo",
             type: .image,
             roomId: roomId,
             assetURL: url
@@ -111,7 +111,7 @@ class ChatRoomViewModel: ObservableObject {
         let message = ChatMessage(
             senderId: userId,
             senderName: userName,
-            content: " Video",
+            content: "🎥 Video",
             type: .video,
             roomId: roomId,
             assetURL: url
@@ -124,7 +124,7 @@ class ChatRoomViewModel: ObservableObject {
         let message = ChatMessage(
             senderId: userId,
             senderName: userName,
-            content: " Voice Message",
+            content: "🎵 Voice Message",
             type: .audio,
             roomId: roomId,
             assetURL: url

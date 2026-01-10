@@ -77,22 +77,40 @@ struct MessageView: View {
                 .foregroundColor(isCurrentUser ? .white : .primary)
         case .image:
             if let url = message.assetURL {
-                AsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .scaledToFit()
-                        .cornerRadius(8)
-                        .onTapGesture {
-                            onImageTapped(url)
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        // Loading state
+                        ZStack {
+                            Color.gray.opacity(0.1)
+                            ProgressView()
                         }
-                } placeholder: {
-                    ZStack {
-                        Color.gray.opacity(0.1)
-                        ProgressView()
+                        .frame(width: 200, height: 200)
+                        .cornerRadius(8)
+                    case .success(let image):
+                        // Image loaded - fill entire frame to avoid empty space
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 200, height: 200)
+                            .cornerRadius(8)
+                            .clipped()
+                            .onTapGesture {
+                                onImageTapped(url)
+                            }
+                    case .failure:
+                        // Error state
+                        ZStack {
+                            Color.gray.opacity(0.1)
+                            Image(systemName: "photo.fill")
+                                .foregroundColor(.gray)
+                        }
+                        .frame(width: 200, height: 200)
+                        .cornerRadius(8)
+                    @unknown default:
+                        EmptyView()
                     }
-                    .frame(width: 200, height: 200)
                 }
-                .frame(maxWidth: 200, maxHeight: 200)
             }
         case .video:
             if let url = message.assetURL {

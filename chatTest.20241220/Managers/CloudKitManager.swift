@@ -403,21 +403,23 @@ class CloudKitManager: ObservableObject {
         )
 
         let notificationInfo = CKSubscription.NotificationInfo()
-        
+
         // Enable dynamic notifications with localization templates
         // Template: "%1$@: %2$@" -> "Sender Name: Message Content"
         notificationInfo.alertLocalizationKey = "%1$@: %2$@"
         notificationInfo.alertLocalizationArgs = [ChatMessage.senderNameKey, ChatMessage.contentKey]
-        
+
         notificationInfo.shouldSendContentAvailable = true  // Background refresh
         notificationInfo.shouldBadge = true
         notificationInfo.soundName = "default"
-        
-        // Include minimal message fields in notification payload to avoid "limit exceeded" error
+
+        // Include message fields in notification payload
+        // Added 'type' to enable proper fallback reconstruction for attachments
         notificationInfo.desiredKeys = [
             ChatMessage.senderNameKey,
             ChatMessage.contentKey,
-            ChatMessage.roomIdKey
+            ChatMessage.roomIdKey,
+            ChatMessage.typeKey  // Critical for attachment handling
         ]
         
         subscription.notificationInfo = notificationInfo

@@ -1,10 +1,16 @@
 import SwiftUI
+import Combine
+
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct MessagesListView: View {
     let viewModel: ChatRoomViewModel
     let isLoading: Bool
     let onImageTapped: (URL) -> Void
     @State private var proxy: ScrollViewProxy?
+    @State private var keyboardHeight: CGFloat = 0
 
     private var lastMessageId: String? {
         return viewModel.messages.sorted(by: { $0.timestamp < $1.timestamp }).last?.id
@@ -66,6 +72,10 @@ struct MessagesListView: View {
             .onChange(of: viewModel.messages.count) { _ in
                  scrollToBottom(proxy, animated: true)
             }
+            .onReceive(Publishers.keyboardHeight) { newHeight in
+                // Scroll to bottom when keyboard appears or disappears
+                scrollToBottom(proxy, animated: true)
+            }
         }
         .onTapGesture {
             hideKeyboard()
@@ -91,3 +101,20 @@ struct MessagesListView: View {
         )
     }
 }
+
+// MARK: - Keyboard Height Publisher
+extension Publishers {
+    static var keyboardHeight: AnyPublisher<CGFloat, Never> {
+        let willShow = NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
+            .map { notification -> CGFloat in
+                (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect)?.height ?? 0
+            }
+
+        let willHide = NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
+            .map { _ -> CGFloat in 0 }
+
+        return Publishers.Merge(willShow, willHide)
+            .eraseToAnyPublisher()
+    }
+}
+

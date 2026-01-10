@@ -88,13 +88,10 @@ struct ChatRoomView: View {
             navigationState.currentRoomId = nil  // Clear active room
         }
         .fullScreenCover(isPresented: $showCamera) {
-            CameraView(isPresented: $showCamera) { url, isVideo in
+            CameraEditorView(isPresented: $showCamera) { image in
                 Task {
-                    if isVideo {
-                        await viewModel.sendVideo(url)
-                    } else {
-                        await viewModel.sendImage(from: url)
-                    }
+                    isShowingAttachmentMenu = false
+                    await viewModel.sendImage(image)
                 }
             }
         }
@@ -109,6 +106,7 @@ struct ChatRoomView: View {
         .onChange(of: selectedImage) { newImage in
             if let image = newImage {
                 Task {
+                    isShowingAttachmentMenu = false // Dismiss attachment menu
                     await viewModel.sendImage(image)
                     selectedImage = nil
                 }

@@ -22,6 +22,19 @@ class ChatRepository: ObservableObject {
 
     private init() {
         rooms = persistence.loadRooms()
+        unreadCounts = persistence.loadUnreadCounts()
+        // Initialize badge on start
+        updateGlobalBadge()
+    }
+
+    private func updateGlobalBadge() {
+        let total = unreadCounts.values.reduce(0, +)
+        BadgeManager.shared.updateBadge(count: total)
+        
+        // Persist
+        Task {
+            await persistence.saveUnreadCounts(unreadCounts)
+        }
     }
     
     // MARK: - Single Source of Truth for Messages
@@ -98,6 +111,7 @@ class ChatRepository: ObservableObject {
         if let roomId = roomId {
             // Clear unread count
             unreadCounts[roomId] = 0
+            updateGlobalBadge()
             // Load cached messages immediately
             let cachedMessages = persistence.loadMessages(for: roomId)
             self.activeRoomMessages = cachedMessages
@@ -216,6 +230,13 @@ class ChatRepository: ObservableObject {
         let senderId = recordFields[ChatMessage.senderIdKey] as? String ?? "unknown"
         let timestamp = Date() // Approximate
 
+        // Update unread count for any room (new or existing)
+        let currentUserId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
+        if activeRoomId != roomId && senderId != currentUserId {
+            unreadCounts[roomId, default: 0] += 1
+            updateGlobalBadge()
+        }
+
         // 1. Update Room List (Lobby)
         if let index = rooms.firstIndex(where: { $0.id == roomId }) {
             var updatedRoom = rooms[index]
@@ -231,12 +252,6 @@ class ChatRepository: ObservableObject {
 
             Task {
                 await persistence.saveRooms(rooms)
-            }
-
-            // Increment unread count if not active room and not from me
-            let currentUserId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
-            if activeRoomId != roomId && senderId != currentUserId {
-                unreadCounts[roomId, default: 0] += 1
             }
         } else {
             // New room? Fetch all rooms to discover it

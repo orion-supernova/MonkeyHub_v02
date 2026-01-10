@@ -23,6 +23,10 @@ final class MessagePersistenceService {
         getDocumentsDirectory().appendingPathComponent("cached_messages_\(roomId).json")
     }
 
+    private func unreadCountsFileURL() -> URL {
+        getDocumentsDirectory().appendingPathComponent("unread_counts.json")
+    }
+
     // MARK: - Room Persistence
 
     func saveRooms(_ rooms: [ChatRoom]) async {
@@ -68,6 +72,30 @@ final class MessagePersistenceService {
         } catch {
             print("⚠️ MessagePersistenceService: No cached messages found for room \(roomId)")
             return []
+        }
+    }
+
+    // MARK: - Unread Counts Persistence
+
+    func saveUnreadCounts(_ counts: [String: Int]) async {
+        do {
+            let data = try JSONEncoder().encode(counts)
+            try data.write(to: unreadCountsFileURL())
+            print("💾 MessagePersistenceService: Saved unread counts to disk")
+        } catch {
+            print("❌ MessagePersistenceService: Failed to save unread counts: \(error)")
+        }
+    }
+
+    func loadUnreadCounts() -> [String: Int] {
+        do {
+            let data = try Data(contentsOf: unreadCountsFileURL())
+            let loadedCounts = try JSONDecoder().decode([String: Int].self, from: data)
+            print("📂 MessagePersistenceService: Loaded unread counts from disk")
+            return loadedCounts
+        } catch {
+            print("⚠️ MessagePersistenceService: No cached unread counts found")
+            return [:]
         }
     }
 }

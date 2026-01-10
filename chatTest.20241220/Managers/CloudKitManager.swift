@@ -410,7 +410,6 @@ class CloudKitManager: ObservableObject {
         notificationInfo.alertLocalizationArgs = [ChatMessage.senderNameKey, ChatMessage.contentKey]
 
         notificationInfo.shouldSendContentAvailable = true  // Background refresh
-        notificationInfo.shouldBadge = true
         notificationInfo.soundName = "default"
 
         // Include message fields in notification payload

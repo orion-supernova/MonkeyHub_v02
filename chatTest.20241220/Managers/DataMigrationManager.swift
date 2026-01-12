@@ -173,36 +173,98 @@ class DataMigrationManager: ObservableObject {
             print("    - \(roomName): \(messages.count) messages")
         }
 
-        let migrationData = MigrationData(
-            userId: userId,
-            rooms: exportedRooms,
-            messages: allMessages,
-            exportDate: Date(),
-            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
-        )
-
         progress = 0.8
         statusMessage = "Writing export file..."
 
-        // Write to file
+        // Write to file and bundle assets
+        // Prepare export directory
+        let documentsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let baseName = "migration_export_\(Int(Date().timeIntervalSince1970))"
+        let exportDir = documentsPath.appendingPathComponent(baseName, isDirectory: true)
+        let assetsDir = exportDir.appendingPathComponent("Assets", isDirectory: true)
+
+        try? fileManager.removeItem(at: exportDir)
+        try fileManager.createDirectory(at: assetsDir, withIntermediateDirectories: true)
+
+        // Prepare JSON encoder
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
+        // Rebuild messages with local asset references and copy files
+        var messagesWithAssets: [String: [MigrationData.ExportedMessage]] = [:]
+        for (roomId, messages) in allMessages {
+            var updated: [MigrationData.ExportedMessage] = []
+            for var m in messages {
+                if let assetURLString = m.assetURL, let originalURL = URL(string: assetURLString) {
+                    let ext = originalURL.pathExtension.isEmpty ? "dat" : originalURL.pathExtension
+                    let fileName = "\(m.id).\(ext)"
+                    let destURL = assetsDir.appendingPathComponent(fileName)
+                    if fileManager.fileExists(atPath: originalURL.path) {
+                        try? fileManager.removeItem(at: destURL)
+                        do {
+                            try fileManager.copyItem(at: originalURL, to: destURL)
+                            print("📦 Copied asset for message \(m.id) to \(destURL.lastPathComponent) (")
+                            if let values = try? destURL.resourceValues(forKeys: [.fileSizeKey]), let size = values.fileSize {
+                                let formatter = ByteCountFormatter(); formatter.countStyle = .file
+                                print("   size: \(formatter.string(fromByteCount: Int64(size)))")
+                            }
+                        } catch {
+                            print("❌ Failed to copy asset for message \(m.id): \(error)")
+                        }
+                        m = MigrationData.ExportedMessage(
+                            id: m.id,
+                            senderId: m.senderId,
+                            senderName: m.senderName,
+                            content: m.content,
+                            type: m.type,
+                            timestamp: m.timestamp,
+                            roomId: m.roomId,
+//                            assetURL: "Assets/\(fileName)",
+                            assetURL: "\(fileName)",
+                            status: m.status
+                        )
+                    } else {
+                        print("⚠️ Asset source not found for message \(m.id) at: \(originalURL.path)")
+                    }
+                }
+                updated.append(m)
+            }
+            messagesWithAssets[roomId] = updated
+        }
+
+        let migrationData = MigrationData(
+            userId: userId,
+            rooms: exportedRooms,
+            messages: messagesWithAssets,
+            exportDate: Date(),
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
+        )
+
+        // Write primary JSON inside the export directory
         let data = try encoder.encode(migrationData)
+        let dataJSON = exportDir.appendingPathComponent("data.json")
+        try data.write(to: dataJSON)
 
-        // Save to Documents directory
-        let documentsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let exportFileName = "migration_export_\(Date().timeIntervalSince1970).json"
-        let exportUrl = documentsPath.appendingPathComponent(exportFileName)
+        // Also write a thin compatibility JSON at the root to satisfy UI scanning pattern
+        let rootJSON = documentsPath.appendingPathComponent("\(baseName).json")
+        try data.write(to: rootJSON)
 
-        try data.write(to: exportUrl)
+        // Verify assets directory content
+        if let files = try? fileManager.contentsOfDirectory(at: assetsDir, includingPropertiesForKeys: [.fileSizeKey]) {
+            let totalBytes = files.compactMap { try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize }.reduce(0, +)
+            let fmt = ByteCountFormatter(); fmt.countStyle = .file
+            print("📦 Assets bundled: \(files.count) files, total \(fmt.string(fromByteCount: Int64(totalBytes)))")
+        } else {
+            print("ℹ️ No assets directory or failed to read assets directory")
+        }
 
         progress = 1.0
         statusMessage = "Export completed!"
         isExporting = false
 
-        return exportUrl
+        // Return the root JSON path so the existing UI can find it
+        return rootJSON
     }
 
     // MARK: - Delete All CloudKit Data
@@ -275,6 +337,8 @@ class DataMigrationManager: ObservableObject {
 
         let migrationData = try decoder.decode(MigrationData.self, from: data)
 
+        let fileManager = FileManager.default
+
         print("📥 Import file loaded:")
         print("  - Export date: \(migrationData.exportDate)")
         print("  - User ID: \(migrationData.userId)")
@@ -289,6 +353,23 @@ class DataMigrationManager: ObservableObject {
         for room in migrationData.rooms {
             let messageCount = migrationData.messages[room.id]?.count ?? 0
             print("  - Room: \(room.name) (\(messageCount) messages)")
+        }
+
+        // Determine assets directory (sibling folder to the json file)
+        let exportFolder = url.deletingPathExtension()
+        let assetsDir = exportFolder.appendingPathComponent("Assets", isDirectory: true)
+
+        var assetsAvailable = false
+        if fileManager.fileExists(atPath: assetsDir.path) {
+            if let files = try? fileManager.contentsOfDirectory(at: assetsDir, includingPropertiesForKeys: [.fileSizeKey]) {
+                let total = files.count
+                let bytes = files.compactMap { try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize }.reduce(0, +)
+                let fmt = ByteCountFormatter(); fmt.countStyle = .file
+                print("📥 Found Assets dir with \(total) files (\(fmt.string(fromByteCount: Int64(bytes)))) at: \(assetsDir.path)")
+                assetsAvailable = total > 0
+            }
+        } else {
+            print("ℹ️ No Assets directory next to import file at: \(assetsDir.path)")
         }
 
         await MainActor.run {
@@ -384,49 +465,229 @@ class DataMigrationManager: ObservableObject {
             statusMessage = "Uploading messages..."
         }
 
-        // Upload messages
+        // Upload messages in batches using CKModifyRecordsOperation to ensure assets are attached reliably
         let totalMessages = migrationData.messages.values.flatMap { $0 }.count
         var uploadedMessages = 0
+        let batchSize = 200
 
-        for (roomId, messages) in migrationData.messages {
-            for message in messages {
-                do {
-                    let messageType = MessageType(rawValue: message.type) ?? .text
-                    let messageStatus = MessageStatus(rawValue: message.status) ?? .sent
-                    let assetURL = message.assetURL.flatMap { URL(string: $0) }
+        // Flatten messages preserving order
+        let flatMessages: [MigrationData.ExportedMessage] = migrationData.messages.values.flatMap { $0 }
 
-                    let record = CKRecord(recordType: ChatMessage.recordType, recordID: CKRecord.ID(recordName: message.id))
-                    record[ChatMessage.idKey] = message.id
-                    record[ChatMessage.senderIdKey] = message.senderId
-                    record[ChatMessage.senderNameKey] = message.senderName
-                    record[ChatMessage.contentKey] = message.content
-                    record[ChatMessage.typeKey] = messageType.rawValue
-                    // Convert Date to String for CloudKit (timestamp is stored as String in schema)
-                    record[ChatMessage.timestampKey] = (message.timestamp)
-                    record[ChatMessage.roomIdKey] = message.roomId
-                    if let assetURL = assetURL {
-                        record[ChatMessage.assetKey] = CKAsset(fileURL: assetURL)
+        for batchStart in stride(from: 0, to: flatMessages.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, flatMessages.count)
+            let batch = Array(flatMessages[batchStart..<batchEnd])
+
+            // Build records for this batch
+            var records: [CKRecord] = []
+            var tempFiles: [URL] = [] // Keep strong references to temp files for the duration of the operation
+
+            for message in batch {
+                let messageType = MessageType(rawValue: message.type) ?? .text
+                let record = CKRecord(recordType: ChatMessage.recordType, recordID: CKRecord.ID(recordName: message.id))
+                record[ChatMessage.idKey] = message.id
+                record[ChatMessage.senderIdKey] = message.senderId
+                record[ChatMessage.senderNameKey] = message.senderName
+                record[ChatMessage.contentKey] = message.content
+                record[ChatMessage.typeKey] = messageType.rawValue
+                record[ChatMessage.timestampKey] = message.timestamp
+                record[ChatMessage.roomIdKey] = message.roomId
+
+                // Resolve asset path (relative inside bundle or absolute)
+                let resolvedAssetURL: URL? = {
+                    guard let path = message.assetURL else { return nil }
+                    if path.hasPrefix("http://") || path.hasPrefix("https://") || path.hasPrefix("file://") {
+                        return URL(string: path)
+                    } else {
+                        return assetsDir.appendingPathComponent(path)
                     }
+                }()
 
-                    // Save the message (no need to check - we already deleted everything)
-                    try await cloudKit.database.save(record)
+                if let sourceURL = resolvedAssetURL, fileManager.fileExists(atPath: sourceURL.path) {
+                    // Copy to a unique temporary file for CKAsset reliability
+                    let ext = sourceURL.pathExtension.isEmpty ? "dat" : sourceURL.pathExtension
+                    let tmpURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(UUID().uuidString)
+                        .appendingPathExtension(ext)
+                    do {
+                        try? FileManager.default.removeItem(at: tmpURL)
+                        try FileManager.default.copyItem(at: sourceURL, to: tmpURL)
+                        record[ChatMessage.assetKey] = CKAsset(fileURL: tmpURL)
+                        tempFiles.append(tmpURL)
+                        print("📤 Prepared asset for message \(message.id): \(tmpURL.lastPathComponent)")
+                    } catch {
+                        print("⚠️ Failed to stage asset for message \(message.id): \(error)")
+                    }
+                } else if let badURL = resolvedAssetURL {
+                    print("⚠️ Asset file missing for message \(message.id) at: \(badURL.path)")
+                }
 
+                records.append(record)
+            }
+
+            // Perform modify operation for this batch
+            let op = CKModifyRecordsOperation(recordsToSave: records, recordIDsToDelete: nil)
+            op.savePolicy = .allKeys
+            op.qualityOfService = .userInitiated
+            op.perRecordCompletionBlock = { record, error in
+                if let error = error {
+                    print("❌ Failed to save message record \(record.recordID.recordName): \(error)")
+                } else {
                     uploadedMessages += 1
                     let messageProgress = 0.5 + (0.5 * Double(uploadedMessages) / Double(totalMessages))
-                    await MainActor.run {
-                        progress = messageProgress
-                        statusMessage = "Uploading message \(uploadedMessages)/\(totalMessages)..."
+                    Task { @MainActor in
+                        self.progress = messageProgress
+                        self.statusMessage = "Uploading message \(uploadedMessages)/\(totalMessages)..."
                     }
-                } catch {
-                    print("Failed to import message \(message.id): \(error)")
                 }
             }
+            op.modifyRecordsResultBlock = { result in
+                switch result {
+                case .success:
+                    print("✅ Batch saved: records \(batchStart+1)-\(batchEnd) of \(flatMessages.count)")
+                case .failure(let error):
+                    print("❌ Batch save failed: \(error)")
+                }
+                for tmp in tempFiles {
+                    try? FileManager.default.removeItem(at: tmp)
+                }
+            }
+
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                op.completionBlock = { continuation.resume() }
+                cloudKit.database.add(op)
+            }
         }
+
+        // Automatic post-import asset rehydration
+        await rehydrateAssets(fromFile: url)
 
         await MainActor.run {
             progress = 1.0
             statusMessage = "Import completed!"
             isImporting = false
+        }
+    }
+
+    // MARK: - Post-Import Asset Rehydration
+    private func rehydrateAssets(fromFile url: URL) async {
+        print("🔁 Starting asset rehydration pass...")
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let migrationData = try decoder.decode(MigrationData.self, from: data)
+
+            let exportFolder = url.deletingPathExtension()
+            let assetsDir = exportFolder.appendingPathComponent("Assets", isDirectory: true)
+            let fm = FileManager.default
+            guard fm.fileExists(atPath: assetsDir.path) else {
+                print("ℹ️ Rehydrate: No Assets directory found at \(assetsDir.path)")
+                return
+            }
+
+            // Flatten messages that reference an asset path
+            let messagesWithAssets: [MigrationData.ExportedMessage] = migrationData.messages.values
+                .flatMap { $0 }
+                .filter { $0.assetURL != nil }
+
+            if messagesWithAssets.isEmpty {
+                print("ℹ️ Rehydrate: No messages with asset references in JSON")
+                return
+            }
+
+            let batchSize = 200
+            let db = cloudKitManager.database
+
+            for start in stride(from: 0, to: messagesWithAssets.count, by: batchSize) {
+                let end = min(start + batchSize, messagesWithAssets.count)
+                let slice = Array(messagesWithAssets[start..<end])
+
+                // Fetch existing records for these message IDs
+                let recordIDs = slice.map { CKRecord.ID(recordName: $0.id) }
+                var fetched: [CKRecord.ID: CKRecord] = [:]
+
+                // Fetch in a single operation
+                let fetchOp = CKFetchRecordsOperation(recordIDs: recordIDs)
+                fetchOp.perRecordResultBlock = { recordID, result in
+                    switch result {
+                    case .success(let record):
+                        fetched[recordID] = record
+                    case .failure(let error):
+                        print("⚠️ Rehydrate: Failed to fetch record \(recordID.recordName): \(error)")
+                    }
+                }
+
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    fetchOp.completionBlock = { continuation.resume() }
+                    db.add(fetchOp)
+                }
+
+                // Prepare updates with staged temp files
+                var recordsToSave: [CKRecord] = []
+                var temps: [URL] = []
+
+                for msg in slice {
+                    guard let record = fetched[CKRecord.ID(recordName: msg.id)] else { continue }
+                    guard let path = msg.assetURL else { continue }
+
+                    let sourceURL: URL
+                    if path.hasPrefix("http://") || path.hasPrefix("https://") || path.hasPrefix("file://") {
+                        guard let u = URL(string: path) else { continue }
+                        sourceURL = u
+                    } else {
+                        sourceURL = assetsDir.appendingPathComponent(path)
+                    }
+
+                    guard fm.fileExists(atPath: sourceURL.path) else {
+                        print("⚠️ Rehydrate: Missing asset file for message \(msg.id) at \(sourceURL.path)")
+                        continue
+                    }
+
+                    // Stage temp file
+                    let ext = sourceURL.pathExtension.isEmpty ? "dat" : sourceURL.pathExtension
+                    let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
+                    do {
+                        try? fm.removeItem(at: tmp)
+                        try fm.copyItem(at: sourceURL, to: tmp)
+                        record[ChatMessage.assetKey] = CKAsset(fileURL: tmp)
+                        temps.append(tmp)
+                        recordsToSave.append(record)
+                    } catch {
+                        print("❌ Rehydrate: Failed to stage asset for \(msg.id): \(error)")
+                    }
+                }
+
+                guard !recordsToSave.isEmpty else { continue }
+
+                let modify = CKModifyRecordsOperation(recordsToSave: recordsToSave, recordIDsToDelete: nil)
+                modify.savePolicy = .changedKeys
+                modify.qualityOfService = .userInitiated
+                modify.perRecordCompletionBlock = { record, error in
+                    if let error = error {
+                        print("❌ Rehydrate: Failed to update \(record.recordID.recordName): \(error)")
+                    } else {
+                        print("✅ Rehydrate: Updated asset for \(record.recordID.recordName)")
+                    }
+                }
+                modify.modifyRecordsResultBlock = { result in
+                    switch result {
+                    case .success:
+                        print("✅ Rehydrate: Batch updated (\(start+1)-\(end))")
+                    case .failure(let error):
+                        print("❌ Rehydrate: Batch failed: \(error)")
+                    }
+                    for t in temps { try? fm.removeItem(at: t) }
+                }
+
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    modify.completionBlock = { continuation.resume() }
+                    db.add(modify)
+                }
+            }
+
+            print("🔁 Asset rehydration pass completed.")
+        } catch {
+            print("❌ Rehydrate: Unexpected error: \(error)")
         }
     }
 
@@ -508,3 +769,4 @@ class DataMigrationManager: ObservableObject {
         return (roomCount, messageCount, sizeString)
     }
 }
+

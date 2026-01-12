@@ -910,6 +910,7 @@ struct DataMigrationSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var availableExports: [URL] = []
+    @State private var showingExportsBrowser: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -1047,13 +1048,19 @@ struct DataMigrationSheet: View {
                                                     Text(exportFile.lastPathComponent)
                                                         .font(.caption.bold())
                                                         .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                                                    HStack(spacing: 6) {
-                                                        Text(formatFileDate(exportFile))
-                                                        Text("•")
-                                                        Text(formatFileSize(exportFile))
+                                                    VStack(alignment: .leading, spacing: 2) {
+                                                        HStack(spacing: 6) {
+                                                            Text(formatFileDate(exportFile))
+                                                            Text("•")
+                                                            Text(formatFileSize(exportFile))
+                                                        }
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.secondary)
+
+                                                        Text(formatExportBundleInfo(exportFile))
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.secondary)
                                                     }
-                                                    .font(.caption2)
-                                                    .foregroundStyle(.secondary)
                                                 }
                                                 Spacer()
                                                 if selectedExportFile == exportFile {
@@ -1075,6 +1082,13 @@ struct DataMigrationSheet: View {
                                                 deleteExportFile(exportFile)
                                             } label: {
                                                 Label("Delete", systemImage: "trash")
+                                            }
+                                        }
+                                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                            Button {
+                                                showingExportsBrowser = true
+                                            } label: {
+                                                Label("Browse", systemImage: "folder")
                                             }
                                         }
                                     }
@@ -1159,6 +1173,9 @@ struct DataMigrationSheet: View {
             .onAppear {
                 scanForExportFiles()
             }
+            .sheet(isPresented: $showingExportsBrowser) {
+                ExportsBrowserView()
+            }
         }
     }
 
@@ -1218,6 +1235,45 @@ struct DataMigrationSheet: View {
         } catch {
             return "—"
         }
+    }
+
+    private func formatExportBundleInfo(_ jsonURL: URL) -> String {
+        let folderURL = jsonURL.deletingPathExtension()
+        let assetsURL = folderURL.appendingPathComponent("Assets", isDirectory: true)
+        let fm = FileManager.default
+        var folderExists = false
+        var totalBytes: Int64 = 0
+        var fileCount = 0
+
+        if fm.fileExists(atPath: folderURL.path) {
+            folderExists = true
+            if let files = try? fm.contentsOfDirectory(at: folderURL, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) {
+                for file in files {
+                    if let isDir = try? file.resourceValues(forKeys: [.isDirectoryKey]).isDirectory, isDir == true {
+                        // Include Assets contents
+                        if file.lastPathComponent == "Assets" {
+                            if let assets = try? fm.contentsOfDirectory(at: file, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]) {
+                                fileCount += assets.count
+                                for a in assets {
+                                    if let size = try? a.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                                        totalBytes += Int64(size)
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        if let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                            totalBytes += Int64(size)
+                            fileCount += 1
+                        }
+                    }
+                }
+            }
+        }
+
+        guard folderExists else { return "Bundle: not found" }
+        let fmt = ByteCountFormatter(); fmt.countStyle = .file
+        return "Bundle: \(fileCount) files, \(fmt.string(fromByteCount: totalBytes))"
     }
 
     private func deleteExportFile(_ url: URL) {

@@ -499,6 +499,7 @@ struct SettingsView: View {
                 migrationManager: migrationManager,
                 selectedExportFile: $selectedExportFile
             )
+            .interactiveDismissDisabled(true)
         }
         .alert("Switch Environment", isPresented: $showingEnvironmentAlert) {
             Button("Development") {
@@ -1046,9 +1047,13 @@ struct DataMigrationSheet: View {
                                                     Text(exportFile.lastPathComponent)
                                                         .font(.caption.bold())
                                                         .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                                                    Text(formatFileDate(exportFile))
-                                                        .font(.caption2)
-                                                        .foregroundStyle(.secondary)
+                                                    HStack(spacing: 6) {
+                                                        Text(formatFileDate(exportFile))
+                                                        Text("•")
+                                                        Text(formatFileSize(exportFile))
+                                                    }
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
                                                 }
                                                 Spacer()
                                                 if selectedExportFile == exportFile {
@@ -1197,6 +1202,24 @@ struct DataMigrationSheet: View {
         return formatter.string(from: creationDate)
     }
 
+    private func formatFileSize(_ url: URL) -> String {
+        do {
+            let values = try url.resourceValues(forKeys: [.fileSizeKey])
+            let bytes = Double(values.fileSize ?? 0)
+            if bytes <= 0 { return "0 B" }
+            let units = ["B", "KB", "MB", "GB", "TB"]
+            let idx = min(Int(log2(bytes) / 10.0), units.count - 1)
+            let size = bytes / pow(1024, Double(idx))
+            let formatter = NumberFormatter()
+            formatter.maximumFractionDigits = size < 10 ? 2 : 1
+            formatter.minimumFractionDigits = 0
+            let sizeString = formatter.string(from: NSNumber(value: size)) ?? String(format: "%.1f", size)
+            return "\(sizeString) \(units[idx])"
+        } catch {
+            return "—"
+        }
+    }
+
     private func deleteExportFile(_ url: URL) {
         do {
             try FileManager.default.removeItem(at: url)
@@ -1253,3 +1276,4 @@ struct StatCard: View {
 #Preview {
     SettingsView()
 }
+

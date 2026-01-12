@@ -37,10 +37,17 @@ struct chatTest_20241220App: App {
             // The view that checks for iCloud status and shows different views
             MainView()
                 .environmentObject(cloudKit)
+                .task {
+                    // Initialize once when the view appears
+                    await cloudKit.initialize()
+                }
                 .onReceive(NotificationCenter.default.publisher(for: activeNotification)) { _ in
-                    // Trigger the initialization of CloudKit whenever the app becomes active
-                    Task {
-                        await cloudKit.initialize()
+                    // Only re-check status if we're in an error state
+                    // Don't trigger full initialization every time app becomes active
+                    if cloudKit.iCloudStatus != .available || !cloudKit.isInitialized {
+                        Task {
+                            await cloudKit.initialize()
+                        }
                     }
                 }
                 .withAlertManager()

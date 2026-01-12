@@ -38,10 +38,14 @@ struct ChatRoomView: View {
                     messageText: $messageText,
                     showImagePicker: $showImagePicker,
                     isShowingAttachmentMenu: $isShowingAttachmentMenu,
-                    onSendMessage: {
-                        let textToSend = messageText
-                        messageText = ""
-                        await viewModel.sendMessage(textToSend)
+                    onSendMessage: { textToSend in         // <-- add the parameter
+                        Task {
+                            await viewModel.sendMessage(textToSend)
+
+                            await MainActor.run {
+                                messageText = ""
+                            }
+                        }
                     },
                     onTakePhoto: {
                         isShowingAttachmentMenu = false
@@ -56,6 +60,7 @@ struct ChatRoomView: View {
                         showVoiceRecorder = true
                     }
                 )
+
             }
             .background(Color.platformBackground)
 
@@ -84,8 +89,8 @@ struct ChatRoomView: View {
                 Button {
                     showRoomInfo = true
                 } label: {
-                    Image(systemName: "info.circle")
-                        .font(.body)
+                    Image(systemName: "info")
+                        .font(.caption)
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
                 }
             }

@@ -90,6 +90,9 @@ class CloudKitManager: ObservableObject {
     private let versionKey = "version"
     private let currentSchemaVersion = 3  // Updated for v2→v3 migration
     private var hasAttemptedMigration = false  // Prevents duplicate migration attempts
+    
+    private var isInitializing = false
+    private var initializationTask: Task<Void, Never>?
 
     enum CloudKitEnvironment: String {
         case development = "Development"
@@ -101,7 +104,7 @@ class CloudKitManager: ObservableObject {
         }
     }
 
-    enum CloudKitStatus {
+    enum CloudKitStatus: Equatable {
         case unknown
         case available
         case noAccount
@@ -109,6 +112,22 @@ class CloudKitManager: ObservableObject {
         case noInternet
         case temporarilyUnavailable
         case error(Error)
+        
+        static func == (lhs: CloudKitStatus, rhs: CloudKitStatus) -> Bool {
+            switch (lhs, rhs) {
+            case (.unknown, .unknown),
+                 (.available, .available),
+                 (.noAccount, .noAccount),
+                 (.restricted, .restricted),
+                 (.noInternet, .noInternet),
+                 (.temporarilyUnavailable, .temporarilyUnavailable):
+                return true
+            case (.error(let lhsError), .error(let rhsError)):
+                return lhsError.localizedDescription == rhsError.localizedDescription
+            default:
+                return false
+            }
+        }
     }
 
     private init() {
@@ -174,24 +193,37 @@ class CloudKitManager: ObservableObject {
 
     // MARK: - Initialization
     func initialize() async {
-        Logger.info("Starting CloudKit initialization...", category: .cloudKit)
-
-        // Detect environment
-        await detectEnvironment()
-
-        // FAST PATH: If we have a stored user ID, assume we are good to go for UI purposes
-        if userDefaults.string(forKey: userIdUserDefaultsKey) != nil {
-            Logger.info("⚡️ Fast Path: Local user found, unblocking UI immediateley", category: .cloudKit)
-            self.isAuthenticated = true
-            self.iCloudStatus = .available
-            self.isInitialized = true
-        } else {
-             // If no user, we must block to check status (otherwise LoginView won't know what to show)
-             // But we can still be optimistic
+        // Prevent concurrent initialization
+        if isInitializing {
+            Logger.info("⏭️ Initialization already in progress, waiting...", category: .cloudKit)
+            await initializationTask?.value
+            return
         }
+        
+        // If already initialized and status is good, skip re-initialization
+        if isInitialized && iCloudStatus == .available {
+            Logger.info("⏭️ Already initialized with good status, skipping", category: .cloudKit)
+            return
+        }
+        
+        isInitializing = true
+        
+        initializationTask = Task {
+            Logger.info("Starting CloudKit initialization...", category: .cloudKit)
 
-        // BACKGROUND CHECK: Verify status without blocking (unless we had no user)
-        let checkingTask = Task {
+            // Detect environment
+            await detectEnvironment()
+
+            // FAST PATH: If we have a stored user ID, assume we are good to go for UI purposes
+            let hasStoredUser = userDefaults.string(forKey: userIdUserDefaultsKey) != nil
+            if hasStoredUser {
+                Logger.info("⚡️ Fast Path: Local user found, unblocking UI immediately", category: .cloudKit)
+                self.isAuthenticated = true
+                self.iCloudStatus = .available
+                self.isInitialized = true
+            }
+
+            // BACKGROUND CHECK: Verify status
             do {
                 // 1. Check iCloud availability
                 let accountStatus = try await container.accountStatus()
@@ -249,12 +281,11 @@ class CloudKitManager: ObservableObject {
                     self.isInitialized = true
                 }
             }
+            
+            isInitializing = false
         }
         
-        // If we didn't take the fast path, await the check (so we don't flash empty UI)
-        if !self.isInitialized {
-            _ = await checkingTask.result
-        }
+        await initializationTask?.value
     }
 
     // MARK: - Authentication

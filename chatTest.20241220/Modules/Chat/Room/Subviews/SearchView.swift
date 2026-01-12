@@ -241,6 +241,7 @@ struct SearchView: View {
                     if viewModel.searchMode == .rooms {
                         RoomsListView(
                             rooms: viewModel.rooms,
+                            joinedRoomIds: viewModel.joinedRoomIds,
                             joinRoom: { room in
                                 Task {
                                     try? await CloudKitManager.shared.joinRoom(room)

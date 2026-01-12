@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RoomsListView: View {
     let rooms: [ChatRoom]
+    let joinedRoomIds: Set<String>
     let joinRoom: (ChatRoom) async -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
@@ -12,7 +13,11 @@ struct RoomsListView: View {
                 emptyStateView
             } else {
                 ForEach(rooms) { room in
-                    RoomRow(room: room, joinRoom: joinRoom)
+                    RoomRow(
+                        room: room,
+                        isJoined: joinedRoomIds.contains(room.id),
+                        joinRoom: joinRoom
+                    )
                 }
             }
         }
@@ -45,27 +50,32 @@ struct RoomsListView: View {
 
 private struct RoomRow: View {
     let room: ChatRoom
+    let isJoined: Bool
     let joinRoom: (ChatRoom) async -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Button {
-            Task {
-                await joinRoom(room)
+            if !isJoined {
+                Task {
+                    await joinRoom(room)
+                }
             }
         } label: {
             HStack(spacing: 16) {
                 roomIcon
                 roomInfo
                 Spacer()
-                joinButton
+                joinStatusButton
             }
             .padding()
             .background(cardBackground)
             .overlay(cardBorder)
         }
         .buttonStyle(.plain)
+        .disabled(isJoined)
+        .opacity(isJoined ? 0.7 : 1.0)
     }
 
     private var roomIcon: some View {
@@ -102,10 +112,21 @@ private struct RoomRow: View {
         }
     }
 
-    private var joinButton: some View {
-        Text("Join")
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+    private var joinStatusButton: some View {
+        Group {
+            if isJoined {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("Joined")
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+            } else {
+                Text("Join")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+            }
+        }
     }
 
     private var cardBackground: some View {
@@ -137,5 +158,5 @@ private struct RoomRow: View {
 }
 
 #Preview {
-    RoomsListView(rooms: [], joinRoom: { _ in })
+    RoomsListView(rooms: [], joinedRoomIds: [], joinRoom: { _ in })
 }

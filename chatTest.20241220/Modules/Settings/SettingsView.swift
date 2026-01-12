@@ -15,14 +15,14 @@ struct SettingsView: View {
     @State private var editingEmail = ""
     @State private var isImagePickerPresented = false
     @State private var selectedImage: PlatformImage?
+    @State private var profileAvatarImage: PlatformImage?
     @StateObject private var navigationState = NavigationStateManager.shared
     @StateObject private var migrationManager = DataMigrationManager.shared
     @State private var showingMigrationSheet = false
     @State private var showingEnvironmentAlert = false
     @State private var showingClearDataAlert = false
     @State private var showingForceReloginAlert = false
-    @State private var selectedExportFile: URL?  // ← Persistent across sheet dismissals
-
+    @State private var selectedExportFile: URL?
 
     private func signOut() async {
         userDefaults.set(nil, forKey: userIdUserDefaultsKey)
@@ -31,15 +31,9 @@ struct SettingsView: View {
 
     private func forceRelogin() async {
         do {
-            // Clear all local data
             try migrationManager.clearAllLocalData()
-
-            // Clear CloudKit authentication state
             cloudKit.isAuthenticated = false
-
-            // Clear environment preference to reset it
             UserDefaults.standard.removeObject(forKey: "cloudKitEnvironment")
-
             AlertManager.shared.showAlert(
                 title: "Success",
                 message: "All data cleared. You will be redirected to login."
@@ -68,7 +62,6 @@ struct SettingsView: View {
     private var developerSection: some View {
         SettingsSection(title: "DEVELOPER TOOLS") {
             VStack(spacing: 16) {
-                // Environment info
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Image(systemName: "cloud.fill")
@@ -105,7 +98,6 @@ struct SettingsView: View {
                         )
                 )
 
-                // Data migration button
                 Button {
                     showingMigrationSheet = true
                 } label: {
@@ -116,7 +108,6 @@ struct SettingsView: View {
                     )
                 }
 
-                // Clear local data button
                 Button {
                     showingClearDataAlert = true
                 } label: {
@@ -127,7 +118,6 @@ struct SettingsView: View {
                     )
                 }
 
-                // Force re-login button
                 Button {
                     showingForceReloginAlert = true
                 } label: {
@@ -175,6 +165,7 @@ struct SettingsView: View {
 
         do {
             currentUser = try await CloudKitManager.shared.fetchCurrentUser()
+            loadProfileAvatar()
         } catch {
             AlertManager.shared.showAlert(
                 title: "Error",
@@ -182,28 +173,36 @@ struct SettingsView: View {
             )
         }
     }
+    
+    private func loadProfileAvatar() {
+        guard let avatarAsset = currentUser?.avatarAsset,
+              let fileURL = avatarAsset.fileURL else { 
+            profileAvatarImage = nil
+            return 
+        }
+        
+        if let data = try? Data(contentsOf: fileURL),
+           let image = PlatformImage.fromData(data) {
+            profileAvatarImage = image
+        }
+    }
 
     private var profileSection: some View {
         VStack(spacing: 24) {
-            // Profile Picture with edit button
             ZStack {
                 if let selectedImage = selectedImage {
                     Image(platformImage: selectedImage)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 80, height: 80)
+                        .frame(width: 100, height: 100)
                         .clipShape(Circle())
                         .shadow(
                             color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
                             radius: 10,
                             y: 5
                         )
-                } else if let avatarAsset = currentUser?.avatarAsset,
-                    let avatarUrl = avatarAsset.fileURL,
-                    let imageData = try? Data(contentsOf: avatarUrl),
-                    let image = PlatformImage.fromData(imageData)
-                {
-                    Image(platformImage: image)
+                } else if let profileAvatarImage = profileAvatarImage {
+                    Image(platformImage: profileAvatarImage)
                         .resizable()
                         .scaledToFill()
                         .frame(width: 100, height: 100)
@@ -244,7 +243,6 @@ struct SettingsView: View {
                         }
                 }
 
-                // Edit button
                 Button {
                     isImagePickerPresented = true
                 } label: {
@@ -260,10 +258,8 @@ struct SettingsView: View {
                 .offset(x: 32, y: 32)
             }
 
-            // User Info with edit button
             VStack(spacing: 8) {
                 if isEditingProfile {
-                    // Edit mode
                     VStack(spacing: 16) {
                         ProfileTextField(
                             title: "Name",
@@ -283,7 +279,6 @@ struct SettingsView: View {
                             icon: "envelope.fill"
                         )
 
-                        // Save/Cancel buttons
                         HStack(spacing: 16) {
                             Button(role: .cancel) {
                                 isEditingProfile = false
@@ -343,7 +338,6 @@ struct SettingsView: View {
                     }
                     .padding(.horizontal)
                 } else {
-                    // Display mode
                     if isLoadingUser {
                         VStack(spacing: 8) {
                             ShimmerView()
@@ -398,13 +392,13 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $isImagePickerPresented) {
             ImagePicker(image: $selectedImage)
-                .onChange(of: selectedImage) { _ in
-                    if selectedImage != nil {
-                        Task {
-                            await handleImageSelection()
-                        }
-                    }
+        }
+        .onChange(of: selectedImage) { newImage in
+            if let image = newImage {
+                Task {
+                    await handleImageSelection()
                 }
+            }
         }
     }
 
@@ -414,7 +408,6 @@ struct SettingsView: View {
                 ZStack(alignment: .top) {
                     let headerHeight = geometry.size.height * 0.4
                     
-                    // Header background
                     LinearGradient(
                         colors: selectedTheme.colors(for: colorScheme).headerBackground,
                         startPoint: .topLeading,
@@ -425,12 +418,10 @@ struct SettingsView: View {
 
                     ScrollView {
                         VStack(spacing: 0) {
-                            // Profile Section
                             profileSection
                                 .padding(.top, 40)
                                 .padding(.bottom, 32)
 
-                            // Settings Sections
                             VStack(spacing: 24) {
                                 themeSection
                                 developerSection
@@ -567,32 +558,27 @@ struct SettingsView: View {
         )
 
         do {
-            // Save to CloudKit
             try await CloudKitManager.shared.updateUser(updatedUser)
 
-            // Close edit mode
             await MainActor.run {
                 isEditingProfile = false
-                // Clear current user to show loading state
                 currentUser = nil
+                profileAvatarImage = nil
                 isLoadingUser = true
             }
 
-            // Add a small delay to ensure CloudKit sync
-            try await Task.sleep(nanoseconds: 500_000_000)  // 0.5 seconds
+            try await Task.sleep(nanoseconds: 500_000_000)
 
-            // Fetch fresh data
             let freshUser = try await CloudKitManager.shared.fetchCurrentUser()
 
-            // Update UI on main thread
             await MainActor.run {
                 withAnimation {
                     self.currentUser = freshUser
                     self.isLoadingUser = false
+                    loadProfileAvatar()
                 }
             }
 
-            // Show success message
             AlertManager.shared.showAlert(
                 title: "Success",
                 message: "Profile updated successfully"
@@ -615,12 +601,13 @@ struct SettingsView: View {
             isLoadingUser = true
             try await CloudKitManager.shared.updateUserProfilePicture(user, image: image)
 
-            // Fetch updated user data
             let freshUser = try await CloudKitManager.shared.fetchCurrentUser()
 
             await MainActor.run {
                 withAnimation {
                     self.currentUser = freshUser
+                    self.profileAvatarImage = image
+                    self.selectedImage = nil
                     self.isLoadingUser = false
                 }
             }
@@ -631,6 +618,7 @@ struct SettingsView: View {
             )
         } catch {
             await MainActor.run {
+                self.selectedImage = nil
                 isLoadingUser = false
             }
             AlertManager.shared.showAlert(
@@ -640,6 +628,8 @@ struct SettingsView: View {
         }
     }
 }
+
+// ... existing code ...
 
 // Supporting Views
 struct SettingsSection<Content: View>: View {
@@ -759,14 +749,12 @@ private func themeIcon(for theme: AppTheme) -> String {
     }
 }
 
-// Add a separate view for theme row content
 private struct ThemeRowContent: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme: ColorScheme
 
     var body: some View {
         HStack {
-            // Theme icon
             Image(systemName: themeIcon(for: selectedTheme))
                 .font(.headline)
                 .foregroundStyle(
@@ -774,7 +762,6 @@ private struct ThemeRowContent: View {
                 )
                 .frame(width: 32)
 
-            // Theme info
             VStack(alignment: .leading, spacing: 2) {
                 Text("Theme")
                     .font(.headline)
@@ -861,7 +848,6 @@ struct ShimmerView: View {
     }
 }
 
-// Add this helper view
 private struct ProfileTextField: View {
     let title: String
     @Binding var text: String
@@ -904,7 +890,7 @@ private struct ProfileTextField: View {
 // Data Migration Sheet
 struct DataMigrationSheet: View {
     @ObservedObject var migrationManager: DataMigrationManager
-    @Binding var selectedExportFile: URL?  // ← Now a binding from parent
+    @Binding var selectedExportFile: URL?
     @Environment(\.dismiss) private var dismiss
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
@@ -916,7 +902,6 @@ struct DataMigrationSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                    // Info Section
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Data Migration")
                             .font(.title2.bold())
@@ -927,7 +912,6 @@ struct DataMigrationSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
 
-                    // Stats Section
                     let stats = migrationManager.getDiskUsageStatsSync()
                     VStack(spacing: 16) {
                         HStack(spacing: 16) {
@@ -938,7 +922,6 @@ struct DataMigrationSheet: View {
                     }
                     .padding(.horizontal)
 
-                    // Export Section
                     VStack(alignment: .leading, spacing: 16) {
                         Text("EXPORT DATA")
                             .font(.caption.bold())
@@ -964,14 +947,11 @@ struct DataMigrationSheet: View {
                                 Task { @MainActor in
                                     do {
                                         let exportUrl = try await migrationManager.exportDataToDisk()
-                                        // Ensure state update happens on main thread
                                         selectedExportFile = exportUrl
 
-                                        // Refresh available exports list
                                         scanForExportFiles()
 
-                                        // Small delay to ensure UI updates before alert
-                                        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+                                        try? await Task.sleep(nanoseconds: 100_000_000) 
 
                                         AlertManager.shared.showAlert(
                                             title: "Export Complete",
@@ -1001,7 +981,6 @@ struct DataMigrationSheet: View {
                         }
                     }
 
-                    // Import Section
                     VStack(alignment: .leading, spacing: 16) {
                         Text("IMPORT TO CLOUDKIT")
                             .font(.caption.bold())
@@ -1162,9 +1141,17 @@ struct DataMigrationSheet: View {
                 .padding(.vertical)
             }
             .background(selectedTheme.colors(for: colorScheme).background)
+            #if canImport(UIKit)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: {
+                    #if canImport(UIKit)
+                    return .navigationBarTrailing
+                    #else
+                    return .automatic
+                    #endif
+                }()) {
                     Button("Done") {
                         dismiss()
                     }
@@ -1188,7 +1175,6 @@ struct DataMigrationSheet: View {
             return
         }
 
-        // Filter for migration export files and sort by date (newest first)
         let exports = contents
             .filter { $0.lastPathComponent.hasPrefix("migration_export_") && $0.pathExtension == "json" }
             .sorted { file1, file2 in
@@ -1199,11 +1185,8 @@ struct DataMigrationSheet: View {
 
         availableExports = exports
 
-        // If we have a newly created export, select it
         if let selectedFile = selectedExportFile, exports.contains(selectedFile) {
-            // Keep current selection
         } else if let mostRecent = exports.first {
-            // Auto-select most recent export
             selectedExportFile = mostRecent
         }
     }
@@ -1250,7 +1233,6 @@ struct DataMigrationSheet: View {
             if let files = try? fm.contentsOfDirectory(at: folderURL, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) {
                 for file in files {
                     if let isDir = try? file.resourceValues(forKeys: [.isDirectoryKey]).isDirectory, isDir == true {
-                        // Include Assets contents
                         if file.lastPathComponent == "Assets" {
                             if let assets = try? fm.contentsOfDirectory(at: file, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]) {
                                 fileCount += assets.count
@@ -1280,12 +1262,10 @@ struct DataMigrationSheet: View {
         do {
             try FileManager.default.removeItem(at: url)
 
-            // If deleted file was selected, clear selection
             if selectedExportFile == url {
                 selectedExportFile = nil
             }
 
-            // Refresh the list
             scanForExportFiles()
 
             AlertManager.shared.showAlert(
@@ -1332,4 +1312,3 @@ struct StatCard: View {
 #Preview {
     SettingsView()
 }
-

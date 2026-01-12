@@ -15,9 +15,10 @@ struct ChatRoom: Identifiable, Hashable, Codable {
     var lastMessageDate: Date?
     var participants: [String]
     let description: String?
-    let isPrivate: Bool?
+    var isPrivate: Bool?
     let type: RoomType
     let messageLifetime: TimeInterval?
+    var avatarAsset: CKAsset?
 
     // CloudKit record keys
     static let recordType = "ChatRoom"
@@ -32,6 +33,22 @@ struct ChatRoom: Identifiable, Hashable, Codable {
     static let isPrivateKey = "isPrivate"
     static let typeKey = "type"
     static let messageLifetimeKey = "messageLifetime"
+    static let avatarAssetKey = "avatarAsset"
+
+    // Codable keys (excluding avatarAsset since CKAsset is not Codable)
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case createdBy
+        case createdAt
+        case lastMessage
+        case lastMessageDate
+        case participants
+        case description
+        case isPrivate
+        case type
+        case messageLifetime
+    }
 
     init(from record: CKRecord) throws {
         guard
@@ -65,6 +82,7 @@ struct ChatRoom: Identifiable, Hashable, Codable {
         self.type =
             RoomType(rawValue: record[ChatRoom.typeKey] as? String ?? "Regular Room") ?? .regular
         self.messageLifetime = record[ChatRoom.messageLifetimeKey] as? TimeInterval
+        self.avatarAsset = record[ChatRoom.avatarAssetKey] as? CKAsset
     }
 
     init(
@@ -79,9 +97,43 @@ struct ChatRoom: Identifiable, Hashable, Codable {
         self.lastMessageDate = nil
         self.participants = participants
         self.description = nil
-        self.isPrivate = false
+        self.isPrivate = true  // Default to private
         self.type = type
         self.messageLifetime = messageLifetime
+        self.avatarAsset = nil
+    }
+
+    // Custom Decodable init - avatarAsset will be nil when decoded from JSON
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        createdBy = try container.decode(String.self, forKey: .createdBy)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        lastMessage = try container.decodeIfPresent(String.self, forKey: .lastMessage)
+        lastMessageDate = try container.decodeIfPresent(Date.self, forKey: .lastMessageDate)
+        participants = try container.decode([String].self, forKey: .participants)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        isPrivate = try container.decodeIfPresent(Bool.self, forKey: .isPrivate)
+        type = try container.decode(RoomType.self, forKey: .type)
+        messageLifetime = try container.decodeIfPresent(TimeInterval.self, forKey: .messageLifetime)
+        avatarAsset = nil // CKAsset cannot be decoded from JSON
+    }
+
+    // Custom Encodable - skip avatarAsset since it's not Codable
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(createdBy, forKey: .createdBy)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(lastMessage, forKey: .lastMessage)
+        try container.encodeIfPresent(lastMessageDate, forKey: .lastMessageDate)
+        try container.encode(participants, forKey: .participants)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encodeIfPresent(isPrivate, forKey: .isPrivate)
+        try container.encode(type, forKey: .type)
+        try container.encodeIfPresent(messageLifetime, forKey: .messageLifetime)
     }
 
     func toRecord() -> CKRecord {
@@ -104,6 +156,9 @@ struct ChatRoom: Identifiable, Hashable, Codable {
         record[ChatRoom.typeKey] = type.rawValue
         if let messageLifetime = messageLifetime {
             record[ChatRoom.messageLifetimeKey] = messageLifetime
+        }
+        if let avatarAsset = avatarAsset {
+            record[ChatRoom.avatarAssetKey] = avatarAsset
         }
         return record
     }

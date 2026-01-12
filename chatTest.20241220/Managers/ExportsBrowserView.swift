@@ -1,6 +1,10 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 struct ExportsBrowserView: View {
     @State private var exports: [ExportBundle] = []
     @State private var showingShareSheet: Bool = false
@@ -54,10 +58,22 @@ struct ExportsBrowserView: View {
             }
             .navigationTitle("Exports")
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: {
+                    #if canImport(UIKit)
+                    return .navigationBarLeading
+                    #else
+                    return .cancellationAction
+                    #endif
+                }()) {
                     Button("Close") { dismiss() }
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: {
+                    #if canImport(UIKit)
+                    return .navigationBarTrailing
+                    #else
+                    return .automatic
+                    #endif
+                }()) {
                     Button {
                         refresh()
                     } label: {
@@ -69,11 +85,13 @@ struct ExportsBrowserView: View {
                 ExportDetailView(bundle: bundle)
             }
             .onAppear { refresh() }
+            #if canImport(UIKit)
             .sheet(isPresented: $showingShareSheet) {
                 if let shareURL = shareURL {
                     ActivityView(activityItems: [shareURL])
                 }
             }
+            #endif
         }
     }
 
@@ -223,7 +241,8 @@ struct ExportBundle: Identifiable, Hashable {
     }
 }
 
-// MARK: - ActivityView for sharing
+#if canImport(UIKit)
+// MARK: - ActivityView for sharing (iOS only)
 struct ActivityView: UIViewControllerRepresentable {
     let activityItems: [Any]
     let applicationActivities: [UIActivity]? = nil
@@ -234,3 +253,4 @@ struct ActivityView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
+#endif

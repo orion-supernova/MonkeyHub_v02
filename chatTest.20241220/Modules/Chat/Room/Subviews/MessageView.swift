@@ -6,13 +6,45 @@ struct MessageView: View {
     let onImageTapped: (URL) -> Void
     let onDelete: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
 
     private var isCurrentUser: Bool {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         return message.senderId == userId
     }
+    
+    private var isSystemMessage: Bool {
+        return message.senderId == ChatMessage.systemSenderId
+    }
 
     var body: some View {
+        if isSystemMessage {
+            systemMessageView
+        } else {
+            regularMessageView
+        }
+    }
+    
+    private var systemMessageView: some View {
+        HStack {
+            Spacer()
+            
+            Text(message.content)
+                .font(.caption)
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(selectedTheme.colors(for: colorScheme).cardBackground.opacity(0.6))
+                )
+                .padding(.vertical, 4)
+            
+            Spacer()
+        }
+    }
+    
+    private var regularMessageView: some View {
         HStack {
             if isCurrentUser { Spacer() }
 
@@ -127,6 +159,8 @@ struct MessageView: View {
             if let url = message.assetURL {
                 AudioPlayerView(url: url)
             }
+        case .system:
+            EmptyView()
         }
     }
 }

@@ -16,6 +16,7 @@ struct ChatRoomView: View {
     @State private var showCamera = false
     @State private var showVoiceRecorder = false
     @State private var isShowingAttachmentMenu = false
+    @State private var showRoomInfo = false
 
     init(room: ChatRoom) {
         self.room = room
@@ -80,26 +81,12 @@ struct ChatRoomView: View {
                 return .automatic
                 #endif
             }()) {
-                Button("Token") {
-                    let token = getDeviceToken()
-                    print("Device Token: \(token)")
-                    
-                    #if canImport(UIKit)
-                    UIPasteboard.general.string = token  // Copy to clipboard
-                    #elseif canImport(AppKit)
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(token, forType: .string)
-                    #endif
-
-                    // Optional: Show an alert that token was copied
-                    let alertMessage =
-                        token == "Token not available"
-                        ? "No token available yet" : "Token copied to clipboard"
-
-                    AlertManager.shared.showAlert(
-                        title: "Device Token",
-                        message: alertMessage
-                    )
+                Button {
+                    showRoomInfo = true
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.body)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
                 }
             }
         }
@@ -109,11 +96,19 @@ struct ChatRoomView: View {
         }
         .onAppear {
             navigationState.currentScreen = .chatRoom
-            navigationState.currentRoomId = room.id  // Track active room for notification suppression
+            navigationState.currentRoomId = room.id
         }
         .onDisappear {
             navigationState.currentScreen = .home
-            navigationState.currentRoomId = nil  // Clear active room
+            navigationState.currentRoomId = nil
+        }
+        .sheet(isPresented: $showRoomInfo) {
+            // onDismiss callback - refresh messages when sheet closes
+            Task {
+                await viewModel.loadMessages()
+            }
+        } content: {
+            RoomInfoView(room: room)
         }
         #if canImport(UIKit)
         .fullScreenCover(isPresented: $showCamera) {
@@ -153,7 +148,7 @@ struct ChatRoomView: View {
         .onChange(of: selectedImage) { newImage in
             if let image = newImage {
                 Task {
-                    isShowingAttachmentMenu = false // Dismiss attachment menu
+                    isShowingAttachmentMenu = false
                     await viewModel.sendImage(image)
                     selectedImage = nil
                 }
@@ -194,10 +189,6 @@ struct ChatRoomView: View {
                 )
             }
         )
-    }
-
-    private func getDeviceToken() -> String {
-        return UserDefaults.standard.string(forKey: "deviceToken") ?? "Token not available"
     }
 }
 

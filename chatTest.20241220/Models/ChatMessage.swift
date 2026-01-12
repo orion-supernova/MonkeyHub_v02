@@ -7,6 +7,7 @@ enum MessageType: String, Codable {
     case video
     case url
     case audio
+    case system
 }
 
 enum MessageStatus: String, Codable {
@@ -25,6 +26,10 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     let roomId: String
     let assetURL: URL?
     var status: MessageStatus
+    
+    // System message identifier
+    static let systemSenderId = "system"
+    static let systemSenderName = "System"
 
     // CloudKit record keys
     static let recordType = "ChatMessage"

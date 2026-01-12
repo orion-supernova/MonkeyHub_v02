@@ -48,12 +48,14 @@ class LoginViewModel: ObservableObject {
                         throw AuthError.credentialError
                     }
 
+                    // IMPORTANT: Always check if user exists FIRST
                     let userExists = try await isUserExists()
 
                     if userExists {
+                        Logger.info("User exists, logging in...", category: .auth)
                         try await loginUser(with: credential)
                     } else {
-
+                        Logger.info("User does not exist, creating new user...", category: .auth)
                         let email = credential.email
                         let fullName = credential.fullName
                         let username = "\(fullName?.givenName ?? "") \(fullName?.familyName ?? "")"
@@ -83,28 +85,39 @@ class LoginViewModel: ObservableObject {
         do {
             Logger.info("Creating new user: \(name) (\(email))", category: .auth)
             let iCloudId = try await cloudKit.container.userRecordID()
-            Logger.info("Fetched iCloud ID: \(iCloudId.recordName)", category: .auth)
+            let userId = iCloudId.recordName
+            Logger.info("Fetched iCloud ID: \(userId)", category: .auth)
 
+            // Create user with original iCloud ID (including underscore if present)
+            // The underscore will be stripped only for CKRecord.ID in toRecord()
             let newUser = ChatUser(
-                id: iCloudId.recordName,
+                id: userId,
                 name: name,
                 email: email
             )
 
             do {
                 try await cloudKit.database.save(newUser.toRecord())
-                Logger.info("CloudKit save successful for user \(iCloudId.recordName)", category: .cloudKit)
+                Logger.info("CloudKit save successful for user \(userId)", category: .cloudKit)
             } catch let error {
                 Logger.error("CloudKit Save Error: \(error.localizedDescription)", category: .cloudKit)
-                // If the error contains specific info about why it failed
+
+                // Handle the case where user already exists (e.g., environment switch)
                 if let ckError = error as? CKError {
                     Logger.error("CKError Code: \(ckError.code.rawValue)", category: .cloudKit)
+
+                    // If record already exists, try to login instead
+                    if ckError.code == .serverRecordChanged || ckError.code == .batchRequestFailed {
+                        Logger.info("User might already exist in different environment, attempting login...", category: .auth)
+                        try await loginUser(with: credential)
+                        return
+                    }
                 }
                 throw CloudKitError.custom(error.localizedDescription)
             }
 
             cloudKit.isAuthenticated = true
-            userDefaults.set(iCloudId.recordName, forKey: userIdUserDefaultsKey)
+            userDefaults.set(userId, forKey: userIdUserDefaultsKey)
 
             // Setup notifications for new user
             await cloudKit.syncDeviceTokenWithCloudKit()
@@ -120,16 +133,16 @@ class LoginViewModel: ObservableObject {
     private func loginUser(with credential: ASAuthorizationAppleIDCredential) async throws {
         do {
             let iCloudId = try await cloudKit.container.userRecordID()
-            let id = iCloudId.recordName
+            let userId = iCloudId.recordName
 
-            userDefaults.set(id, forKey: userIdUserDefaultsKey)
+            userDefaults.set(userId, forKey: userIdUserDefaultsKey)
             cloudKit.isAuthenticated = true
-            
+
             // Setup notifications for existing user
             await cloudKit.syncDeviceTokenWithCloudKit()
             await cloudKit.subscribeToAllJoinedRooms()
-            
-            Logger.info("User logged in successfully: \(id)", category: .auth)
+
+            Logger.info("User logged in successfully: \(userId)", category: .auth)
         } catch {
             Logger.error("Failed to login user: \(error)", category: .auth)
             throw AuthError.signInFailed
@@ -139,9 +152,11 @@ class LoginViewModel: ObservableObject {
     private func isUserExists() async throws -> Bool {
         // Get the iCloud user record ID
         let iCloudId = try await cloudKit.container.userRecordID()
+        let userId = iCloudId.recordName
+        Logger.info("Checking if user exists with ID: \(userId)", category: .auth)
 
-        // Check for user with iCloud ID
-        let predicate = NSPredicate(format: "id == %@", iCloudId.recordName)
+        // Check for user with iCloud ID (keep underscore as stored in field)
+        let predicate = NSPredicate(format: "id == %@", userId)
         let query = CKQuery(recordType: "ChatUser", predicate: predicate)
 
         do {

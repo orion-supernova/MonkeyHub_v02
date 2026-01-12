@@ -132,7 +132,7 @@ class ChatRepository: ObservableObject {
                 // Preserve pending messages
                 let pendingMessages = self.activeRoomMessages.filter { $0.status == .pending }
 
-                // Clear and re-populate with fetched messages (limit to newest batch + pending)
+                // Clear and re-populate with fetched messages (recent 30 + pending)
                 self.activeRoomMessages = []
 
                 withAnimation {
@@ -164,9 +164,9 @@ class ChatRepository: ObservableObject {
 
         do {
             let olderMessages = try await cloudKit.fetchRecentMessages(for: roomId, before: oldestDate, limit: 30)
-            guard !olderMessages.isEmpty else { 
+            guard !olderMessages.isEmpty else {
                 print("🏁 ChatRepository: No older messages found")
-                return 
+                return
             }
 
             if self.activeRoomId == roomId {

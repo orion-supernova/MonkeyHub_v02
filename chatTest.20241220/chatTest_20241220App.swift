@@ -11,10 +11,18 @@ import SwiftUI
 @main
 struct chatTest_20241220App: App {
     @StateObject private var cloudKit = CloudKitManager.shared
-    
+    private let appDelegate = AppDelegate()
+
     #if canImport(UIKit)
-    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var uiAppDelegate
     #endif
+
+    init() {
+        // Register for notifications on macOS
+        #if !canImport(UIKit)
+        appDelegate.registerForPushNotifications()
+        #endif
+    }
 
     private var activeNotification: Notification.Name {
         #if canImport(UIKit)

@@ -71,9 +71,11 @@ extension ChatUser {
     ///
     /// - Returns: CKRecord representation of this user
     func toRecord() -> CKRecord {
-        let recordID = CKRecord.ID(recordName: id)
-        let record = CKRecord(recordType: Self.recordType, recordID: recordID)
-        
+        // Let CloudKit generate a system UUID as the record ID (like existing records)
+        // Don't force it to match the user's iCloud ID
+        let record = CKRecord(recordType: Self.recordType)
+
+        // Store the user's iCloud ID in the id FIELD (can have underscore)
         record[CodingKeys.id.rawValue] = id
         record[CodingKeys.name.rawValue] = name
         record[CodingKeys.username.rawValue] = username

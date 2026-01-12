@@ -84,11 +84,22 @@ class CloudKitManager: ObservableObject {
     @Published var isAuthenticated: Bool = false
     @Published var isInitialized = false
     @Published var iCloudStatus: CloudKitStatus = .unknown
+    @Published var currentEnvironment: CloudKitEnvironment = .unknown
 
     // Schema versioning
     private let versionKey = "version"
     private let currentSchemaVersion = 2  // Updated for v1→v2 migration
     private var hasAttemptedMigration = false  // Prevents duplicate migration attempts
+
+    enum CloudKitEnvironment: String {
+        case development = "Development"
+        case production = "Production"
+        case unknown = "Unknown"
+
+        var displayName: String {
+            return self.rawValue
+        }
+    }
 
     enum CloudKitStatus {
         case unknown
@@ -105,9 +116,68 @@ class CloudKitManager: ObservableObject {
         self.database = container.publicCloudDatabase
     }
 
+    // MARK: - Environment Detection
+    private func detectEnvironment() async {
+        // Check if environment is stored in UserDefaults (user manually set it)
+        if let savedEnvironment = UserDefaults.standard.string(forKey: "cloudKitEnvironment"),
+           let environment = CloudKitEnvironment(rawValue: savedEnvironment) {
+            await MainActor.run {
+                self.currentEnvironment = environment
+            }
+            return
+        }
+
+        // Try to detect environment by checking schema deployment
+        // If we can fetch a SchemaVersion record, it means the schema is deployed (likely production)
+        do {
+            let predicate = NSPredicate(value: true)
+            let query = CKQuery(recordType: "SchemaVersion", predicate: predicate)
+            let (results, _) = try await database.records(matching: query, resultsLimit: 1)
+
+            if let _ = try? results.first?.1.get() {
+                // Found SchemaVersion record - schema is deployed, likely production
+                await MainActor.run {
+                    self.currentEnvironment = .production
+                    Logger.info("🔍 Auto-detected environment: Production (schema deployed)", category: .cloudKit)
+                }
+                return
+            }
+        } catch {
+            // If query fails or no records found, fall back to build config
+            Logger.info("🔍 Could not auto-detect environment, using build config", category: .cloudKit)
+        }
+
+        // Fallback: Use build configuration as heuristic
+        #if DEBUG
+        await MainActor.run {
+            self.currentEnvironment = .development
+        }
+        #else
+        await MainActor.run {
+            self.currentEnvironment = .production
+        }
+        #endif
+    }
+
+    func setEnvironment(_ environment: CloudKitEnvironment) {
+        UserDefaults.standard.set(environment.rawValue, forKey: "cloudKitEnvironment")
+        self.currentEnvironment = environment
+    }
+
+    func getEnvironmentInfo() -> String {
+        return """
+        CloudKit Environment: \(currentEnvironment.displayName)
+        Container: \(container.containerIdentifier ?? "Unknown")
+        Database: Public
+        """
+    }
+
     // MARK: - Initialization
     func initialize() async {
         Logger.info("Starting CloudKit initialization...", category: .cloudKit)
+
+        // Detect environment
+        await detectEnvironment()
 
         // FAST PATH: If we have a stored user ID, assume we are good to go for UI purposes
         if userDefaults.string(forKey: userIdUserDefaultsKey) != nil {
@@ -294,6 +364,16 @@ class CloudKitManager: ObservableObject {
         }
     }
 
+    func fetchChatRoom(byId roomId: String) async throws -> ChatRoom? {
+        let recordId = CKRecord.ID(recordName: roomId)
+        do {
+            let record = try await database.record(for: recordId)
+            return try ChatRoom(from: record)
+        } catch let error as CKError where error.code == .unknownItem {
+            return nil
+        }
+    }
+
     func fetchAvailableRooms() async throws -> [ChatRoom] {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let predicate = NSPredicate(
@@ -374,6 +454,60 @@ class CloudKitManager: ObservableObject {
         return try records.compactMap { result in
             let record = try result.1.get()
             return try ChatMessage(from: record)
+        }
+    }
+
+    // MIGRATION ONLY: Fetch ALL messages without limit (using CKQueryOperation for true pagination)
+    func fetchAllMessages(for roomId: String) async throws -> [ChatMessage] {
+        return try await withCheckedThrowingContinuation { continuation in
+            let predicate = NSPredicate(format: "%K == %@", ChatMessage.roomIdKey, roomId)
+            let query = CKQuery(recordType: ChatMessage.recordType, predicate: predicate)
+            query.sortDescriptors = [NSSortDescriptor(key: ChatMessage.timestampKey, ascending: false)]
+
+            var allMessages: [ChatMessage] = []
+            let operation = CKQueryOperation(query: query)
+            operation.resultsLimit = CKQueryOperation.maximumResults // No limit
+
+            operation.recordMatchedBlock = { recordID, result in
+                switch result {
+                case .success(let record):
+                    if let message = try? ChatMessage(from: record) {
+                        allMessages.append(message)
+                    }
+                case .failure(let error):
+                    print("⚠️ Failed to fetch record \(recordID): \(error)")
+                }
+            }
+
+            operation.queryResultBlock = { result in
+                switch result {
+                case .success(let cursor):
+                    if let cursor = cursor {
+                        // More results available, continue fetching
+                        let nextOperation = CKQueryOperation(cursor: cursor)
+                        nextOperation.recordMatchedBlock = operation.recordMatchedBlock
+                        nextOperation.queryResultBlock = operation.queryResultBlock
+                        self.database.add(nextOperation)
+                    } else {
+                        // No more results
+                        continuation.resume(returning: allMessages)
+                    }
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+
+            database.add(operation)
+        }
+    }
+
+    func fetchMessage(byId messageId: String) async throws -> ChatMessage? {
+        let recordId = CKRecord.ID(recordName: messageId)
+        do {
+            let record = try await database.record(for: recordId)
+            return try ChatMessage(from: record)
+        } catch let error as CKError where error.code == .unknownItem {
+            return nil
         }
     }
 

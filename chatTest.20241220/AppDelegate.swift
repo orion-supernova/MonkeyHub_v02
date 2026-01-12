@@ -18,35 +18,39 @@ protocol BaseAppDelegate {}
 #endif
 
 class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
-    
+
     // Deduplication tracker for CloudKit notifications
     private var processedNotificationIDs = Set<String>()
     private var processedRecordIDs = Set<String>()
     private var lastCleanupDate = Date()
-    
+
     #if canImport(UIKit)
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         registerForPushNotifications()
         return true
     }
-    
+
     func registerForPushNotifications() {
         UNUserNotificationCenter.current().delegate = self
-        
+
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            print("Permission granted: \(granted)")
-            guard granted else { return }
-            
+            print("✅ Notification permission granted: \(granted)")
+            guard granted else {
+                print("⚠️ User denied notification permissions")
+                return
+            }
+
             DispatchQueue.main.async {
+                print("📱 Registering for remote notifications...")
                 UIApplication.shared.registerForRemoteNotifications()
             }
         }
     }
-    
+
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let tokenParts = deviceToken.map { data in String(format: "%02.2hhx", data) }
         let token = tokenParts.joined()
-        print("Device Token: \(token)")
+        print("✅ Device Token: \(token)")
 
         // Store token locally
         UserDefaults.standard.set(token, forKey: "deviceToken")
@@ -56,9 +60,20 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
             await CloudKitManager.shared.updateDeviceToken(token)
         }
     }
-    
+
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("Failed to register for notifications: \(error.localizedDescription)")
+        print("❌ Failed to register for notifications: \(error.localizedDescription)")
+    }
+    #else
+    // macOS doesn't support APNS device tokens
+    // CloudKit silent notifications still work for background sync
+    func registerForPushNotifications() {
+        UNUserNotificationCenter.current().delegate = self
+
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            print("✅ macOS notification permission granted: \(granted)")
+            print("ℹ️ Note: macOS doesn't use device tokens. CloudKit silent notifications will work.")
+        }
     }
     #endif
 

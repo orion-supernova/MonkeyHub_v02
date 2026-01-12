@@ -88,7 +88,7 @@ class CloudKitManager: ObservableObject {
 
     // Schema versioning
     private let versionKey = "version"
-    private let currentSchemaVersion = 2  // Updated for v1→v2 migration
+    private let currentSchemaVersion = 3  // Updated for v2→v3 migration
     private var hasAttemptedMigration = false  // Prevents duplicate migration attempts
 
     enum CloudKitEnvironment: String {
@@ -598,7 +598,7 @@ class CloudKitManager: ObservableObject {
     /// Update the current user's device token in CloudKit
     ///
     /// This method syncs the APNs device token to the user's CloudKit record,
-    /// enabling push notifications for chatroom messages.
+    /// enabling push notifications for chatroom messages. Supports multiple devices.
     ///
     /// - Parameter token: The APNs device token as a hex string
     func updateDeviceToken(_ token: String) async {
@@ -623,14 +623,17 @@ class CloudKitManager: ObservableObject {
                 return
             }
 
-            // Only update if it changed
-            let currentToken = existingRecord[ChatUser.CodingKeys.deviceToken.rawValue] as? String
-            if currentToken != token {
-                existingRecord[ChatUser.CodingKeys.deviceToken.rawValue] = token
+            // Get existing device tokens or create new array
+            var deviceTokens = (existingRecord[ChatUser.CodingKeys.deviceTokens.rawValue] as? [String]) ?? []
+            
+            // Add the new token if it doesn't already exist
+            if !deviceTokens.contains(token) {
+                deviceTokens.append(token)
+                existingRecord[ChatUser.CodingKeys.deviceTokens.rawValue] = deviceTokens
                 try await database.modifyRecords(saving: [existingRecord], deleting: [])
-                Logger.info("Device token updated successfully in CloudKit", category: .cloudKit)
+                Logger.info("Device token added successfully (total: \(deviceTokens.count) devices)", category: .cloudKit)
             } else {
-                Logger.info("Device token already up to date in CloudKit", category: .cloudKit)
+                Logger.info("Device token already registered", category: .cloudKit)
             }
         } catch {
             Logger.error("Failed to update device token: \(error)", category: .cloudKit)

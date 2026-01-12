@@ -2,122 +2,137 @@ import CloudKit
 import Foundation
 
 /**
- Migration: Version 2 to Version 3 (EXAMPLE/TEMPLATE - NOT ACTIVE)
+ Migration: Version 2 to Version 3
+
+ ## Changes
+ - Converts `deviceToken` (String) to `deviceTokens` ([String]) in ChatUser records
+ - Clears old `deviceToken` field data after migration
+ - Adds `avatarAsset` field support to ChatRoom records (CKAsset?, optional)
 
  ## Purpose
- This is an EXAMPLE migration demonstrating the RENAME FIELD pattern.
- It is NOT registered in MigrationManifest and will NOT run.
- Use this as a template when you need to rename a field.
+ - Support multiple devices per user for push notifications
+ - Enable room avatars for visual customization
 
- ## Pattern: Field Rename
- Demonstrates how to rename a field while maintaining backwards compatibility.
+ ## Data Impact
+ - All existing ChatUser records with deviceToken will have it migrated to deviceTokens array
+ - Old deviceToken field will be cleared (set to nil)
+ - Estimated time: ~1 second per 100 records
 
- ## Example Change
- - Rename ChatRoom.createdBy → ChatRoom.ownerId
+ ## Breaking Changes
+ - Old app versions (v2) will NOT work after this migration
+ - All users MUST update to v3+
 
- ## Strategy
- 1. Add new field (ownerId) while keeping old field (createdBy)
- 2. Copy data from old field to new field for all records
- 3. Both fields exist temporarily for backwards compatibility
- 4. In a future version, remove the old field
-
- ## Implementation Steps
- 1. Update model to include BOTH old and new fields
- 2. Implement this migration to copy data
- 3. Deploy to all users
- 4. In next version, update model to only use new field
- 5. Create another migration to remove old field (optional)
-
- ## Notes
- - CloudKit doesn't have true "rename" operation
- - This requires keeping both fields temporarily
- - Old app versions can still use old field name
- - New app versions use new field name
+ ## Rollback
+ - Not supported. Once migrated, old deviceToken data is lost.
  */
-class Migration_v2_to_v3_EXAMPLE: CloudKitMigration {
+class Migration_v2_to_v3: CloudKitMigration {
     let fromVersion = 2
     let toVersion = 3
-    let description = "Example: Rename ChatRoom.createdBy to ownerId"
+    let description = "Migrate deviceToken to deviceTokens array"
 
     func migrate(database: CKDatabase) async throws {
-        Logger.info("Starting EXAMPLE migration v2 → v3: Rename field", category: .cloudKit)
+        Logger.info("🚀 Starting migration v2 → v3", category: .cloudKit)
 
-        // Fetch all ChatRoom records
-        let records = try await CloudKitBatchOperations.batchFetch(
-            recordType: ChatRoom.recordType,
-            predicate: NSPredicate(value: true),
-            database: database
-        )
+        try await migrateUsers(database: database)
 
-        Logger.info("Found \(records.count) ChatRoom records", category: .cloudKit)
-
-        var updatedRecords: [CKRecord] = []
-
-        for record in records {
-            // Copy value from old field to new field
-            if let createdBy = record["createdBy"] as? String {
-                record["ownerId"] = createdBy
-                // Keep old field for backwards compatibility
-                // record["createdBy"] remains unchanged
-                updatedRecords.append(record)
-            }
-        }
-
-        // Batch save
-        if !updatedRecords.isEmpty {
-            try await CloudKitBatchOperations.batchSave(
-                records: updatedRecords,
-                database: database,
-                progress: { completed, total in
-                    Logger.debug(
-                        "Rename migration progress: \(completed)/\(total)",
-                        category: .cloudKit)
-                }
-            )
-        }
-
-        Logger.info("EXAMPLE Migration v2 → v3 completed", category: .cloudKit)
+        Logger.info("✅ Migration v2 → v3 completed successfully!", category: .cloudKit)
     }
-
-    func rollback(database: CKDatabase) async throws {
-        Logger.info("Rolling back EXAMPLE migration v3 → v2", category: .cloudKit)
-
-        // Remove the new field (ownerId)
+    
+    private func migrateUsers(database: CKDatabase) async throws {
+        Logger.info("📱 Migrating ChatUser records (deviceToken → deviceTokens)...", category: .cloudKit)
+        
         let records = try await CloudKitBatchOperations.batchFetch(
-            recordType: ChatRoom.recordType,
+            recordType: ChatUser.recordType,
             predicate: NSPredicate(value: true),
             database: database
         )
 
+        Logger.info("📊 Found \(records.count) ChatUser records to migrate", category: .cloudKit)
+
+        guard !records.isEmpty else {
+            Logger.info("ℹ️ No ChatUser records to migrate", category: .cloudKit)
+            return
+        }
+
         var updatedRecords: [CKRecord] = []
+        var migrated = 0
+
         for record in records {
-            record["ownerId"] = nil
+            // Migrate old deviceToken to new deviceTokens array
+            if let oldToken = record[ChatUser.CodingKeys.deviceToken.rawValue] as? String, !oldToken.isEmpty {
+                record[ChatUser.CodingKeys.deviceTokens.rawValue] = [oldToken]
+                migrated += 1
+                Logger.info(
+                    "➕ Migrating deviceToken to deviceTokens for user: \(record[ChatUser.CodingKeys.id.rawValue] ?? "unknown")",
+                    category: .cloudKit)
+            } else {
+                // No old token, set empty array
+                record[ChatUser.CodingKeys.deviceTokens.rawValue] = [String]()
+            }
+            
+            // Clear old deviceToken field
+            record[ChatUser.CodingKeys.deviceToken.rawValue] = nil
+
             updatedRecords.append(record)
         }
 
+        Logger.info(
+            "💾 Updating \(updatedRecords.count) ChatUser records (migrated: \(migrated) tokens)",
+            category: .cloudKit)
+
         try await CloudKitBatchOperations.batchSave(
             records: updatedRecords,
-            database: database
+            database: database,
+            progress: { completed, total in
+                Logger.info(
+                    "📈 Migration progress: \(completed)/\(total)",
+                    category: .cloudKit)
+            },
+            savePolicy: .allKeys  // Required to process nil values (clearing old field)
         )
 
-        Logger.info("Rollback completed", category: .cloudKit)
+        Logger.info("✅ All ChatUser records migrated successfully!", category: .cloudKit)
+    }
+
+    func rollback(database: CKDatabase) async throws {
+        Logger.info(
+            "⚠️ Rollback v3 → v2: Not supported",
+            category: .cloudKit)
+        throw MigrationError.rollbackFailed(version: 3, reason: "Cannot restore cleared deviceToken data")
     }
 
     func validate(database: CKDatabase) async throws -> Bool {
-        let query = CKQuery(
-            recordType: ChatRoom.recordType,
-            predicate: NSPredicate(value: true)
-        )
-        let (records, _) = try await database.records(matching: query, resultsLimit: 10)
+        Logger.info("🔍 Validating if migration v2 → v3 is needed...", category: .cloudKit)
 
-        for (_, result) in records {
-            let record = try result.get()
-            // Migration needed if ownerId field is missing but createdBy exists
-            if record["ownerId"] == nil && record["createdBy"] != nil {
-                return true
+        let query = CKQuery(recordType: ChatUser.recordType, predicate: NSPredicate(value: true))
+
+        do {
+            let (records, _) = try await database.records(matching: query, resultsLimit: 10)
+
+            guard !records.isEmpty else {
+                return false
             }
-        }
 
-        return false
+            // Check if any records still need migration
+            for (_, result) in records {
+                let record = try result.get()
+                let hasOldDeviceToken = record[ChatUser.CodingKeys.deviceToken.rawValue] != nil
+                let hasNewDeviceTokens = record[ChatUser.CodingKeys.deviceTokens.rawValue] != nil
+
+                // Migration needed if:
+                // 1. Old deviceToken field still has data, OR
+                // 2. New deviceTokens field doesn't exist yet
+                if hasOldDeviceToken || !hasNewDeviceTokens {
+                    Logger.info("⚠️ Migration needed (oldToken: \(hasOldDeviceToken), newTokens: \(hasNewDeviceTokens))", category: .cloudKit)
+                    return true
+                }
+            }
+
+            Logger.info("✅ All records already migrated", category: .cloudKit)
+            return false
+
+        } catch {
+            return false
+        }
     }
 }

@@ -62,21 +62,53 @@ final class RoomInfoViewModel: ObservableObject {
     }
     
     func updateRoomAvatar(_ image: PlatformImage) async {
+        print("🖼️ RoomInfoViewModel: updateRoomAvatar called")
+        print("🖼️ RoomInfoViewModel: Room ID: \(room.id)")
+        print("🖼️ RoomInfoViewModel: Room Name: \(room.name)")
         isLoading = true
         error = nil
         
         do {
+            print("🖼️ RoomInfoViewModel: Creating asset from image...")
             let asset = try createAsset(from: image)
+            print("🖼️ RoomInfoViewModel: Asset created at: \(asset.fileURL?.path ?? "unknown")")
             
-            let recordId = CKRecord.ID(recordName: room.id)
-            let record = try await cloudKit.database.record(for: recordId)
+            // Query by the "id" field, not recordID
+            print("🖼️ RoomInfoViewModel: Querying room by id field: \(room.id)")
+            let predicate = NSPredicate(format: "%K == %@", ChatRoom.idKey, room.id)
+            let query = CKQuery(recordType: ChatRoom.recordType, predicate: predicate)
+            
+            let (records, _) = try await cloudKit.database.records(matching: query, resultsLimit: 1)
+            guard let record = try records.first?.1.get() else {
+                print("❌ RoomInfoViewModel: Room not found with id: \(room.id)")
+                throw CloudKitError.recordNotFound
+            }
+            
+            print("✅ RoomInfoViewModel: Room found! Record ID: \(record.recordID.recordName)")
+            
             record[ChatRoom.avatarAssetKey] = asset
             
+            print("🖼️ RoomInfoViewModel: Saving record with avatar...")
             _ = try await cloudKit.database.modifyRecords(saving: [record], deleting: [])
+            print("🖼️ RoomInfoViewModel: Avatar saved to CloudKit successfully")
             
-            room.avatarAsset = asset
+            // Refresh room to get updated avatarAsset
+            let (updatedRecords, _) = try await cloudKit.database.records(matching: query, resultsLimit: 1)
+            if let updatedRecord = try updatedRecords.first?.1.get() {
+                room = try ChatRoom(from: updatedRecord)
+                print("🖼️ RoomInfoViewModel: Room refreshed with new avatar")
+            }
+            
+            // Send system message about avatar change
+            await sendAvatarChangeMessage()
+            
+            isLoading = false
+        } catch let error as CKError {
+            print("❌ RoomInfoViewModel: CloudKit error: \(error)")
+            self.error = .unknown(error)
             isLoading = false
         } catch {
+            print("❌ RoomInfoViewModel: Failed to update avatar: \(error)")
             self.error = error as? CloudKitError ?? .unknown(error)
             isLoading = false
         }
@@ -167,6 +199,12 @@ final class RoomInfoViewModel: ObservableObject {
             self.error = error as? CloudKitError ?? .unknown(error)
             isLoading = false
         }
+    }
+    
+    private func sendAvatarChangeMessage() async {
+        let currentUserName = await fetchCurrentUserName()
+        let content = "\(currentUserName) updated the room avatar"
+        await sendSystemMessage(content)
     }
     
     private func sendNameChangeMessage(oldName: String, newName: String) async {

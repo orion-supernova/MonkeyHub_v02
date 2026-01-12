@@ -82,7 +82,18 @@ struct ChatRoom: Identifiable, Hashable, Codable {
         self.type =
             RoomType(rawValue: record[ChatRoom.typeKey] as? String ?? "Regular Room") ?? .regular
         self.messageLifetime = record[ChatRoom.messageLifetimeKey] as? TimeInterval
-        self.avatarAsset = record[ChatRoom.avatarAssetKey] as? CKAsset
+        
+        // Persist avatar asset to permanent storage
+        if let asset = record[ChatRoom.avatarAssetKey] as? CKAsset {
+            // Create a new CKAsset with the persisted URL
+            if let persistedURL = AssetPersistenceService.shared.persistAsset(asset) {
+                self.avatarAsset = CKAsset(fileURL: persistedURL)
+            } else {
+                self.avatarAsset = asset
+            }
+        } else {
+            self.avatarAsset = nil
+        }
     }
 
     init(

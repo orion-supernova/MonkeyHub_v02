@@ -67,13 +67,21 @@ struct RoomInfoView: View {
                 ImagePicker(image: $selectedImage)
             }
             .onChange(of: selectedImage) { newImage in
+                print("🖼️ RoomInfoView: selectedImage changed: \(newImage != nil)")
                 if let image = newImage {
+                    print("🖼️ RoomInfoView: Starting avatar upload...")
                     Task {
                         await viewModel.updateRoomAvatar(image)
-                        roomAvatarImage = image
+                        print("🖼️ RoomInfoView: Avatar upload completed, reloading...")
+                        // Reload avatar after upload completes
+                        loadRoomAvatar()
                         selectedImage = nil
                     }
                 }
+            }
+            .onChange(of: viewModel.room.avatarAsset) { _ in
+                // Reload avatar whenever the room's avatarAsset changes
+                loadRoomAvatar()
             }
             .alert("Change Room Visibility", isPresented: $showVisibilityAlert) {
                 Button("Cancel", role: .cancel) {}
@@ -129,24 +137,38 @@ struct RoomInfoView: View {
                             )
                     }
                     
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            Image(systemName: "camera.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(.white)
-                                .background(
-                                    Circle()
-                                        .fill(selectedTheme.colors(for: colorScheme).accent)
-                                        .frame(width: 32, height: 32)
-                                )
-                                .offset(x: -8, y: -8)
-                        }
+                    // Loading indicator overlay
+                    if viewModel.isLoading {
+                        Circle()
+                            .fill(Color.black.opacity(0.5))
+                            .frame(width: 120, height: 120)
+                        
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(1.5)
                     }
-                    .frame(width: 120, height: 120)
+                    
+                    if !viewModel.isLoading {
+                        VStack {
+                            Spacer()
+                            HStack {
+                                Spacer()
+                                Image(systemName: "camera.circle.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(.white)
+                                    .background(
+                                        Circle()
+                                            .fill(selectedTheme.colors(for: colorScheme).accent)
+                                            .frame(width: 32, height: 32)
+                                    )
+                                    .offset(x: -8, y: -8)
+                            }
+                        }
+                        .frame(width: 120, height: 120)
+                    }
                 }
             }
+            .disabled(viewModel.isLoading)
             
             if isEditingName {
                 HStack {

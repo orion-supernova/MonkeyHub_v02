@@ -487,30 +487,44 @@ struct EnhancedRoomCard: View {
     let action: () -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
+    @State private var roomAvatarImage: PlatformImage?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Header with room avatar and leave button
             HStack {
                 // Room avatar
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: selectedTheme.colors(for: colorScheme).primary,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                Group {
+                    if let avatarImage = roomAvatarImage {
+                        Image(platformImage: avatarImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 44, height: 44)
+                            .clipShape(Circle())
+                    } else {
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: selectedTheme.colors(for: colorScheme).primary,
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
 
-                    Text(room.name.prefix(1).uppercased())
-                        .font(.title3.bold())
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                            Text(room.name.prefix(1).uppercased())
+                                .font(.title3.bold())
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                        }
+                        .frame(width: 44, height: 44)
+                    }
                 }
-                .frame(width: 44, height: 44)
                 .shadow(
                     color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
                     radius: 5, y: 2)
+                .onAppear {
+                    loadRoomAvatar()
+                }
 
                 Spacer()
 
@@ -575,6 +589,16 @@ struct EnhancedRoomCard: View {
                 .strokeBorder(
                     selectedTheme.colors(for: colorScheme).accent.opacity(0.1), lineWidth: 1)
         )
+    }
+    
+    private func loadRoomAvatar() {
+        guard let avatarAsset = room.avatarAsset,
+              let fileURL = avatarAsset.fileURL else { return }
+        
+        if let data = try? Data(contentsOf: fileURL),
+           let image = PlatformImage.fromData(data) {
+            roomAvatarImage = image
+        }
     }
 }
 

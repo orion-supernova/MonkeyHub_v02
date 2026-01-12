@@ -402,7 +402,7 @@ class DataMigrationManager: ObservableObject {
                     record[ChatMessage.contentKey] = message.content
                     record[ChatMessage.typeKey] = messageType.rawValue
                     // Convert Date to String for CloudKit (timestamp is stored as String in schema)
-                    record[ChatMessage.timestampKey] = formatDateForCloudKit(message.timestamp)
+                    record[ChatMessage.timestampKey] = (message.timestamp)
                     record[ChatMessage.roomIdKey] = message.roomId
                     if let assetURL = assetURL {
                         record[ChatMessage.assetKey] = CKAsset(fileURL: assetURL)

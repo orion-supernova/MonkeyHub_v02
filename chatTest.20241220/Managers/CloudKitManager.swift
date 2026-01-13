@@ -430,8 +430,8 @@ class CloudKitManager: ObservableObject {
         _ = try await database.modifyRecords(saving: [record], deleting: [])
             .saveResults.first?.1.get()
         
-        // Automatically subscribe to notifications upon joining
-        try? await subscribeToMessages(in: room.id)
+        // Subscribe to notifications (idempotent - managed by subscription manager)
+        await NotificationSubscriptionManager.shared.subscribeToRoom(room.id)
     }
 
     func leaveRoom(_ room: ChatRoom) async throws {
@@ -443,8 +443,8 @@ class CloudKitManager: ObservableObject {
         _ = try await database.modifyRecords(saving: [record], deleting: [])
             .saveResults.first?.1.get()
         
-        // Unsubscribe from notifications upon leaving
-        try? await unsubscribeFromMessages(in: room.id)
+        // Unsubscribe from notifications (managed by subscription manager)
+        await NotificationSubscriptionManager.shared.unsubscribeFromRoom(room.id)
     }
 
     // MARK: - Message Operations
@@ -555,6 +555,30 @@ class CloudKitManager: ObservableObject {
 
     // MARK: - Subscription Management
 
+    /// Subscribe to message notifications for a specific room
+    ///
+    /// **IMPORTANT: CloudKit Subscription Model vs OneSignal**
+    ///
+    /// CloudKit uses a **subscription-based** model, not a push-on-demand model like OneSignal:
+    ///
+    /// 1. **Subscribe ONCE** with notification config (sound, badge, alert format)
+    /// 2. **Send messages** later (CloudKit automatically sends notifications)
+    /// 3. **All messages** in that room use the same notification config
+    ///
+    /// This means:
+    /// - ✅ Sender doesn't need to know about notifications
+    /// - ✅ Multi-device sync works automatically
+    /// - ✅ CloudKit handles notification delivery
+    /// - ❌ Can't customize notification per message
+    /// - ❌ Can't do "silent" notifications for specific messages
+    /// - ❌ Config is set at subscribe time, not send time
+    ///
+    /// **Workaround for message-specific control:**
+    /// Use custom fields in the message (e.g., `notificationType`) and filter
+    /// client-side in AppDelegate to suppress notifications conditionally.
+    ///
+    /// - Parameter roomId: The room to subscribe to
+    /// - Throws: CloudKitError if subscription fails
     func subscribeToMessages(in roomId: String) async throws {
         // Predicate: all messages in this room. 
         // We no longer exclude the sender so that messages sent from one device 
@@ -687,16 +711,8 @@ class CloudKitManager: ObservableObject {
     ///
     /// This is useful after a reinstall to restore push notification subscriptions.
     func subscribeToAllJoinedRooms() async {
-        Logger.info("Restoring subscriptions for all joined rooms", category: .cloudKit)
-        do {
-            let rooms = try await fetchUserRooms()
-            for room in rooms {
-                try? await subscribeToMessages(in: room.id)
-            }
-            Logger.info("Restored \(rooms.count) room subscriptions", category: .cloudKit)
-        } catch {
-            Logger.error("Failed to restore room subscriptions: \(error)", category: .cloudKit)
-        }
+        // Delegate to subscription manager (centralized logic)
+        await NotificationSubscriptionManager.shared.subscribeToAllJoinedRooms()
     }
 
     /// Check schema version and run migrations if needed

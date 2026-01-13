@@ -19,6 +19,11 @@ class ChatRepository: ObservableObject {
     private let persistence = MessagePersistenceService.shared
     private let userIdUserDefaultsKey = "userId"
     private var activeRoomId: String?
+    
+    // MARK: - Deduplication (Single Source of Truth)
+    // The Repository is the ONLY place that deduplicates messages
+    private var processedMessageIds = Set<String>() // Track processed message IDs to prevent duplicates
+    private let maxProcessedIdsCache = 1000 // Prevent memory bloat
 
     private init() {
         rooms = persistence.loadRooms()
@@ -214,14 +219,33 @@ class ChatRepository: ObservableObject {
     
     // MARK: - Notification Handling (Data Pipeline)
 
-    /// Called by AppDelegate when a remote notification allows us to process data.
-    /// Deduplication is handled by AppDelegate before calling this.
+    /// Called by NotificationRouter when a remote notification arrives.
+    /// This is the SINGLE SOURCE OF TRUTH for message deduplication.
     func handleIncomingNotification(_ userInfo: [AnyHashable: Any]) {
         guard let cloudKitNotification = CKNotification(fromRemoteNotificationDictionary: userInfo) as? CKQueryNotification,
               let recordFields = cloudKitNotification.recordFields,
               let roomId = recordFields[ChatMessage.roomIdKey] as? String,
               let recordID = cloudKitNotification.recordID
         else { return }
+        
+        let messageId = recordID.recordName
+        
+        // DEDUPLICATION: Check if we've already processed this message
+        if processedMessageIds.contains(messageId) {
+            print("♻️ ChatRepository: Skipping duplicate message \(messageId)")
+            return
+        }
+        
+        // Mark as processed
+        processedMessageIds.insert(messageId)
+        
+        // Cleanup cache if it grows too large
+        if processedMessageIds.count > maxProcessedIdsCache {
+            print("🧹 ChatRepository: Cleaning processed message cache")
+            // Keep only the most recent half
+            let toRemove = processedMessageIds.prefix(maxProcessedIdsCache / 2)
+            processedMessageIds.subtract(toRemove)
+        }
 
         print("📥 ChatRepository: Processing incoming message for Room \(roomId)")
 
@@ -269,7 +293,7 @@ class ChatRepository: ObservableObject {
 
                     await MainActor.run {
                         withAnimation {
-                            // Use upsertMessage for proper deduplication
+                            // Use upsertMessage for proper deduplication (secondary check)
                             upsertMessage(fullMessage, in: roomId)
                         }
                     }

@@ -17,12 +17,11 @@ typealias BaseAppDelegate = UIApplicationDelegate
 protocol BaseAppDelegate {}
 #endif
 
+/// AppDelegate: Single Responsibility - Register for notifications and route them
+/// Does NOT handle deduplication or data updates - that's the Repository's job
 class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
-
-    // Deduplication tracker for CloudKit notifications
-    private var processedNotificationIDs = Set<String>()
-    private var processedRecordIDs = Set<String>()
-    private var lastCleanupDate = Date()
+    
+    private let router = NotificationRouter.shared
 
     #if canImport(UIKit)
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -77,8 +76,7 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
     }
     #endif
 
-    // MARK: - UNUserNotificationCenterDelegate
-    // Note: This delegate is cross-platform (supported on macOS)
+    // MARK: - UNUserNotificationCenterDelegate (Cross-platform)
 
     /// Handle notification when app is in FOREGROUND
     func userNotificationCenter(
@@ -88,14 +86,16 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
     ) {
         let userInfo = notification.request.content.userInfo
         
-        // Broadcast for real-time updates (messages + typing indicators)
-        handleIncomingNotification(userInfo: userInfo)
+        // Route to appropriate handler (Repository will deduplicate)
+        Task { @MainActor in
+            router.route(userInfo)
+        }
 
         // Check if user is currently viewing this chatroom
-        if shouldSuppressNotification(userInfo: userInfo) {
-            // Silent: Don't show banner/sound
+        if router.shouldSuppressUI(for: userInfo) {
+            // Silent: Don't show banner/sound (but data was still processed above)
             completionHandler([])
-            print("Notification suppressed - user in active chatroom")
+            print("🔕 Notification UI suppressed - user in active chatroom")
         } else {
             // Show banner and play sound
             #if canImport(UIKit)
@@ -103,7 +103,7 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
             #else
             completionHandler([.banner, .sound, .badge]) // Also works on macOS
             #endif
-            print("Notification presented in foreground")
+            print("🔔 Notification presented in foreground")
         }
     }
 
@@ -114,46 +114,19 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
-
-        if let cloudKitNotification = CKNotification(fromRemoteNotificationDictionary: userInfo),
-           let queryNotification = cloudKitNotification as? CKQueryNotification,
-           let recordFields = queryNotification.recordFields,
-           let roomId = recordFields[ChatMessage.roomIdKey] as? String {
-
-            print("User tapped notification for room: \(roomId)")
-
-            // Navigate to chatroom
-            Task { @MainActor in
-                await navigateToChatRoom(roomId: roomId)
+        
+        // Route data update
+        Task { @MainActor in
+            router.route(userInfo)
+            
+            // Navigate to chatroom if applicable
+            if let roomId = router.extractRoomId(from: userInfo) {
+                print("👆 User tapped notification for room: \(roomId)")
+                navigateToChatRoom(roomId: roomId)
             }
         }
 
         completionHandler()
-    }
-
-    /// Check if notification should be suppressed
-    private func shouldSuppressNotification(userInfo: [AnyHashable: Any]) -> Bool {
-        guard let cloudKitNotification = CKNotification(fromRemoteNotificationDictionary: userInfo),
-              let queryNotification = cloudKitNotification as? CKQueryNotification,
-              let recordFields = queryNotification.recordFields,
-              let roomId = recordFields[ChatMessage.roomIdKey] as? String else {
-            return false
-        }
-
-        // Check if user is currently in this chatroom
-        let navigationState = NavigationStateManager.shared
-        return navigationState.currentScreen == .chatRoom &&
-               navigationState.currentRoomId == roomId
-    }
-
-    /// Navigate to specific chatroom
-    @MainActor
-    private func navigateToChatRoom(roomId: String) async {
-        NotificationCenter.default.post(
-            name: NSNotification.Name("OpenChatRoom"),
-            object: nil,
-            userInfo: ["roomId": roomId]
-        )
     }
 
     #if canImport(UIKit)
@@ -163,10 +136,12 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        print("Received remote notification")
+        print("📲 Received remote notification in background")
 
-        // Broadcast for real-time updates (messages + typing indicators)
-        handleIncomingNotification(userInfo: userInfo)
+        // Route to appropriate handler (Repository will deduplicate)
+        Task { @MainActor in
+            router.route(userInfo)
+        }
 
         if let notification = CKNotification(fromRemoteNotificationDictionary: userInfo) {
             if notification.notificationType == .query {
@@ -179,78 +154,14 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
     }
     #endif
 
-    /// Helper (Cross-platform) - Routes notifications to appropriate handlers
-    private func handleIncomingNotification(userInfo: [AnyHashable: Any]) {
-        guard let cloudKitNotification = CKNotification(fromRemoteNotificationDictionary: userInfo) else {
-            return
-        }
-        
-        // Use notificationID to deduplicate multiple calls for the same event
-        if let id = cloudKitNotification.notificationID {
-            let notificationID = "\(id)"
-            if processedNotificationIDs.contains(notificationID) {
-                print("♻️ Skipping already processed notificationID: \(notificationID)")
-                return
-            }
-            processedNotificationIDs.insert(notificationID)
-            print("🆕 Processing new notificationID: \(notificationID)")
-            
-            // Periodically clean up old IDs (every 10 seconds)
-            if Date().timeIntervalSince(lastCleanupDate) > 10 {
-                processedNotificationIDs.removeAll()
-                processedRecordIDs.removeAll()
-                lastCleanupDate = Date()
-            }
-        }
-
-        guard let queryNotification = cloudKitNotification as? CKQueryNotification else {
-            return
-        }
-        
-        // Secondary deduplication by Record ID (most reliable)
-        if let recordID = queryNotification.recordID?.recordName {
-            if processedRecordIDs.contains(recordID) {
-                print("♻️ Skipping already processed recordID: \(recordID)")
-                return
-            }
-            processedRecordIDs.insert(recordID)
-        }
-        
-        // Determine notification type based on subscription ID
-        if let subscriptionID = queryNotification.subscriptionID {
-            if subscriptionID.hasPrefix("typing-") {
-                // Typing indicator notification
-                print("📥 Typing indicator notification received")
-                Task { @MainActor in
-                    TypingIndicatorManager.shared.handleTypingNotification(userInfo)
-                }
-                return
-            } else if subscriptionID.hasPrefix("messages-") {
-                // Message notification
-                handleChatMessageNotification(userInfo: userInfo, queryNotification: queryNotification)
-                return
-            }
-        }
-        
-        // Fallback: Try to determine by record type or fields
-        if let recordFields = queryNotification.recordFields,
-           recordFields[ChatMessage.roomIdKey] != nil {
-            handleChatMessageNotification(userInfo: userInfo, queryNotification: queryNotification)
-        }
-    }
+    // MARK: - Navigation Helper
     
-    private func handleChatMessageNotification(userInfo: [AnyHashable: Any], queryNotification: CKQueryNotification) {
-        guard let recordFields = queryNotification.recordFields,
-              let roomId = recordFields[ChatMessage.roomIdKey] as? String else {
-            print("⚠️ Missing roomId in notification fields")
-            return
-        }
-
-        print("🚀 Passing valid notification data to ChatRepository for room: \(roomId)")
-        
-        // Pass the raw userInfo (validated by deduplication) to the Repository
-        Task { @MainActor in
-            ChatRepository.shared.handleIncomingNotification(userInfo)
-        }
+    @MainActor
+    private func navigateToChatRoom(roomId: String) {
+        NotificationCenter.default.post(
+            name: NSNotification.Name("OpenChatRoom"),
+            object: nil,
+            userInfo: ["roomId": roomId]
+        )
     }
 }

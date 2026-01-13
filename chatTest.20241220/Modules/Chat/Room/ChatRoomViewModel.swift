@@ -80,7 +80,9 @@ class ChatRoomViewModel: ObservableObject {
         await loadUserData()
         // Explicitly wait for fetch to ensure loading state remains true
         await repository.fetchMessages(for: roomId)
-        try? await cloudKit.subscribeToMessages(in: roomId)
+        
+        // Subscribe to notifications (idempotent - managed by subscription manager)
+        await NotificationSubscriptionManager.shared.subscribeToRoom(roomId)
     }
 
     func loadOlderMessages() async {

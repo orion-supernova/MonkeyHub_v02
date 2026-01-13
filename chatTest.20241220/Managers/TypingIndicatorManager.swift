@@ -24,6 +24,11 @@ final class TypingIndicatorManager: ObservableObject {
     private var cachedUserName: String?
     private var isCurrentlyTyping: [String: Bool] = [:] // roomId -> typing state
     
+    // MARK: - Deduplication (Single Source of Truth)
+    // The Manager is the ONLY place that deduplicates typing indicators
+    private var processedIndicatorIds = Set<String>() // Track processed typing indicator IDs
+    private let maxProcessedIdsCache = 500 // Prevent memory bloat
+    
     // MARK: - Configuration
     private let sendInterval: TimeInterval = 1.0 // Send to CloudKit every 1 second
     private let throttleInterval: TimeInterval = 0.5 // Minimum time between CloudKit sends
@@ -387,6 +392,7 @@ final class TypingIndicatorManager: ObservableObject {
     // MARK: - Notification Handling (USE NOTIFICATION PAYLOAD LIKE MESSAGES)
     
     /// Handle incoming typing indicator notification - use payload data directly
+    /// This is the SINGLE SOURCE OF TRUTH for typing indicator deduplication.
     func handleTypingNotification(_ userInfo: [AnyHashable: Any]) {
         guard let cloudKitNotification = CKNotification(fromRemoteNotificationDictionary: userInfo) as? CKQueryNotification,
               let recordID = cloudKitNotification.recordID,
@@ -409,6 +415,23 @@ final class TypingIndicatorManager: ObservableObject {
             return
         }
         
+        // DEDUPLICATION: Check if we've already processed this indicator event
+        let deduplicationKey = "\(indicatorId)_\(cloudKitNotification.queryNotificationReason.rawValue)"
+        if processedIndicatorIds.contains(deduplicationKey) {
+            print("♻️ TypingIndicator: Skipping duplicate notification for \(indicatorId)")
+            return
+        }
+        
+        // Mark as processed
+        processedIndicatorIds.insert(deduplicationKey)
+        
+        // Cleanup cache if it grows too large
+        if processedIndicatorIds.count > maxProcessedIdsCache {
+            print("🧹 TypingIndicator: Cleaning processed indicator cache")
+            let toRemove = processedIndicatorIds.prefix(maxProcessedIdsCache / 2)
+            processedIndicatorIds.subtract(toRemove)
+        }
+
         print("📥 TypingIndicator: Received notification for room \(roomId)")
         
         // Check notification type
@@ -436,7 +459,7 @@ final class TypingIndicatorManager: ObservableObject {
             
             print("✅ TypingIndicator: \(userName) is typing (from notification)")
             
-            // Add to state
+            // Add to state (with secondary deduplication by userId)
             var indicators = typingUsers[roomId] ?? []
             indicators.removeAll { $0.userId == userId } // Remove old one
             indicators.append(indicator)

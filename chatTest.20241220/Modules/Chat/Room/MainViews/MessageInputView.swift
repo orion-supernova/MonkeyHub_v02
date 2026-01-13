@@ -9,6 +9,7 @@ struct MessageInputView: View {
     @Binding var isShowingAttachmentMenu: Bool
     
     let onSendMessage: (String) async -> Void
+    let onTextChanged: (String) -> Void
     let onTakePhoto: () -> Void
     let onTakeVideo: () -> Void
     let onRecordAudio: () -> Void
@@ -28,7 +29,7 @@ struct MessageInputView: View {
             }
             
 #if os(macOS)
-            EnterToSendTextView(text: $messageText) { textToSend in
+            EnterToSendTextView(text: $messageText, onTextChanged: onTextChanged) { textToSend in
                 Task {
                     await onSendMessage(textToSend)
                 }
@@ -46,6 +47,9 @@ struct MessageInputView: View {
             TextField("Message", text: $messageText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...5)
+                .onChange(of: messageText) { oldValue, newValue in
+                    onTextChanged(newValue)
+                }
 #endif
             
             Button {
@@ -72,6 +76,7 @@ struct MessageInputView: View {
 
         let textToSend = messageText
         messageText = ""
+        onTextChanged("")
 
         await onSendMessage(textToSend)
     }
@@ -82,6 +87,7 @@ import SwiftUI
 
 struct EnterToSendTextView: NSViewRepresentable {
     @Binding var text: String
+    let onTextChanged: (String) -> Void
     let onSend: (String) -> Void
 
     func makeNSView(context: Context) -> NSTextView {
@@ -128,6 +134,7 @@ struct EnterToSendTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
             parent.text = tv.string
+            parent.onTextChanged(tv.string)
         }
 
         func textView(
@@ -139,6 +146,7 @@ struct EnterToSendTextView: NSViewRepresentable {
 
                 textView.window?.makeFirstResponder(nil)
                 parent.text = ""
+                parent.onTextChanged("")
                 parent.onSend(textToSend)
 
                 DispatchQueue.main.async {

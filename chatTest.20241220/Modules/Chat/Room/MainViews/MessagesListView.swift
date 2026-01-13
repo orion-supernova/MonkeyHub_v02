@@ -13,6 +13,14 @@ struct MessagesListView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 8) {
+                // Typing Indicator (at visual bottom, internal first)
+                if let typingText = viewModel.typingText {
+                    TypingIndicatorView(text: typingText)
+                        .padding(.horizontal)
+                        .rotationEffect(.degrees(180))
+                        .transition(.opacity.combined(with: .scale))
+                }
+                
                 ForEach(viewModel.messages) { message in
                     MessageView(
                         message: message,
@@ -68,6 +76,47 @@ struct MessagesListView: View {
     #endif
 }
 
+// MARK: - Typing Indicator View
+
+struct TypingIndicatorView: View {
+    let text: String
+    @State private var animationPhase = 0
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            // Animated dots
+            HStack(spacing: 4) {
+                ForEach(0..<3) { index in
+                    Circle()
+                        .fill(Color.gray)
+                        .frame(width: 8, height: 8)
+                        .opacity(animationPhase == index ? 1.0 : 0.4)
+                        .animation(
+                            .easeInOut(duration: 0.6)
+                                .repeatForever(autoreverses: true)
+                                .delay(Double(index) * 0.2),
+                            value: animationPhase
+                        )
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.gray.opacity(0.2))
+            .cornerRadius(16)
+            
+            Text(text)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 4)
+        .onAppear {
+            withAnimation {
+                animationPhase = 1
+            }
+        }
+    }
+}
+
 // MARK: - Keyboard Height Publisher
 #if canImport(UIKit)
 extension Publishers {
@@ -85,4 +134,3 @@ extension Publishers {
     }
 }
 #endif
-

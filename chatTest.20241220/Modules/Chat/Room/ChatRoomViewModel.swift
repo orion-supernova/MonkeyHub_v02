@@ -6,10 +6,12 @@ import Combine
 class ChatRoomViewModel: ObservableObject {
     @Published private(set) var messages: [ChatMessage] = []
     @Published private(set) var isFetchingOlderMessages = false
+    @Published var typingText: String? = nil
     
     // Dependencies
     private let repository = ChatRepository.shared
     private let cloudKit = CloudKitManager.shared
+    private let typingManager = TypingIndicatorManager.shared
     private let userDefaults = UserDefaults.standard
     private let userIdUserDefaultsKey = "userId"
     
@@ -17,6 +19,7 @@ class ChatRoomViewModel: ObservableObject {
     private var userId: String = ""
     private var userName: String = "User"
     private var cancellables = Set<AnyCancellable>()
+    private var typingCancellable: AnyCancellable?
 
     init(roomId: String) {
         self.roomId = roomId
@@ -26,12 +29,19 @@ class ChatRoomViewModel: ObservableObject {
         
         setupBindings()
         repository.setActiveRoom(roomId)
+        typingManager.setActiveRoom(roomId)
     }
     
     deinit {
         print("💀 ChatRoomViewModel deinit (\(roomId))")
-        // Notify repo that we are leaving
+        
+        // Capture roomId for async cleanup
+        let roomId = self.roomId
+        
+        // Stop typing and clean up asynchronously
         Task { @MainActor in
+            TypingIndicatorManager.shared.stopTyping(in: roomId)
+            TypingIndicatorManager.shared.setActiveRoom(nil)
             ChatRepository.shared.setActiveRoom(nil)
         }
     }
@@ -45,6 +55,17 @@ class ChatRoomViewModel: ObservableObject {
                 messages.filter { $0.roomId == roomId }
             }
             .assign(to: \.messages, on: self)
+            .store(in: &cancellables)
+        
+        // Bind to typing indicators
+        typingManager.$typingUsers
+            .receive(on: DispatchQueue.main)
+            .map { [weak self, roomId] typingUsers in
+                let text = self?.typingManager.getTypingText(for: roomId)
+                print("🔄 ChatRoomViewModel: Typing text updated to: \(text ?? "nil")")
+                return text
+            }
+            .assign(to: \.typingText, on: self)
             .store(in: &cancellables)
     }
 
@@ -71,7 +92,28 @@ class ChatRoomViewModel: ObservableObject {
         isFetchingOlderMessages = false
     }
 
+    // MARK: - Typing Indicator
+    
+    func onTextChanged(_ text: String) {
+        print("📝 ChatRoomViewModel: Text changed to: '\(text)' (isEmpty: \(text.isEmpty))")
+        
+        if text.isEmpty {
+            print("🛑 ChatRoomViewModel: Stopping typing")
+            typingManager.stopTyping(in: roomId)
+        } else {
+            print("▶️ ChatRoomViewModel: Starting typing")
+            typingManager.startTyping(in: roomId)
+        }
+    }
+    
+    func onSendMessage() {
+        print("📤 ChatRoomViewModel: Sending message, stopping typing")
+        typingManager.stopTyping(in: roomId)
+    }
+
     func sendMessage(_ text: String) async {
+        onSendMessage()
+        
         let message = ChatMessage(
             senderId: userId,
             senderName: userName,

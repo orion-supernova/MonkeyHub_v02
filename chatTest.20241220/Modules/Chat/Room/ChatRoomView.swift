@@ -38,7 +38,7 @@ struct ChatRoomView: View {
                     messageText: $messageText,
                     showImagePicker: $showImagePicker,
                     isShowingAttachmentMenu: $isShowingAttachmentMenu,
-                    onSendMessage: { textToSend in         // <-- add the parameter
+                    onSendMessage: { textToSend in
                         Task {
                             await viewModel.sendMessage(textToSend)
 
@@ -46,6 +46,9 @@ struct ChatRoomView: View {
                                 messageText = ""
                             }
                         }
+                    },
+                    onTextChanged: { text in
+                        viewModel.onTextChanged(text)
                     },
                     onTakePhoto: {
                         isShowingAttachmentMenu = false

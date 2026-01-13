@@ -88,8 +88,8 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
     ) {
         let userInfo = notification.request.content.userInfo
         
-        // Broadcast for real-time updates even if suppressed or presented
-        handleChatMessageNotification(userInfo: userInfo)
+        // Broadcast for real-time updates (messages + typing indicators)
+        handleIncomingNotification(userInfo: userInfo)
 
         // Check if user is currently viewing this chatroom
         if shouldSuppressNotification(userInfo: userInfo) {
@@ -165,8 +165,8 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
     ) {
         print("Received remote notification")
 
-        // Broadcast for real-time updates
-        handleChatMessageNotification(userInfo: userInfo)
+        // Broadcast for real-time updates (messages + typing indicators)
+        handleIncomingNotification(userInfo: userInfo)
 
         if let notification = CKNotification(fromRemoteNotificationDictionary: userInfo) {
             if notification.notificationType == .query {
@@ -179,8 +179,8 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
     }
     #endif
 
-    /// Helper (Cross-platform)
-    private func handleChatMessageNotification(userInfo: [AnyHashable: Any]) {
+    /// Helper (Cross-platform) - Routes notifications to appropriate handlers
+    private func handleIncomingNotification(userInfo: [AnyHashable: Any]) {
         guard let cloudKitNotification = CKNotification(fromRemoteNotificationDictionary: userInfo) else {
             return
         }
@@ -215,7 +215,31 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
             }
             processedRecordIDs.insert(recordID)
         }
-
+        
+        // Determine notification type based on subscription ID
+        if let subscriptionID = queryNotification.subscriptionID {
+            if subscriptionID.hasPrefix("typing-") {
+                // Typing indicator notification
+                print("📥 Typing indicator notification received")
+                Task { @MainActor in
+                    TypingIndicatorManager.shared.handleTypingNotification(userInfo)
+                }
+                return
+            } else if subscriptionID.hasPrefix("messages-") {
+                // Message notification
+                handleChatMessageNotification(userInfo: userInfo, queryNotification: queryNotification)
+                return
+            }
+        }
+        
+        // Fallback: Try to determine by record type or fields
+        if let recordFields = queryNotification.recordFields,
+           recordFields[ChatMessage.roomIdKey] != nil {
+            handleChatMessageNotification(userInfo: userInfo, queryNotification: queryNotification)
+        }
+    }
+    
+    private func handleChatMessageNotification(userInfo: [AnyHashable: Any], queryNotification: CKQueryNotification) {
         guard let recordFields = queryNotification.recordFields,
               let roomId = recordFields[ChatMessage.roomIdKey] as? String else {
             print("⚠️ Missing roomId in notification fields")

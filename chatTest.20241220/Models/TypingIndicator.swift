@@ -25,7 +25,7 @@ struct TypingIndicator: Identifiable, Equatable {
         self.userId = userId
         self.userName = userName
         self.timestamp = Date()
-        self.expiresAt = Date().addingTimeInterval(3) // 3 second TTL
+        self.expiresAt = Date().addingTimeInterval(5) // 5 second TTL
     }
     
     init(from record: CKRecord) throws {

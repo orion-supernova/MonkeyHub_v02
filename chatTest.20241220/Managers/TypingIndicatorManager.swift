@@ -18,14 +18,16 @@ final class TypingIndicatorManager: ObservableObject {
     // MARK: - Internal State
     private var typingTimers: [String: Timer] = [:] // roomId -> timer for sending
     private var inactivityTimers: [String: Timer] = [:] // roomId -> timer for detecting inactivity
+    private var lastSentTime: [String: Date] = [:] // roomId -> last time we sent to CloudKit
     private var cleanupTimers: [String: Timer] = [:] // indicatorId -> cleanup timer
     private var activeRoomId: String?
     private var cachedUserName: String?
+    private var isCurrentlyTyping: [String: Bool] = [:] // roomId -> typing state
     
     // MARK: - Configuration
     private let sendInterval: TimeInterval = 1.0 // Send to CloudKit every 1 second
-    private let inactivityTimeout: TimeInterval = 2.0 // Stop typing if no activity for 2 seconds
-    private let expirationTimeout: TimeInterval = 3.0 // Clean up indicators after 3 seconds
+    private let throttleInterval: TimeInterval = 0.5 // Minimum time between CloudKit sends
+    private let inactivityTimeout: TimeInterval = 3.0 // Stop typing after 3 seconds of no keyboard activity
     
     private init() {
         // Cache user name at init for instant local updates
@@ -38,9 +40,35 @@ final class TypingIndicatorManager: ObservableObject {
     
     // MARK: - Public API
     
-    /// Start tracking typing for a room
-    func startTyping(in roomId: String) {
+    /// Called on every text change - handles state management
+    func onTextChanged(in roomId: String) {
         guard activeRoomId == roomId else { return }
+        
+        // Reset inactivity timer on every keystroke
+        inactivityTimers[roomId]?.invalidate()
+        let inactivityTimer = Timer.scheduledTimer(withTimeInterval: inactivityTimeout, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleInactivity(in: roomId)
+            }
+        }
+        inactivityTimers[roomId] = inactivityTimer
+        
+        // If already typing, just reset the timer
+        if isCurrentlyTyping[roomId] == true {
+            print("⌨️ TypingIndicator: Still typing (inactivity timer reset)")
+            return
+        }
+        
+        // Start typing immediately (no debounce for local UI)
+        startTyping(in: roomId)
+    }
+    
+    /// Start tracking typing for a room
+    private func startTyping(in roomId: String) {
+        guard activeRoomId == roomId else { return }
+        guard isCurrentlyTyping[roomId] != true else { return } // Already typing
+        
+        isCurrentlyTyping[roomId] = true
         
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let userName = cachedUserName ?? "User"
@@ -58,26 +86,15 @@ final class TypingIndicatorManager: ObservableObject {
         indicators.append(localIndicator)
         typingUsers[roomId] = indicators
         
-        print("⚡️ TypingIndicator: YOU are typing (instant local update)")
+        print("⚡️ TypingIndicator: Started typing (instant local update)")
         
-        // Reset inactivity timer - if user keeps typing, reset the countdown
-        inactivityTimers[roomId]?.invalidate()
-        let inactivityTimer = Timer.scheduledTimer(withTimeInterval: inactivityTimeout, repeats: false) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.handleInactivity(in: roomId)
-            }
-        }
-        inactivityTimers[roomId] = inactivityTimer
-        
-        // Only set up CloudKit sync timer if not already running
-        guard typingTimers[roomId] == nil else { return }
-        
-        // Send to CloudKit immediately (background)
+        // Send to CloudKit with throttling
         Task {
-            await sendTypingIndicatorToCloudKit(for: roomId)
+            await sendTypingIndicatorWithThrottle(for: roomId)
         }
         
         // Schedule repeating sends to CloudKit every 1 second
+        typingTimers[roomId]?.invalidate() // Clean up any existing timer
         let timer = Timer.scheduledTimer(withTimeInterval: sendInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.sendTypingIndicatorToCloudKit(for: roomId)
@@ -88,6 +105,10 @@ final class TypingIndicatorManager: ObservableObject {
     
     /// Stop tracking typing for a room
     func stopTyping(in roomId: String) {
+        guard isCurrentlyTyping[roomId] == true else { return } // Not typing
+        
+        isCurrentlyTyping[roomId] = false
+        
         typingTimers[roomId]?.invalidate()
         typingTimers[roomId] = nil
         
@@ -115,6 +136,11 @@ final class TypingIndicatorManager: ObservableObject {
     
     /// Set the active room for receiving typing indicators
     func setActiveRoom(_ roomId: String?) {
+        // Stop typing in previous room
+        if let previousRoom = activeRoomId {
+            stopTyping(in: previousRoom)
+        }
+        
         self.activeRoomId = roomId
         
         if let roomId = roomId {
@@ -131,6 +157,8 @@ final class TypingIndicatorManager: ObservableObject {
             cleanupTimers.removeAll()
             inactivityTimers.values.forEach { $0.invalidate() }
             inactivityTimers.removeAll()
+            isCurrentlyTyping.removeAll()
+            lastSentTime.removeAll()
         }
     }
     
@@ -158,6 +186,26 @@ final class TypingIndicatorManager: ObservableObject {
     }
     
     // MARK: - CloudKit Operations
+    
+    /// Send typing indicator with throttling (prevents sending too frequently)
+    private func sendTypingIndicatorWithThrottle(for roomId: String) async {
+        let now = Date()
+        
+        // Check if we sent recently (within throttle interval)
+        if let lastSent = lastSentTime[roomId] {
+            let timeSinceLastSend = now.timeIntervalSince(lastSent)
+            if timeSinceLastSend < throttleInterval {
+                print("🚫 TypingIndicator: Throttled (last sent \(String(format: "%.2f", timeSinceLastSend))s ago)")
+                return
+            }
+        }
+        
+        // Update last sent time
+        lastSentTime[roomId] = now
+        
+        // Actually send to CloudKit
+        await sendTypingIndicatorToCloudKit(for: roomId)
+    }
     
     private func sendTypingIndicatorToCloudKit(for roomId: String) async {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""

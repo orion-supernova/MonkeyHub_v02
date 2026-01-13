@@ -95,15 +95,10 @@ class ChatRoomViewModel: ObservableObject {
     // MARK: - Typing Indicator
     
     func onTextChanged(_ text: String) {
-        print("📝 ChatRoomViewModel: Text changed to: '\(text)' (isEmpty: \(text.isEmpty))")
+        print("📝 ChatRoomViewModel: Text changed (length: \(text.count))")
         
-        if text.isEmpty {
-            print("🛑 ChatRoomViewModel: Stopping typing")
-            typingManager.stopTyping(in: roomId)
-        } else {
-            print("▶️ ChatRoomViewModel: Starting typing")
-            typingManager.startTyping(in: roomId)
-        }
+        // Always notify manager on any text change (including delete)
+        typingManager.onTextChanged(in: roomId)
     }
     
     func onSendMessage() {

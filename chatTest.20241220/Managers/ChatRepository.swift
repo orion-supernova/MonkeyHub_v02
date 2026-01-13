@@ -133,6 +133,24 @@ class ChatRepository: ObservableObject {
 
         do {
             let messages = try await cloudKit.fetchRecentMessages(for: roomId, limit: 30)
+            
+            // Fetch reactions for all messages (gracefully handle if record type doesn't exist)
+            var messagesWithReactions = messages
+            do {
+                let messageIds = messages.map { $0.id }
+                let reactionsMap = try await ReactionService.shared.fetchReactions(for: messageIds)
+                
+                // Attach reactions to messages
+                for i in 0..<messagesWithReactions.count {
+                    if let reactions = reactionsMap[messagesWithReactions[i].id] {
+                        messagesWithReactions[i].reactions = reactions
+                    }
+                }
+            } catch {
+                print("⚠️ ChatRepository: Could not fetch reactions (this is normal if reactions haven't been set up yet): \(error)")
+                // Continue without reactions
+            }
+            
             if self.activeRoomId == roomId {
                 // Preserve pending messages
                 let pendingMessages = self.activeRoomMessages.filter { $0.status == .pending }
@@ -141,7 +159,7 @@ class ChatRepository: ObservableObject {
                 self.activeRoomMessages = []
 
                 withAnimation {
-                    upsertMessages(messages, in: roomId, saveToDisk: false)
+                    upsertMessages(messagesWithReactions, in: roomId, saveToDisk: false)
 
                     // Re-add pending messages
                     for pending in pendingMessages {
@@ -173,10 +191,27 @@ class ChatRepository: ObservableObject {
                 print("🏁 ChatRepository: No older messages found")
                 return
             }
+            
+            // Fetch reactions for older messages (gracefully handle if record type doesn't exist)
+            var messagesWithReactions = olderMessages
+            do {
+                let messageIds = olderMessages.map { $0.id }
+                let reactionsMap = try await ReactionService.shared.fetchReactions(for: messageIds)
+                
+                // Attach reactions to messages
+                for i in 0..<messagesWithReactions.count {
+                    if let reactions = reactionsMap[messagesWithReactions[i].id] {
+                        messagesWithReactions[i].reactions = reactions
+                    }
+                }
+            } catch {
+                print("⚠️ ChatRepository: Could not fetch reactions for older messages (this is normal if reactions haven't been set up yet): \(error)")
+                // Continue without reactions
+            }
 
             if self.activeRoomId == roomId {
                 withAnimation {
-                    upsertMessages(olderMessages, in: roomId, saveToDisk: true)
+                    upsertMessages(messagesWithReactions, in: roomId, saveToDisk: true)
                 }
             }
         } catch {

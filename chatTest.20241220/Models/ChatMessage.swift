@@ -26,6 +26,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     let roomId: String
     let assetURL: URL?
     var status: MessageStatus
+    var reactions: [MessageReaction]
     
     // System message identifier
     static let systemSenderId = "system"
@@ -51,7 +52,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         timestamp: Date = Date(),
         roomId: String,
         assetURL: URL? = nil,
-        status: MessageStatus = .sent
+        status: MessageStatus = .sent,
+        reactions: [MessageReaction] = []
     ) {
         self.id = id
         self.senderId = senderId
@@ -62,6 +64,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         self.roomId = roomId
         self.assetURL = assetURL
         self.status = status
+        self.reactions = reactions
     }
 
     /// Initialize from CloudKit record
@@ -95,6 +98,9 @@ struct ChatMessage: Identifiable, Equatable, Codable {
             self.assetURL = nil
         }
         
+        // Reactions are fetched separately, not stored in message record
+        self.reactions = []
+        
         self.status = .sent
     }
 
@@ -115,6 +121,13 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         }
 
         return record
+    }
+    
+    /// Group reactions by emoji for UI display
+    func groupedReactions() -> [ReactionGroup] {
+        let grouped = Dictionary(grouping: reactions, by: { $0.emoji })
+        return grouped.map { ReactionGroup(emoji: $0.key, reactions: $0.value) }
+            .sorted { $0.reactions.first?.timestamp ?? Date() < $1.reactions.first?.timestamp ?? Date() }
     }
 
     static func == (lhs: ChatMessage, rhs: ChatMessage) -> Bool {

@@ -9,6 +9,7 @@ struct MessagesListView: View {
     let viewModel: ChatRoomViewModel
     let isLoading: Bool
     let onImageTapped: (URL) -> Void
+    @State private var activeReactionPickerMessageId: String?
 
     var body: some View {
         ScrollView {
@@ -29,7 +30,15 @@ struct MessagesListView: View {
                             Task {
                                 await viewModel.deleteMessage(message.id)
                             }
-                        }
+                        },
+                        showReactionPicker: Binding(
+                            get: { activeReactionPickerMessageId == message.id },
+                            set: { shouldShow in
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    activeReactionPickerMessageId = shouldShow ? message.id : nil
+                                }
+                            }
+                        )
                     )
                     .padding(.horizontal)
                     .id(message.id)
@@ -54,13 +63,18 @@ struct MessagesListView: View {
             .padding(.vertical)
         }
         .rotationEffect(.degrees(180)) // Flip the entire scroll view
-
         .background(Color.primary.colorInvert()) // Simple platform-agnostic alternative to systemBackground
         .scrollDismissesKeyboard(.interactively)
         .onTapGesture {
-            #if canImport(UIKit)
-            hideKeyboard()
-            #endif
+            if activeReactionPickerMessageId != nil {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    activeReactionPickerMessageId = nil
+                }
+            } else {
+                #if canImport(UIKit)
+                hideKeyboard()
+                #endif
+            }
         }
     }
 

@@ -594,21 +594,26 @@ class CloudKitManager: ObservableObject {
 
         let notificationInfo = CKSubscription.NotificationInfo()
 
-        // Enable dynamic notifications with localization templates
-        // Template: "%1$@: %2$@" -> "Sender Name: Message Content"
+        // Rich notification configuration
+        // For media messages, we'll show an emoji instead of trying to load the actual asset
+        // This is the industry standard for privacy-focused apps (Signal, Threema)
+        // User taps notification to see full media in-app
         notificationInfo.alertLocalizationKey = "%1$@: %2$@"
         notificationInfo.alertLocalizationArgs = [ChatMessage.senderNameKey, ChatMessage.contentKey]
-
-        notificationInfo.shouldSendContentAvailable = true  // Background refresh
         notificationInfo.soundName = "default"
+        
+        // Add notification category for Reply action
+        notificationInfo.category = "CHAT_MESSAGE"
+
+        // Always enable content-available for background data sync
+        notificationInfo.shouldSendContentAvailable = true
 
         // Include message fields in notification payload
-        // Added 'type' to enable proper fallback reconstruction for attachments
         notificationInfo.desiredKeys = [
             ChatMessage.senderNameKey,
             ChatMessage.contentKey,
             ChatMessage.roomIdKey,
-            ChatMessage.typeKey  // Critical for attachment handling
+            ChatMessage.typeKey
         ]
         
         subscription.notificationInfo = notificationInfo

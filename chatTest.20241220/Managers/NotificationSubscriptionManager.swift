@@ -47,7 +47,7 @@ final class NotificationSubscriptionManager: ObservableObject {
         pendingOperations[roomId] = nil
     }
     
-    /// Unsubscribe from messages in a room
+    /// Unsubscribe from messages and reactions in a room
     /// - Parameter roomId: The room to unsubscribe from
     func unsubscribeFromRoom(_ roomId: String) async {
         // Not subscribed? Skip
@@ -55,11 +55,13 @@ final class NotificationSubscriptionManager: ObservableObject {
             print("ℹ️ NotificationSubscriptionManager: Not subscribed to room \(roomId), skipping unsubscribe")
             return
         }
-        
+
         do {
+            // Unsubscribe from both messages and reactions
             try await cloudKit.unsubscribeFromMessages(in: roomId)
+            try await cloudKit.unsubscribeFromReactions(in: roomId)
             activeSubscriptions.remove(roomId)
-            print("✅ NotificationSubscriptionManager: Unsubscribed from room \(roomId)")
+            print("✅ NotificationSubscriptionManager: Unsubscribed from messages and reactions in room \(roomId)")
         } catch {
             print("❌ NotificationSubscriptionManager: Failed to unsubscribe from room \(roomId): \(error)")
         }
@@ -104,9 +106,11 @@ final class NotificationSubscriptionManager: ObservableObject {
     
     private func performSubscription(roomId: String) async {
         do {
+            // Subscribe to both messages AND reactions for the room
             try await cloudKit.subscribeToMessages(in: roomId)
+            try await cloudKit.subscribeToReactions(in: roomId)
             activeSubscriptions.insert(roomId)
-            print("✅ NotificationSubscriptionManager: Successfully subscribed to room \(roomId)")
+            print("✅ NotificationSubscriptionManager: Successfully subscribed to messages and reactions in room \(roomId)")
         } catch let error as CKError where error.code == .serverRejectedRequest {
             // Duplicate subscription - treat as success
             activeSubscriptions.insert(roomId)

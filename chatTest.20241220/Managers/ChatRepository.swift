@@ -150,18 +150,18 @@ class ChatRepository: ObservableObject {
             
             if self.activeRoomId == roomId {
                 let pendingMessages = self.activeRoomMessages.filter { $0.status == .pending }
-                
+
                 // Clear and rebuild
-                var newList = messages
+                var newList = messagesWithReactions  // Use messagesWithReactions instead of messages!
                 newList.append(contentsOf: pendingMessages)
-                
+
                 // Sort: Oldest to Newest
                 newList.sort { $0.timestamp < $1.timestamp }
-                
+
                 withAnimation {
                     self.activeRoomMessages = newList
                 }
-                
+
                 await persistence.saveMessages(activeRoomMessages, for: roomId)
             }
         } catch {
@@ -395,6 +395,75 @@ class ChatRepository: ObservableObject {
             // Revert optimism? Would need to fetch again to be safe.
             if roomId == activeRoomId {
                await fetchMessages(for: roomId)
+            }
+        }
+    }
+
+    // MARK: - Reaction Notification Handling
+
+    /// Called by NotificationRouter when a reaction notification arrives
+    /// This updates the local message's reactions in real-time
+    func handleIncomingReaction(_ userInfo: [AnyHashable: Any], queryNotification: CKQueryNotification) {
+        guard let recordID = queryNotification.recordID,
+              let recordFields = queryNotification.recordFields,
+              let messageId = recordFields[MessageReaction.messageIdKey] as? String else {
+            print("⚠️ ChatRepository: Invalid reaction notification")
+            return
+        }
+
+        let notificationType = queryNotification.queryNotificationReason
+
+        print("📥 ChatRepository: Processing reaction notification for message \(messageId), type: \(notificationType.rawValue)")
+
+        // Find the message in active room
+        guard let messageIndex = activeRoomMessages.firstIndex(where: { $0.id == messageId }) else {
+            print("ℹ️ ChatRepository: Message \(messageId) not in active room, ignoring reaction notification")
+            return
+        }
+
+        Task {
+            do {
+                if notificationType == .recordDeleted {
+                    // Reaction was removed
+                    let reactionId = recordID.recordName
+                    print("🗑️ ChatRepository: Removing reaction \(reactionId) from message \(messageId)")
+
+                    await MainActor.run {
+                        withAnimation {
+                            activeRoomMessages[messageIndex].reactions.removeAll { $0.id == reactionId }
+                        }
+
+                        Task {
+                            await persistence.saveMessages(activeRoomMessages, for: activeRoomMessages[messageIndex].roomId)
+                        }
+                    }
+                } else {
+                    // Reaction was added or updated - fetch the full reaction
+                    print("➕ ChatRepository: Fetching new/updated reaction for message \(messageId)")
+
+                    let record = try await cloudKit.database.record(for: recordID)
+                    let reaction = try MessageReaction(from: record)
+
+                    await MainActor.run {
+                        withAnimation {
+                            // Remove old reaction if it exists (for updates)
+                            activeRoomMessages[messageIndex].reactions.removeAll { $0.id == reaction.id }
+                            // Add new/updated reaction
+                            activeRoomMessages[messageIndex].reactions.append(reaction)
+
+                            // Sort reactions by timestamp
+                            activeRoomMessages[messageIndex].reactions.sort { $0.timestamp < $1.timestamp }
+                        }
+
+                        Task {
+                            await persistence.saveMessages(activeRoomMessages, for: activeRoomMessages[messageIndex].roomId)
+                        }
+                    }
+
+                    print("✅ ChatRepository: Updated reaction on message \(messageId)")
+                }
+            } catch {
+                print("❌ ChatRepository: Failed to process reaction notification: \(error)")
             }
         }
     }

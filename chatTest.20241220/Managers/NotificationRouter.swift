@@ -29,6 +29,9 @@ final class NotificationRouter {
             } else if subscriptionID.hasPrefix("messages-") {
                 routeToChatRepository(userInfo: userInfo, queryNotification: queryNotification)
                 return
+            } else if subscriptionID.hasPrefix("reactions-") {
+                routeToReactionHandler(userInfo: userInfo, queryNotification: queryNotification)
+                return
             }
         }
         
@@ -86,5 +89,16 @@ final class NotificationRouter {
     private func routeToTypingManager(userInfo: [AnyHashable: Any], queryNotification: CKQueryNotification) {
         print("📥 NotificationRouter: Routing typing notification to TypingIndicatorManager")
         TypingIndicatorManager.shared.handleTypingNotification(userInfo)
+    }
+
+    private func routeToReactionHandler(userInfo: [AnyHashable: Any], queryNotification: CKQueryNotification) {
+        guard let recordFields = queryNotification.recordFields,
+              let messageId = recordFields[MessageReaction.messageIdKey] as? String else {
+            print("⚠️ NotificationRouter: Missing messageId in reaction notification")
+            return
+        }
+
+        print("📥 NotificationRouter: Routing reaction notification to ChatRepository (message: \(messageId))")
+        ChatRepository.shared.handleIncomingReaction(userInfo, queryNotification: queryNotification)
     }
 }

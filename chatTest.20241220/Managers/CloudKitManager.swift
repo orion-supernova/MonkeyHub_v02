@@ -640,6 +640,65 @@ class CloudKitManager: ObservableObject {
         try await database.deleteSubscription(withID: "messages-\(roomId)")
     }
 
+    /// Subscribe to reaction notifications for a specific room
+    /// This allows real-time updates when reactions are added/removed
+    /// - Parameter roomId: The room to subscribe to
+    /// - Throws: CloudKitError if subscription fails
+    func subscribeToReactions(in roomId: String) async throws {
+        // We need to subscribe to reactions for messages in this room
+        // Since reactions have a messageId field, we need to fetch all message IDs first
+        // But that's expensive, so instead we'll subscribe to ALL reactions
+        // and filter client-side by checking if the message belongs to the active room
+
+        let predicate = NSPredicate(value: true)  // Subscribe to all reactions
+
+        let subscription = CKQuerySubscription(
+            recordType: MessageReaction.recordType,
+            predicate: predicate,
+            subscriptionID: "reactions-\(roomId)",
+            options: [.firesOnRecordCreation, .firesOnRecordDeletion, .firesOnRecordUpdate]
+        )
+
+        let notificationInfo = CKSubscription.NotificationInfo()
+
+        // Silent notification - we handle UI updates in-app
+        notificationInfo.shouldSendContentAvailable = true
+        notificationInfo.shouldBadge = false
+        notificationInfo.alertBody = ""  // No alert
+
+        // Include reaction fields in notification payload
+        notificationInfo.desiredKeys = [
+            MessageReaction.idKey,
+            MessageReaction.emojiKey,
+            MessageReaction.userIdKey,
+            MessageReaction.messageIdKey,
+            MessageReaction.timestampKey
+        ]
+
+        subscription.notificationInfo = notificationInfo
+
+        do {
+            let savedSubscription = try await database.modifySubscriptions(
+                saving: [subscription], deleting: []
+            ).saveResults.first?.1.get()
+
+            guard savedSubscription != nil else {
+                throw CloudKitError.operationFailed
+            }
+            Logger.info("✅ Successfully subscribed to reactions in room \(roomId)", category: .cloudKit)
+        } catch let error as CKError {
+            // Some errors (like duplicate subscription) are expected and shouldn't be treated as failures
+            Logger.info("ℹ️ CloudKit reaction subscription info for room \(roomId): \(error.localizedDescription) (Code: \(error.code.rawValue))", category: .cloudKit)
+        } catch {
+            Logger.error("❌ Reaction subscription failed for room \(roomId): \(error)", category: .cloudKit)
+            throw error
+        }
+    }
+
+    func unsubscribeFromReactions(in roomId: String) async throws {
+        try await database.deleteSubscription(withID: "reactions-\(roomId)")
+    }
+
     func deleteChatMessage(_ messageId: String) async throws {
         let predicate = NSPredicate(format: "%K == %@", ChatMessage.idKey, messageId)
         let query = CKQuery(recordType: ChatMessage.recordType, predicate: predicate)

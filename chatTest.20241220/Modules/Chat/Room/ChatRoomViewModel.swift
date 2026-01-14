@@ -95,7 +95,6 @@ class ChatRoomViewModel: ObservableObject {
     }
 
     // MARK: - Typing Indicator
-    
     func onTextChanged(_ text: String) {
         print("📝 ChatRoomViewModel: Text changed (length: \(text.count))")
         
@@ -122,7 +121,6 @@ class ChatRoomViewModel: ObservableObject {
     }
     
     // MARK: - Asset Sending
-    
     private func saveTempImage(_ image: PlatformImage) -> URL? {
         let fileManager = FileManager.default
         let paths = fileManager.urls(for: .documentDirectory, in: .userDomainMask)

@@ -3,6 +3,7 @@ import SwiftUI
 struct MessageInputView: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var isTextFieldFocused: Bool
     
     @Binding var messageText: String
     @Binding var showImagePicker: Bool
@@ -15,121 +16,198 @@ struct MessageInputView: View {
     let onRecordAudio: () -> Void
     
     var body: some View {
-        HStack(spacing: 8) {
-            Button {
+        // This HStack is the ONLY container. No .background means it's invisible except for the glass components.
+        HStack(spacing: 12) {
+            LiquidButton(icon: "plus") {
+                isTextFieldFocused = false
                 isShowingAttachmentMenu.toggle()
-            } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.title)
-                    .foregroundStyle(LinearGradient(
-                        colors: selectedTheme.colors(for: colorScheme).primary,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
             }
             
-#if os(macOS)
-            EnterToSendTextView(text: $messageText, onTextChanged: onTextChanged) { textToSend in
-                Task {
-                    await onSendMessage(textToSend)
-                }
-            }
-            .frame(height: 28)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color(NSColor.textBackgroundColor))
+            GlassTextField(
+                text: $messageText,
+                isTextFieldFocused: $isTextFieldFocused,
+                onTextChanged: onTextChanged,
+                onSend: { Task { await sendIfNotEmpty() } }
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.gray.opacity(0.3))
-            )
-#else
-            TextField("Message", text: $messageText, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1...5)
-                .onChange(of: messageText) { oldValue, newValue in
-                    onTextChanged(newValue)
-                }
-#endif
             
-            Button {
+            LiquidButton(
+                icon: "arrow.up",
+                isDisabled: messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ) {
                 Task { await sendIfNotEmpty() }
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title)
-                    .foregroundStyle(LinearGradient(
-                        colors: selectedTheme.colors(for: colorScheme).primary,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
             }
-            .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .padding()
-        .background(Color.platformBackground)
-        .overlay(Divider(), alignment: .top)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        // Ensure the input area stays above the keyboard automatically
     }
     
     private func sendIfNotEmpty() async {
         let trimmed = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-
         let textToSend = messageText
         messageText = ""
         onTextChanged("")
-
         await onSendMessage(textToSend)
+    }
+}
+
+// MARK: - Components
+
+struct LiquidButton: View {
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
+    let icon: String
+    var isDisabled: Bool = false
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(
+                    isDisabled
+                    ? AnyShapeStyle(Color.gray.opacity(0.4))
+                    : AnyShapeStyle(LinearGradient(
+                        colors: selectedTheme.colors(for: colorScheme).primary,
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                      ))
+                )
+                .frame(width: 44, height: 44)
+                .modifier(LiquidGlassModifier(cornerRadius: 22))
+        }
+        .buttonStyle(LiquidButtonStyle())
+        .disabled(isDisabled)
+    }
+}
+
+struct GlassTextField: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Binding var text: String
+    @FocusState.Binding var isTextFieldFocused: Bool
+    let onTextChanged: (String) -> Void
+    let onSend: () -> Void
+    
+    var body: some View {
+        Group {
+#if os(macOS)
+            ZStack(alignment: .leading) {
+                if text.isEmpty {
+                    Text("Message")
+                        .padding(.horizontal, 16)
+                        .foregroundStyle(Color.secondary.opacity(0.5))
+                }
+                EnterToSendTextView(text: $text, onTextChanged: onTextChanged, onSend: { _ in onSend() })
+                .frame(height: 24)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .modifier(LiquidGlassModifier(cornerRadius: 18))
+#else
+            TextField("Message", text: $text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .lineLimit(1...5)
+                .focused($isTextFieldFocused)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .modifier(LiquidGlassModifier(cornerRadius: 22))
+                .onChange(of: text) { oldValue, newValue in onTextChanged(newValue) }
+#endif
+        }
+    }
+}
+
+struct LiquidGlassModifier: ViewModifier {
+    @Environment(\.colorScheme) var colorScheme
+    var cornerRadius: CGFloat
+    
+    func body(content: Content) -> some View {
+        content
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: cornerRadius).fill(.ultraThinMaterial)
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(LinearGradient(
+                            colors: [
+                                .white.opacity(colorScheme == .dark ? 0.1 : 0.45),
+                                .white.opacity(0.05),
+                                .clear
+                            ],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                }
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .stroke(LinearGradient(
+                        colors: [
+                            .white.opacity(colorScheme == .dark ? 0.5 : 0.8),
+                            .white.opacity(0.2),
+                            .black.opacity(colorScheme == .dark ? 0 : 0.05)
+                        ],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ), lineWidth: 1.5)
+            )
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.08), radius: colorScheme == .dark ? 8 : 12, x: 0, y: 4)
+    }
+}
+
+struct LiquidButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
 #if os(macOS)
 import SwiftUI
+import AppKit
 
 struct EnterToSendTextView: NSViewRepresentable {
     @Binding var text: String
     let onTextChanged: (String) -> Void
     let onSend: (String) -> Void
 
-    func makeNSView(context: Context) -> NSTextView {
-        let textView = NSTextView()
-
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSTextView.scrollableTextView()
+        
+        // Use the TextKit 1 compatible initializer
+        let textView = CenteredTextView(usingTextLayoutManager: false)
+        
         textView.delegate = context.coordinator
         textView.isRichText = false
-        textView.font = .systemFont(ofSize: 14)
-
-        textView.isVerticallyResizable = false
-        textView.isHorizontallyResizable = false
-        textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.heightTracksTextView = true
-        textView.textContainer?.lineFragmentPadding = 0
-        textView.textContainerInset = NSSize(width: 6, height: 4)
-
         textView.drawsBackground = false
         textView.backgroundColor = .clear
+        textView.font = .systemFont(ofSize: 14)
+        
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        
+        // Safety check for text container
+        if let container = textView.textContainer {
+            container.containerSize = NSSize(width: scrollView.contentSize.width, height: .greatestFiniteMagnitude)
+            container.widthTracksTextView = true
+        }
 
-        textView.isAutomaticTextReplacementEnabled = false
-        textView.isAutomaticSpellingCorrectionEnabled = false
-
-        return textView
+        scrollView.documentView = textView
+        return scrollView
     }
 
-    func updateNSView(_ nsView: NSTextView, context: Context) {
-        guard nsView.window?.firstResponder !== nsView else { return }
-        if nsView.string != text {
-            nsView.string = text
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? CenteredTextView else { return }
+        if textView.string != text {
+            textView.string = text
         }
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    final class Coordinator: NSObject, NSTextViewDelegate {
-        let parent: EnterToSendTextView
-
-        init(_ parent: EnterToSendTextView) {
-            self.parent = parent
-        }
+    class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: EnterToSendTextView
+        init(_ parent: EnterToSendTextView) { self.parent = parent }
 
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
@@ -137,26 +215,36 @@ struct EnterToSendTextView: NSViewRepresentable {
             parent.onTextChanged(tv.string)
         }
 
-        func textView(
-            _ textView: NSTextView,
-            doCommandBy commandSelector: Selector
-        ) -> Bool {
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-                let textToSend = textView.string
-
-                textView.window?.makeFirstResponder(nil)
-                parent.text = ""
-                parent.onTextChanged("")
-                parent.onSend(textToSend)
-
-                DispatchQueue.main.async {
-                    textView.window?.makeFirstResponder(textView)
-                }
-
+                parent.onSend(textView.string)
                 return true
             }
             return false
         }
+    }
+}
+
+class CenteredTextView: NSTextView {
+    override var textContainerOrigin: NSPoint {
+        // Safe unwrapping: if layout manager or container are missing,
+        // return the default (0,0) instead of crashing.
+        guard let layoutManager = self.layoutManager,
+              let textContainer = self.textContainer else {
+            return super.textContainerOrigin
+        }
+        
+        let rect = layoutManager.usedRect(for: textContainer)
+        let containerHeight = frame.height
+        let textHeight = rect.height
+        
+        let yOffset = (containerHeight - textHeight) / 2
+        return NSPoint(x: 0, y: max(0, yOffset))
+    }
+    
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        self.needsLayout = true
     }
 }
 #endif

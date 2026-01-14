@@ -57,12 +57,14 @@ class ChatRepository: ObservableObject {
         if let existingIndex = activeRoomMessages.firstIndex(where: { $0.id == message.id }) {
             // Update existing message (e.g., status change from pending -> sent)
             activeRoomMessages[existingIndex] = message
-            print("🔄 ChatRepository: Updated existing message \(message.id)")
         } else {
-            // Insert new message at the beginning (newest first)
-            activeRoomMessages.insert(message, at: 0)
-            print("➕ ChatRepository: Inserted new message \(message.id)")
+            // Add new message
+            activeRoomMessages.append(message)
         }
+
+        // FIX: Sort the array so oldest messages are at the top (index 0)
+        // and newest messages are at the bottom.
+        activeRoomMessages.sort { $0.timestamp < $1.timestamp }
 
         if saveToDisk {
             Task {
@@ -76,28 +78,23 @@ class ChatRepository: ObservableObject {
         guard roomId == activeRoomId else { return }
 
         for message in messages {
-            // Check if message already exists
             if let existingIndex = activeRoomMessages.firstIndex(where: { $0.id == message.id }) {
                 activeRoomMessages[existingIndex] = message
             } else {
-                // Find correct insertion position to maintain chronological order
-                let insertIndex = activeRoomMessages.firstIndex { $0.timestamp < message.timestamp } ?? activeRoomMessages.count
-                activeRoomMessages.insert(message, at: insertIndex)
+                activeRoomMessages.append(message)
             }
         }
-
-        print("🔄 ChatRepository: Upserted \(messages.count) messages")
+        
+        // KEY: Keep the array sorted Oldest (Top) to Newest (Bottom)
+        activeRoomMessages.sort { $0.timestamp < $1.timestamp }
 
         if saveToDisk {
-            Task {
-                await persistence.saveMessages(activeRoomMessages, for: roomId)
-            }
+            Task { await persistence.saveMessages(activeRoomMessages, for: roomId) }
         }
     }
 
 
     // MARK: - Room Management
-    
     func fetchRooms() async {
         do {
             let fetchedRooms = try await cloudKit.fetchChatRooms()
@@ -152,23 +149,19 @@ class ChatRepository: ObservableObject {
             }
             
             if self.activeRoomId == roomId {
-                // Preserve pending messages
                 let pendingMessages = self.activeRoomMessages.filter { $0.status == .pending }
-
-                // Clear and re-populate with fetched messages (recent 30 + pending)
-                self.activeRoomMessages = []
-
+                
+                // Clear and rebuild
+                var newList = messages
+                newList.append(contentsOf: pendingMessages)
+                
+                // Sort: Oldest to Newest
+                newList.sort { $0.timestamp < $1.timestamp }
+                
                 withAnimation {
-                    upsertMessages(messagesWithReactions, in: roomId, saveToDisk: false)
-
-                    // Re-add pending messages
-                    for pending in pendingMessages {
-                        if !self.activeRoomMessages.contains(where: { $0.id == pending.id }) {
-                            upsertMessage(pending, in: roomId, saveToDisk: false)
-                        }
-                    }
+                    self.activeRoomMessages = newList
                 }
-
+                
                 await persistence.saveMessages(activeRoomMessages, for: roomId)
             }
         } catch {

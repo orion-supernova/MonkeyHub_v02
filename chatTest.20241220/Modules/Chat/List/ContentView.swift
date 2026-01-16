@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var availableRooms: [ChatRoom] = []
     @State private var isShowingSearchView = false
     @StateObject private var navigationState = NavigationStateManager.shared
+    @Namespace private var animationNamespace
 
     // MARK: - Room Operations
     private func loadData() async {
@@ -284,6 +285,7 @@ struct ContentView: View {
 //                                                            await leaveRoom(room)
                                                         }
                                                     }
+                                                    .matchedTransitionSource(id: room.id, in: animationNamespace)
                                                 }
                                                 .buttonStyle(.plain)
                                             }
@@ -324,6 +326,7 @@ struct ContentView: View {
                     .onAppear {
                         viewModel.clearUnread(for: room.id)
                     }
+                    .navigationTransition(.zoom(sourceID: room.id, in: animationNamespace))
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenChatRoom"))) { notification in
                 if let roomId = notification.userInfo?["roomId"] as? String {

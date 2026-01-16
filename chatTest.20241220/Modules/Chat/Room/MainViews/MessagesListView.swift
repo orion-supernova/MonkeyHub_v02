@@ -9,63 +9,83 @@ struct MessagesListView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     var body: some View {
-        ScrollView {
-            // No more rotation here!
-            LazyVStack(spacing: 8) {
-                // Adaptive top spacer based on orientation
-                Spacer().frame(height: verticalSizeClass == .compact ? 80 : 120)
+        ScrollViewReader { proxy in
+            ScrollView {
+                // No more rotation here!
+                LazyVStack(spacing: 8) {
+                    // Adaptive top spacer based on orientation
+                    Spacer().frame(height: verticalSizeClass == .compact ? 80 : 120)
 
-                // Pagination Loader now at the top of the array
-                if viewModel.isFetchingOlderMessages {
-                    ProgressView()
-                        .padding()
-                }
+                    // Pagination Loader now at the top of the array
+                    if viewModel.isFetchingOlderMessages {
+                        ProgressView()
+                            .padding()
+                    }
 
-                // Normal order: oldest to newest
-                ForEach(viewModel.messages) { message in
-                    MessageView(
-                        message: message,
-                        onImageTapped: onImageTapped,
-                        onDelete: {
-                            Task { await viewModel.deleteMessage(message.id) }
-                        },
-                        showReactionPicker: Binding(
-                            get: { activeReactionPickerMessageId == message.id },
-                            set: { activeReactionPickerMessageId = $0 ? message.id : nil }
+                    // Normal order: oldest to newest
+                    ForEach(viewModel.messages) { message in
+                        MessageView(
+                            message: message,
+                            onImageTapped: onImageTapped,
+                            onDelete: {
+                                Task { await viewModel.deleteMessage(message.id) }
+                            },
+                            showReactionPicker: Binding(
+                                get: { activeReactionPickerMessageId == message.id },
+                                set: { activeReactionPickerMessageId = $0 ? message.id : nil }
+                            )
                         )
-                    )
-                    .padding(.horizontal)
-                    .id(message.id)
-                    .onAppear {
-                        // Pagination logic: If we are not rotated,
-                        // "Older" messages are at the top of the array (index 0)
-                        if let first = viewModel.messages.first, first.id == message.id {
-                            Task { await viewModel.loadOlderMessages() }
+                        .padding(.horizontal)
+                        .id(message.id)
+                        .onAppear {
+                            // Pagination logic: If we are not rotated,
+                            // "Older" messages are at the top of the array (index 0)
+                            if let first = viewModel.messages.first, first.id == message.id {
+                                Task { await viewModel.loadOlderMessages() }
+                            }
                         }
                     }
-                }
 
-                // Typing Indicator at the visual bottom
-                if let typingText = viewModel.typingText {
-                    TypingIndicatorView(text: typingText)
-                        .padding(.horizontal)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                }
+                    // Typing Indicator at the visual bottom
+                    if let typingText = viewModel.typingText {
+                        TypingIndicatorView(text: typingText)
+                            .padding(.horizontal)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
 
-                // Adaptive bottom buffer (for floating input area)
-                Spacer().frame(height: verticalSizeClass == .compact ? 70 : 100)
+                    // Adaptive bottom buffer (for floating input area)
+                    Spacer().frame(height: verticalSizeClass == .compact ? 70 : 100)
+                    
+                    // Invisible anchor for rotation scrolling
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom")
+                }
             }
-        }
-        // KEY: This tells the ScrollView to pin to the bottom by default
-        .defaultScrollAnchor(.bottom)
-        .background(Color.clear)
-        .scrollContentBackground(.hidden)
-        .scrollDismissesKeyboard(.interactively)
-        .onTapGesture {
-            activeReactionPickerMessageId = nil
-            #if canImport(UIKit)
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            #endif
+            // KEY: This tells the ScrollView to pin to the bottom by default
+            .defaultScrollAnchor(.bottom)
+            .background(Color.clear)
+            .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+            .onTapGesture {
+                activeReactionPickerMessageId = nil
+                #if canImport(UIKit)
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                #endif
+            }
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onChange(of: geo.size) { _, _ in
+                            // Handle rotation: Scroll to bottom when view size changes
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                withAnimation {
+                                    proxy.scrollTo("bottom", anchor: .bottom)
+                                }
+                            }
+                        }
+                }
+            )
         }
     }
 }

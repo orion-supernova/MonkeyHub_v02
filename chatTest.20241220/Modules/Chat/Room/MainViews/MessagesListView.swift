@@ -8,22 +8,21 @@ struct MessagesListView: View {
     let imageZoomNamespace: Namespace.ID
     @State private var activeReactionPickerMessageId: String?
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @State private var showScrollToBottom = false
+    @State private var scrollPosition: String? = nil
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                // No more rotation here!
                 LazyVStack(spacing: 8) {
                     // Adaptive top spacer based on orientation
                     Spacer().frame(height: verticalSizeClass == .compact ? 80 : 120)
 
-                    // Pagination Loader now at the top of the array
                     if viewModel.isFetchingOlderMessages {
                         ProgressView()
                             .padding()
                     }
 
-                    // Normal order: oldest to newest
                     ForEach(viewModel.messages) { message in
                         MessageView(
                             message: message,
@@ -40,31 +39,30 @@ struct MessagesListView: View {
                         .padding(.horizontal)
                         .id(message.id)
                         .onAppear {
-                            // Pagination logic: If we are not rotated,
-                            // "Older" messages are at the top of the array (index 0)
                             if let first = viewModel.messages.first, first.id == message.id {
                                 Task { await viewModel.loadOlderMessages() }
                             }
                         }
                     }
 
-                    // Typing Indicator at the visual bottom
                     if let typingText = viewModel.typingText {
                         TypingIndicatorView(text: typingText)
                             .padding(.horizontal)
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            .id("typingIndicator")
                     }
 
                     // Adaptive bottom buffer (for floating input area)
                     Spacer().frame(height: verticalSizeClass == .compact ? 70 : 100)
                     
-                    // Invisible anchor for rotation scrolling
+                    // Anchor for scroll-to-bottom logic
                     Color.clear
-                        .frame(height: 1)
+                        .frame(height: 2)
                         .id("bottom")
+                        .onAppear { showScrollToBottom = false }
+                        .onDisappear { showScrollToBottom = true }
                 }
             }
-            // KEY: This tells the ScrollView to pin to the bottom by default
+            .scrollPosition(id: $scrollPosition)
             .defaultScrollAnchor(.bottom)
             .background(Color.clear)
             .scrollContentBackground(.hidden)
@@ -79,15 +77,33 @@ struct MessagesListView: View {
                 GeometryReader { geo in
                     Color.clear
                         .onChange(of: geo.size) { _, _ in
-                            // Handle rotation: Scroll to bottom when view size changes
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                withAnimation {
-                                    proxy.scrollTo("bottom", anchor: .bottom)
-                                }
+                            // Still need this for rotation, but use simple animation
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                scrollPosition = "bottom"
                             }
                         }
                 }
             )
+            .overlay(alignment: .bottomTrailing) {
+                if showScrollToBottom {
+                    Button {
+                        // scrollPosition binding is more robust against momentum
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            scrollPosition = "bottom"
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 38, height: 38)
+                            .modifier(LiquidGlassModifier(cornerRadius: 19))
+                    }
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 100)
+                    .transition(.opacity) // Pure fade in/out
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: showScrollToBottom)
         }
     }
 }

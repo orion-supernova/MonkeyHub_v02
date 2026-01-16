@@ -11,6 +11,7 @@ struct MessageView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @State private var showAllReactions = false
+    @State private var imageRetryCount = 0
 
     private var isCurrentUser: Bool {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
@@ -79,18 +80,25 @@ struct MessageView: View {
                     }
 
                     // 2. MESSAGE BUBBLE
-                    ZStack(alignment: isCurrentUser ? .bottomTrailing : .bottomLeading) {
-                        messageContentWrapper
-                        
-                        // Integrated Badge
-                        if !message.reactions.isEmpty {
-                            IntegratedReactionBadge(
-                                message: message,
-                                currentUserId: currentUserId,
-                                onTap: { showAllReactions = true }
-                            )
-                            .offset(x: isCurrentUser ? -12 : 12, y: 14)
-                            .zIndex(110)
+                    HStack(alignment: .center, spacing: 4) {
+                        ZStack(alignment: isCurrentUser ? .bottomTrailing : .bottomLeading) {
+                            messageContentWrapper
+
+                            // Integrated Badge
+                            if !message.reactions.isEmpty {
+                                IntegratedReactionBadge(
+                                    message: message,
+                                    currentUserId: currentUserId,
+                                    onTap: { showAllReactions = true }
+                                )
+                                .offset(x: isCurrentUser ? -12 : 12, y: 14)
+                                .zIndex(110)
+                            }
+                        }
+
+                        // 3. STATUS INDICATOR (Only for current user's pending/error messages)
+                        if isCurrentUser && message.status != .sent {
+                            statusIndicator
                         }
                     }
                 }
@@ -160,6 +168,22 @@ struct MessageView: View {
     }
 
     @ViewBuilder
+    private var statusIndicator: some View {
+        switch message.status {
+        case .pending:
+            ProgressView()
+                .scaleEffect(0.5)
+                .frame(width: 12, height: 12)
+        case .error:
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundColor(.red)
+                .font(.caption)
+        case .sent:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
     private var messageContent: some View {
         switch message.type {
         case .text:
@@ -168,14 +192,51 @@ struct MessageView: View {
                 .foregroundColor(isCurrentUser ? .white : .primary)
         case .image:
             if let url = message.assetURL {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                            .frame(width: 250, height: 250).clipped()
-                            .onTapGesture { onImageTapped(url) }
-                    } else {
-                        Rectangle().fill(Color.secondary.opacity(0.2)).frame(width: 250, height: 250)
+                // Local file - load directly without AsyncImage
+                if url.isFileURL, let uiImage = UIImage(contentsOfFile: url.path) {
+                    Image(uiImage: uiImage)
+                        .resizable().scaledToFill()
+                        .frame(width: 250, height: 250).clipped()
+                        .onTapGesture { onImageTapped(url) }
+                } else if url.isFileURL {
+                    // Local file failed to load
+                    ZStack {
+                        Rectangle().fill(Color.secondary.opacity(0.2))
+                        Image(systemName: "photo")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
                     }
+                    .frame(width: 250, height: 250)
+                } else {
+                    // Remote URL - use AsyncImage
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                                .frame(width: 250, height: 250).clipped()
+                                .onTapGesture { onImageTapped(url) }
+                        } else if phase.error != nil {
+                            ZStack {
+                                Rectangle().fill(Color.secondary.opacity(0.2))
+                                VStack(spacing: 8) {
+                                    Image(systemName: "arrow.clockwise.circle.fill")
+                                        .font(.system(size: 32))
+                                        .foregroundColor(.secondary)
+                                    Text("Tap to reload")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .frame(width: 250, height: 250)
+                            .onTapGesture { imageRetryCount += 1 }
+                        } else {
+                            ZStack {
+                                Rectangle().fill(Color.secondary.opacity(0.2))
+                                ProgressView()
+                            }
+                            .frame(width: 250, height: 250)
+                        }
+                    }
+                    .id("\(message.id)-\(imageRetryCount)")
                 }
             }
         case .video:
@@ -199,6 +260,7 @@ struct MessageView: View {
             )
         }
     }
+
 }
 
 // MARK: - Modern Integrated Reaction Badge

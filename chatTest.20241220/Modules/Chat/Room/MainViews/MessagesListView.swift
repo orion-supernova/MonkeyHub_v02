@@ -59,7 +59,7 @@ struct MessagesListView: View {
     // MARK: - Messages Content (Pure SwiftUI)
 
     private var messagesContent: some View {
-        VStack(spacing: 8) {
+        LazyVStack(spacing: 8) {
             // Top spacer with loading indicator
             Color.clear
                 .frame(height: verticalSizeClass == .compact ? 80 : 120)
@@ -72,7 +72,7 @@ struct MessagesListView: View {
                 }
 
             ForEach(viewModel.messages) { message in
-                MessageView(
+                MessageRow(
                     message: message,
                     currentUserId: currentUserId,
                     isCurrentUser: message.senderId == currentUserId,
@@ -80,13 +80,12 @@ struct MessagesListView: View {
                     onDelete: {
                         Task { await viewModel.deleteMessage(message.id) }
                     },
-                    showReactionPicker: Binding(
-                        get: { activeReactionPickerMessageId == message.id },
-                        set: { activeReactionPickerMessageId = $0 ? message.id : nil }
-                    ),
+                    isShowingReactionPicker: activeReactionPickerMessageId == message.id,
+                    onReactionPickerToggle: { show in
+                        activeReactionPickerMessageId = show ? message.id : nil
+                    },
                     imageZoomNamespace: imageZoomNamespace
                 )
-                .padding(.horizontal)
             }
 
             if let typingText = viewModel.typingText {
@@ -97,6 +96,43 @@ struct MessagesListView: View {
             // Bottom buffer for floating input area
             Color.clear.frame(height: verticalSizeClass == .compact ? 60 : 80)
         }
+    }
+}
+
+// MARK: - Optimized Message Row (Equatable for performance)
+struct MessageRow: View, Equatable {
+    let message: ChatMessage
+    let currentUserId: String
+    let isCurrentUser: Bool
+    let onImageTapped: (URL) -> Void
+    let onDelete: () -> Void
+    let isShowingReactionPicker: Bool
+    let onReactionPickerToggle: (Bool) -> Void
+    let imageZoomNamespace: Namespace.ID
+    
+    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool {
+        lhs.message.id == rhs.message.id &&
+        lhs.message.status == rhs.message.status &&
+        lhs.message.assetURL == rhs.message.assetURL &&
+        lhs.message.reactions.count == rhs.message.reactions.count &&
+        lhs.isShowingReactionPicker == rhs.isShowingReactionPicker
+    }
+
+    var body: some View {
+        MessageView(
+            message: message,
+            currentUserId: currentUserId,
+            isCurrentUser: isCurrentUser,
+            onImageTapped: onImageTapped,
+            onDelete: onDelete,
+            showReactionPicker: Binding(
+                get: { isShowingReactionPicker },
+                set: { onReactionPickerToggle($0) }
+            ),
+            imageZoomNamespace: imageZoomNamespace
+        )
+        .id(message.id)
+        .padding(.horizontal)
     }
 }
 

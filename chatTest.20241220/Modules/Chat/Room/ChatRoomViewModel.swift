@@ -76,23 +76,46 @@ class ChatRoomViewModel: ObservableObject {
         }
     }
 
-    func loadMessages() async {
-        await loadUserData()
-        // Explicitly wait for fetch to ensure loading state remains true
-        await repository.fetchMessages(for: roomId)
-        
-        // Subscribe to notifications (idempotent - managed by subscription manager)
-        await NotificationSubscriptionManager.shared.subscribeToRoom(roomId)
-    }
+    private var hasLoadedInitialData = false
 
-    func loadOlderMessages() async {
-        guard !isFetchingOlderMessages else { return }
-        isFetchingOlderMessages = true
-        
-        await repository.fetchOlderMessages(for: roomId)
-        
-        isFetchingOlderMessages = false
-    }
+        func loadMessages() async {
+            // 1. EXIT EARLY if we already have data
+            // This stops the CloudKit/Database fetch when dismissing images
+            guard !hasLoadedInitialData else {
+                print("✋ ChatRoomViewModel: Data already loaded, skipping refresh")
+                return
+            }
+            
+            await loadUserData()
+            
+            // 2. This is the expensive call from your logs
+            await repository.fetchMessages(for: roomId)
+            
+            // 3. Subscription is idempotent, but we only need to call it once
+            await NotificationSubscriptionManager.shared.subscribeToRoom(roomId)
+            
+            // 4. Mark as complete
+            self.hasLoadedInitialData = true
+        }
+
+        private var canLoadMoreOlderMessages = true // ADD THIS
+
+        func loadOlderMessages() async {
+            // Stop if already fetching OR if we know there are no more messages
+            guard !isFetchingOlderMessages && canLoadMoreOlderMessages else { return }
+            
+            isFetchingOlderMessages = true
+            
+            // Update repository to return the count of items found
+            let count = await repository.fetchOlderMessages(for: roomId)
+            
+            if count == 0 {
+                self.canLoadMoreOlderMessages = false
+                print("🏁 ChatRoomViewModel: Reached end of history.")
+            }
+            
+            isFetchingOlderMessages = false
+        }
 
     // MARK: - Typing Indicator
     func onTextChanged(_ text: String) {

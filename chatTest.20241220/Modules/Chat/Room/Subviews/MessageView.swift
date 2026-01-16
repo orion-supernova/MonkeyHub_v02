@@ -184,54 +184,13 @@ struct MessageView: View {
                 .foregroundColor(isCurrentUser ? .white : .primary)
         case .image:
             if let url = message.assetURL {
-                // Local file - load directly without AsyncImage
-                if url.isFileURL, let uiImage = UIImage(contentsOfFile: url.path) {
-                    Image(uiImage: uiImage)
-                        .resizable().scaledToFill()
-                        .frame(width: 250, height: 250).clipped()
-                        .matchedTransitionSource(id: url, in: imageZoomNamespace)
-                        .onTapGesture { onImageTapped(url) }
-                } else if url.isFileURL {
-                    // Local file failed to load
-                    ZStack {
-                        Rectangle().fill(Color.secondary.opacity(0.2))
-                        Image(systemName: "photo")
-                            .font(.system(size: 40))
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(width: 250, height: 250)
-                } else {
-                    // Remote URL - use AsyncImage
-                    AsyncImage(url: url) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFill()
-                                .frame(width: 250, height: 250).clipped()
-                                .matchedTransitionSource(id: url, in: imageZoomNamespace)
-                                .onTapGesture { onImageTapped(url) }
-                        } else if phase.error != nil {
-                            ZStack {
-                                Rectangle().fill(Color.secondary.opacity(0.2))
-                                VStack(spacing: 8) {
-                                    Image(systemName: "arrow.clockwise.circle.fill")
-                                        .font(.system(size: 32))
-                                        .foregroundColor(.secondary)
-                                    Text("Tap to reload")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            .frame(width: 250, height: 250)
-                            .onTapGesture { imageRetryCount += 1 }
-                        } else {
-                            ZStack {
-                                Rectangle().fill(Color.secondary.opacity(0.2))
-                                ProgressView()
-                            }
-                            .frame(width: 250, height: 250)
-                        }
-                    }
-                    .id("\(message.id)-\(imageRetryCount)")
-                }
+                // REMOVED messageId parameter to match the new optimized struct
+                CachedAsyncImage(
+                    url: url,
+                    imageZoomNamespace: imageZoomNamespace,
+                    onTap: { onImageTapped(url) }
+                )
+                .id(url.absoluteString) // Stable ID for transitions
             }
         case .video:
             if let url = message.assetURL {
@@ -409,7 +368,6 @@ struct TabButton: View {
 }
 
 // MARK: - Performance Optimized Modifier
-/// Only applies shadow/scale effects when reaction picker is active - avoids GPU cost when inactive
 struct ReactionPickerEffectModifier: ViewModifier {
     let isActive: Bool
 
@@ -422,6 +380,117 @@ struct ReactionPickerEffectModifier: ViewModifier {
         } else {
             content
                 .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isActive)
+        }
+    }
+}
+
+// MARK: - Cached Async Image (works with LazyVStack + UIKit)
+import SwiftUI
+import ImageIO
+
+final class ImageLoaderManager {
+    static let shared = ImageLoaderManager()
+    private let cache = NSCache<NSURL, UIImage>()
+    
+    func getCachedImage(for url: URL) -> UIImage? {
+        return cache.object(forKey: url as NSURL)
+    }
+
+    func loadAndPrepare(url: URL) async -> UIImage? {
+        if let cached = cache.object(forKey: url as NSURL) { return cached }
+        
+        return await Task.detached(priority: .userInitiated) {
+            var retryCount = 0
+            let maxRetries = 5
+            
+            // If the re-basing worked, this loop will handle the tiny
+            // delay while CloudKit finishes writing the file.
+            while retryCount < maxRetries {
+                if FileManager.default.fileExists(atPath: url.path) {
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 200_000_000) // 0.2s delay
+                retryCount += 1
+            }
+
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 600
+            ]
+            
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                  let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                return nil
+            }
+            
+            let uiImage = UIImage(cgImage: cgImage)
+            self.cache.setObject(uiImage, forKey: url as NSURL)
+            return uiImage
+        }.value
+    }
+}
+
+struct CachedAsyncImage: View {
+    let url: URL
+    let imageZoomNamespace: Namespace.ID
+    let onTap: () -> Void
+    @State private var displayImage: UIImage?
+    @State private var loadFailed = false // Add this
+
+    init(url: URL, imageZoomNamespace: Namespace.ID, onTap: @escaping () -> Void) {
+        self.url = url
+        self.imageZoomNamespace = imageZoomNamespace
+        self.onTap = onTap
+        _displayImage = State(initialValue: ImageLoaderManager.shared.getCachedImage(for: url))
+    }
+
+    var body: some View {
+        ZStack {
+            if let uiImage = displayImage {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 250, height: 250)
+                    .clipped()
+                    .matchedTransitionSource(id: url, in: imageZoomNamespace)
+                    .onTapGesture(perform: onTap)
+            } else if loadFailed {
+                // FAILURE STATE
+                Button {
+                    loadFailed = false
+                    Task { await loadImage() }
+                } label: {
+                    VStack(spacing: 8) {
+                        Image(systemName: "arrow.clockwise.circle.fill")
+                            .font(.title)
+                        Text("Tap to retry").font(.caption)
+                    }
+                    .foregroundColor(.secondary)
+                    .frame(width: 250, height: 250)
+                    .background(Color(.systemGray6))
+                }
+            } else {
+                // LOADING STATE
+                Rectangle().fill(Color(.systemGray6))
+                    .frame(width: 250, height: 250)
+                    .overlay { ProgressView() }
+            }
+        }
+        .task(id: url) {
+            await loadImage()
+        }
+    }
+    
+    private func loadImage() async {
+        if displayImage != nil { return }
+        if let img = await ImageLoaderManager.shared.loadAndPrepare(url: url) {
+            withAnimation(.easeIn(duration: 0.2)) {
+                self.displayImage = img
+            }
+        } else {
+            self.loadFailed = true
         }
     }
 }

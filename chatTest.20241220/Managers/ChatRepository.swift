@@ -168,43 +168,43 @@ class ChatRepository: ObservableObject {
         }
     }
 
-    func fetchOlderMessages(for roomId: String) async {
-        guard roomId == activeRoomId, !activeRoomMessages.isEmpty else { return }
+    // Change return type from async to async -> Int
+    func fetchOlderMessages(for roomId: String) async -> Int {
+        guard roomId == activeRoomId, !activeRoomMessages.isEmpty else { return 0 }
 
-        // FIX: In SSOT, activeRoomMessages is sorted OLDEST FIRST.
-        // So the "Older" messages should be before the FIRST message in our list.
         let oldestMessage = activeRoomMessages.first { $0.status != .pending }
-        guard let oldestDate = oldestMessage?.timestamp else { return }
-
-        print("📡 ChatRepository: Fetching messages before \(oldestDate)")
+        guard let oldestDate = oldestMessage?.timestamp else { return 0 }
 
         do {
             let olderMessages = try await cloudKit.fetchRecentMessages(for: roomId, before: oldestDate, limit: 30)
+            
+            // If empty, return 0 so ViewModel stops the loop
             guard !olderMessages.isEmpty else {
                 print("🏁 ChatRepository: No older messages found")
-                return
+                return 0
             }
             
-            // Fetch reactions for older messages
+            // Fetch reactions (existing logic...)
             var messagesWithReactions = olderMessages
             do {
                 let messageIds = olderMessages.map { $0.id }
                 let reactionsMap = try await ReactionService.shared.fetchReactions(for: messageIds)
-                
                 for i in 0..<messagesWithReactions.count {
                     if let reactions = reactionsMap[messagesWithReactions[i].id] {
                         messagesWithReactions[i].reactions = reactions
                     }
                 }
-            } catch {
-                print("⚠️ ChatRepository: Could not fetch reactions for older messages: \(error)")
-            }
+            } catch { print("⚠️ Reaction fetch failed") }
 
             if self.activeRoomId == roomId {
                 upsertMessages(messagesWithReactions, in: roomId, saveToDisk: true)
             }
+            
+            return messagesWithReactions.count // Return the actual count
+            
         } catch {
             print("❌ ChatRepository: Failed to fetch older messages: \(error)")
+            return 0
         }
     }
     
@@ -311,18 +311,17 @@ class ChatRepository: ObservableObject {
         if activeRoomId == roomId {
             Task {
                 do {
-                    // Fetch the complete message record from CloudKit
+                    // Give CloudKit a breath to move the asset to its temp location
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    
                     let record = try await cloudKit.database.record(for: recordID)
                     let fullMessage = try ChatMessage(from: record)
-
+                    
                     await MainActor.run {
                         withAnimation {
-                            // Use upsertMessage for proper deduplication (secondary check)
                             upsertMessage(fullMessage, in: roomId)
                         }
                     }
-
-                    print("✅ ChatRepository: Fetched and inserted full message with type: \(fullMessage.type)")
                 } catch {
                     print("❌ ChatRepository: Failed to fetch full message from CloudKit: \(error)")
                     // Fallback: Use reconstructed message from notification payload

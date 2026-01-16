@@ -131,8 +131,6 @@ struct ChatRoomView: View {
             navigationState.currentRoomId = nil
         }
         .sheet(isPresented: $showRoomInfo) {
-            Task { await viewModel.loadMessages() }
-        } content: {
             RoomInfoView(room: room)
         }
         .navigationDestination(for: URL.self) { url in

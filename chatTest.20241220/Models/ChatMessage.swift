@@ -24,7 +24,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     let type: MessageType
     let timestamp: Date
     let roomId: String
-    let assetURL: URL?
+    let assetURL: URL? // The active URL for the current session
     var status: MessageStatus
     var reactions: [MessageReaction]
     
@@ -42,6 +42,14 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     static let timestampKey = "timestamp"
     static let roomIdKey = "roomId"
     static let assetKey = "asset"
+
+    // MARK: - Codable Strategy
+    // We use a filename string for persistence because absolute URLs
+    // break when the iOS App Sandbox UUID changes.
+    enum CodingKeys: String, CodingKey {
+        case id, senderId, senderName, content, type, timestamp, roomId, status, reactions
+        case assetFileName
+    }
 
     init(
         id: String = UUID().uuidString,
@@ -67,10 +75,43 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         self.reactions = reactions
     }
 
-    /// Initialize from CloudKit record
-    ///
-    /// - Parameter record: The CloudKit record to parse
-    /// - Throws: CloudKitError.invalidRecord if required fields are missing
+    // MARK: - Codable Implementation
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        senderId = try container.decode(String.self, forKey: .senderId)
+        senderName = try container.decode(String.self, forKey: .senderName)
+        content = try container.decode(String.self, forKey: .content)
+        type = try container.decode(MessageType.self, forKey: .type)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        roomId = try container.decode(String.self, forKey: .roomId)
+        status = try container.decode(MessageStatus.self, forKey: .status)
+        reactions = try container.decode([MessageReaction].self, forKey: .reactions)
+        
+        // Re-base the URL: Get the filename and resolve it to the current sandbox path
+        let fileName = try container.decodeIfPresent(String.self, forKey: .assetFileName)
+        assetURL = AssetPersistenceService.shared.getURL(for: fileName)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(senderId, forKey: .senderId)
+        try container.encode(senderName, forKey: .senderName)
+        try container.encode(content, forKey: .content)
+        try container.encode(type, forKey: .type)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(roomId, forKey: .roomId)
+        try container.encode(status, forKey: .status)
+        try container.encode(reactions, forKey: .reactions)
+        
+        // Persist ONLY the filename, not the absolute URL
+        try container.encodeIfPresent(assetURL?.lastPathComponent, forKey: .assetFileName)
+    }
+
+    // MARK: - CloudKit Logic
+
     init(from record: CKRecord) throws {
         guard let id = record[ChatMessage.idKey] as? String,
             let senderId = record[ChatMessage.senderIdKey] as? String,
@@ -98,9 +139,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
             self.assetURL = nil
         }
         
-        // Reactions are fetched separately, not stored in message record
         self.reactions = []
-        
         self.status = .sent
     }
 
@@ -123,7 +162,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         return record
     }
     
-    /// Group reactions by emoji for UI display
+    // MARK: - Helpers
+
     func groupedReactions() -> [ReactionGroup] {
         let grouped = Dictionary(grouping: reactions, by: { $0.emoji })
         return grouped.map { ReactionGroup(emoji: $0.key, reactions: $0.value) }
@@ -131,6 +171,9 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     }
 
     static func == (lhs: ChatMessage, rhs: ChatMessage) -> Bool {
-        lhs.id == rhs.id
+        lhs.id == rhs.id &&
+        lhs.status == rhs.status &&
+        lhs.reactions.count == rhs.reactions.count &&
+        lhs.assetURL == rhs.assetURL
     }
 }

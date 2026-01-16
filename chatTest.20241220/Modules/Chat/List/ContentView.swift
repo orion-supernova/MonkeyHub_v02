@@ -490,7 +490,7 @@ struct EnhancedRoomCard: View {
     @State private var roomAvatarImage: PlatformImage?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 10) {
             // Header with room avatar and leave button
             HStack {
                 // Room avatar
@@ -499,7 +499,7 @@ struct EnhancedRoomCard: View {
                         Image(platformImage: avatarImage)
                             .resizable()
                             .scaledToFill()
-                            .frame(width: 44, height: 44)
+                            .frame(width: 40, height: 40)
                             .clipShape(Circle())
                     } else {
                         ZStack {
@@ -513,15 +513,15 @@ struct EnhancedRoomCard: View {
                                 )
 
                             Text(room.name.prefix(1).uppercased())
-                                .font(.title3.bold())
+                                .font(.headline.bold())
                                 .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
                         }
-                        .frame(width: 44, height: 44)
+                        .frame(width: 40, height: 40)
                     }
                 }
                 .shadow(
-                    color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
-                    radius: 5, y: 2)
+                    color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.2),
+                    radius: 4, y: 2)
                 .onAppear {
                     loadRoomAvatar()
                 }
@@ -538,15 +538,14 @@ struct EnhancedRoomCard: View {
                             .padding(.vertical, 4)
                             .background(Color.red)
                             .clipShape(Capsule())
-                            .shadow(color: .red.opacity(0.3), radius: 3)
                     }
 
                     // Leave button
                     Button(action: action) {
                         Image(systemName: "door.left.hand.open")
-                            .font(.headline)
+                            .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 28, height: 28)
                             .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))
                             .clipShape(Circle())
                     }
@@ -560,25 +559,39 @@ struct EnhancedRoomCard: View {
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
                     .lineLimit(1)
 
-                if let lastMessage = room.lastMessage {
-                    Text(lastMessage)
-                        .font(.caption)
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                        .lineLimit(2)
+                Group {
+                    if let lastMessage = room.lastMessage {
+                        Text(lastMessage)
+                    } else {
+                        Text("No messages yet")
+                            .italic()
+                            .opacity(0.6)
+                    }
                 }
-
-                HStack(spacing: 4) {
-                    Image(systemName: "person.2.fill")
-                        .imageScale(.small)
-                    Text("\(room.participants.count)")
-                }
-                .font(.caption2)
-                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                .padding(.top, 4)
+                .font(.caption)
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                .lineLimit(1)
             }
+            
+            // Footer (Participants) - No Spacer above it
+            HStack(spacing: 4) {
+                Image(systemName: "person.2.fill")
+                    .imageScale(.small)
+                Text("\(room.participants.count)")
+                
+                Spacer()
+                
+                if room.type == .secret {
+                    Image(systemName: "lock.shield.fill")
+                        .font(.caption2)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(selectedTheme.colors(for: colorScheme).cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .shadow(

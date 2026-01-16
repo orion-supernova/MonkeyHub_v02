@@ -10,6 +10,7 @@ struct BaseView: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var navigationState = NavigationStateManager.shared
+    @State private var hasSubscribed = false
 
     enum Tab: String, CaseIterable {
         case chat = "Chat"
@@ -53,6 +54,13 @@ struct BaseView: View {
             }
         }
         .animation(.spring(duration: 0.3), value: navigationState.currentScreen)
+        .task {
+            // Subscribe to all rooms on app launch (once per session)
+            if !hasSubscribed {
+                await NotificationSubscriptionManager.shared.forceResubscribeToAllRooms()
+                hasSubscribed = true
+            }
+        }
     }
 }
 

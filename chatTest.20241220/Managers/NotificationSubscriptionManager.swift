@@ -56,15 +56,24 @@ final class NotificationSubscriptionManager: ObservableObject {
             return
         }
 
+        // Try to unsubscribe from messages (ignore errors if subscription doesn't exist)
         do {
-            // Unsubscribe from both messages and reactions
             try await cloudKit.unsubscribeFromMessages(in: roomId)
-            try await cloudKit.unsubscribeFromReactions(in: roomId)
-            activeSubscriptions.remove(roomId)
-            print("✅ NotificationSubscriptionManager: Unsubscribed from messages and reactions in room \(roomId)")
+            print("✅ NotificationSubscriptionManager: Unsubscribed from messages in room \(roomId)")
         } catch {
-            print("❌ NotificationSubscriptionManager: Failed to unsubscribe from room \(roomId): \(error)")
+            print("⚠️ NotificationSubscriptionManager: Failed to unsubscribe from messages (might not exist): \(error)")
         }
+
+        // Try to unsubscribe from reactions (ignore errors if subscription doesn't exist)
+        do {
+            try await cloudKit.unsubscribeFromReactions(in: roomId)
+            print("✅ NotificationSubscriptionManager: Unsubscribed from reactions in room \(roomId)")
+        } catch {
+            print("⚠️ NotificationSubscriptionManager: Failed to unsubscribe from reactions (might not exist): \(error)")
+        }
+
+        activeSubscriptions.remove(roomId)
+        print("✅ NotificationSubscriptionManager: Removed room \(roomId) from active subscriptions")
     }
     
     /// Check if currently subscribed to a room
@@ -101,22 +110,73 @@ final class NotificationSubscriptionManager: ObservableObject {
         activeSubscriptions.removeAll()
         print("🧹 NotificationSubscriptionManager: Cleared subscription cache")
     }
+
+    /// Force resubscribe to all joined rooms (useful for fixing notification issues)
+    /// This clears the local cache and resubscribes to all rooms
+    func forceResubscribeToAllRooms() async {
+        print("🔄 NotificationSubscriptionManager: Force resubscribing to all rooms...")
+
+        // Clear local cache
+        activeSubscriptions.removeAll()
+
+        // Resubscribe to all rooms
+        do {
+            let rooms = try await cloudKit.fetchUserRooms()
+
+            // Subscribe in parallel for better performance
+            await withTaskGroup(of: Void.self) { group in
+                for room in rooms {
+                    group.addTask { @MainActor in
+                        await self.subscribeToRoom(room.id)
+                    }
+                }
+            }
+
+            print("✅ NotificationSubscriptionManager: Force resubscribed to \(rooms.count) rooms")
+        } catch {
+            print("❌ NotificationSubscriptionManager: Failed to force resubscribe: \(error)")
+        }
+    }
     
     // MARK: - Private Helpers
     
     private func performSubscription(roomId: String) async {
+        var messageSubscriptionSuccess = false
+        var reactionSubscriptionSuccess = false
+
+        // Subscribe to messages (critical - must succeed)
         do {
-            // Subscribe to both messages AND reactions for the room
             try await cloudKit.subscribeToMessages(in: roomId)
-            try await cloudKit.subscribeToReactions(in: roomId)
-            activeSubscriptions.insert(roomId)
-            print("✅ NotificationSubscriptionManager: Successfully subscribed to messages and reactions in room \(roomId)")
+            messageSubscriptionSuccess = true
+            print("✅ NotificationSubscriptionManager: Subscribed to messages in room \(roomId)")
         } catch let error as CKError where error.code == .serverRejectedRequest {
             // Duplicate subscription - treat as success
-            activeSubscriptions.insert(roomId)
-            print("ℹ️ NotificationSubscriptionManager: Duplicate subscription to room \(roomId) (already exists on server)")
+            messageSubscriptionSuccess = true
+            print("ℹ️ NotificationSubscriptionManager: Message subscription already exists for room \(roomId)")
         } catch {
-            print("❌ NotificationSubscriptionManager: Failed to subscribe to room \(roomId): \(error)")
+            print("❌ NotificationSubscriptionManager: Failed to subscribe to messages in room \(roomId): \(error)")
+        }
+
+        // Subscribe to reactions (optional - failure won't prevent message subscription)
+        do {
+            try await cloudKit.subscribeToReactions(in: roomId)
+            reactionSubscriptionSuccess = true
+            print("✅ NotificationSubscriptionManager: Subscribed to reactions in room \(roomId)")
+        } catch let error as CKError where error.code == .serverRejectedRequest {
+            // Duplicate subscription - treat as success
+            reactionSubscriptionSuccess = true
+            print("ℹ️ NotificationSubscriptionManager: Reaction subscription already exists for room \(roomId)")
+        } catch {
+            print("⚠️ NotificationSubscriptionManager: Failed to subscribe to reactions in room \(roomId): \(error)")
+            // Don't fail - reactions are optional
+        }
+
+        // Mark as subscribed if at least messages succeeded
+        if messageSubscriptionSuccess {
+            activeSubscriptions.insert(roomId)
+            print("✅ NotificationSubscriptionManager: Successfully subscribed to room \(roomId) (messages: ✓, reactions: \(reactionSubscriptionSuccess ? "✓" : "✗"))")
+        } else {
+            print("❌ NotificationSubscriptionManager: Failed to subscribe to room \(roomId)")
         }
     }
 }

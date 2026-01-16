@@ -6,21 +6,21 @@ struct MessagesListView: View {
     let isLoading: Bool
     let onImageTapped: (URL) -> Void
     @State private var activeReactionPickerMessageId: String?
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     var body: some View {
         ScrollView {
             // No more rotation here!
             LazyVStack(spacing: 8) {
-                // Since we are no longer flipped, we put the "Top Spacer" at the TOP
-                // to push content down if there are only a few messages
-                Spacer().frame(height: 120)
+                // Adaptive top spacer based on orientation
+                Spacer().frame(height: verticalSizeClass == .compact ? 80 : 120)
 
                 // Pagination Loader now at the top of the array
                 if viewModel.isFetchingOlderMessages {
                     ProgressView()
                         .padding()
                 }
-                
+
                 // Normal order: oldest to newest
                 ForEach(viewModel.messages) { message in
                     MessageView(
@@ -44,7 +44,7 @@ struct MessagesListView: View {
                         }
                     }
                 }
-                
+
                 // Typing Indicator at the visual bottom
                 if let typingText = viewModel.typingText {
                     TypingIndicatorView(text: typingText)
@@ -52,8 +52,8 @@ struct MessagesListView: View {
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
 
-                // BOTTOM BUFFER (for floating input area)
-                Spacer().frame(height: 100)
+                // Adaptive bottom buffer (for floating input area)
+                Spacer().frame(height: verticalSizeClass == .compact ? 70 : 100)
             }
         }
         // KEY: This tells the ScrollView to pin to the bottom by default

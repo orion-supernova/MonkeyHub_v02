@@ -19,6 +19,7 @@ struct ChatRoom: Identifiable, Hashable, Codable {
     let type: RoomType
     let messageLifetime: TimeInterval?
     var avatarAsset: CKAsset?
+    var avatarURL: URL?  // Codable URL for persisting avatar locally
 
     // CloudKit record keys
     static let recordType = "ChatRoom"
@@ -48,6 +49,7 @@ struct ChatRoom: Identifiable, Hashable, Codable {
         case isPrivate
         case type
         case messageLifetime
+        case avatarURL
     }
 
     init(from record: CKRecord) throws {
@@ -88,11 +90,14 @@ struct ChatRoom: Identifiable, Hashable, Codable {
             // Create a new CKAsset with the persisted URL
             if let persistedURL = AssetPersistenceService.shared.persistAsset(asset) {
                 self.avatarAsset = CKAsset(fileURL: persistedURL)
+                self.avatarURL = persistedURL  // Store URL for Codable persistence
             } else {
                 self.avatarAsset = asset
+                self.avatarURL = asset.fileURL  // Fallback to original URL
             }
         } else {
             self.avatarAsset = nil
+            self.avatarURL = nil
         }
     }
 
@@ -112,9 +117,10 @@ struct ChatRoom: Identifiable, Hashable, Codable {
         self.type = type
         self.messageLifetime = messageLifetime
         self.avatarAsset = nil
+        self.avatarURL = nil
     }
 
-    // Custom Decodable init - avatarAsset will be nil when decoded from JSON
+    // Custom Decodable init - restore avatarAsset from avatarURL
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -128,10 +134,17 @@ struct ChatRoom: Identifiable, Hashable, Codable {
         isPrivate = try container.decodeIfPresent(Bool.self, forKey: .isPrivate)
         type = try container.decode(RoomType.self, forKey: .type)
         messageLifetime = try container.decodeIfPresent(TimeInterval.self, forKey: .messageLifetime)
-        avatarAsset = nil // CKAsset cannot be decoded from JSON
+        avatarURL = try container.decodeIfPresent(URL.self, forKey: .avatarURL)
+
+        // Restore avatarAsset from avatarURL if available
+        if let avatarURL = avatarURL {
+            avatarAsset = CKAsset(fileURL: avatarURL)
+        } else {
+            avatarAsset = nil
+        }
     }
 
-    // Custom Encodable - skip avatarAsset since it's not Codable
+    // Custom Encodable - encode avatarURL instead of avatarAsset
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
@@ -145,6 +158,7 @@ struct ChatRoom: Identifiable, Hashable, Codable {
         try container.encodeIfPresent(isPrivate, forKey: .isPrivate)
         try container.encode(type, forKey: .type)
         try container.encodeIfPresent(messageLifetime, forKey: .messageLifetime)
+        try container.encodeIfPresent(avatarURL, forKey: .avatarURL)
     }
 
     func toRecord() -> CKRecord {

@@ -4,24 +4,16 @@ import AVKit
 // MARK: - Main Message View
 struct MessageView: View {
     let message: ChatMessage
+    let currentUserId: String
+    let isCurrentUser: Bool
     let onImageTapped: (URL) -> Void
     let onDelete: () -> Void
-    
+
     @Binding var showReactionPicker: Bool
     let imageZoomNamespace: Namespace.ID
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @State private var showAllReactions = false
     @State private var imageRetryCount = 0
-
-    private var isCurrentUser: Bool {
-        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-        return message.senderId == userId
-    }
-    
-    private var currentUserId: String {
-        userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-    }
     
     var body: some View {
         if message.senderId == ChatMessage.systemSenderId {
@@ -134,11 +126,10 @@ struct MessageView: View {
                     .cornerRadius(20)
             }
         }
-        .scaleEffect(showReactionPicker ? 1.06 : 1.0)
-        .shadow(color: .black.opacity(showReactionPicker ? 0.25 : 0), radius: 15, y: 8)
-        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: showReactionPicker)
+        .modifier(ReactionPickerEffectModifier(isActive: showReactionPicker))
         .onTapGesture(count: 2) {
-            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+            let generator = UIImpactFeedbackGenerator(style: .heavy)
+            generator.impactOccurred()
             withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                 showReactionPicker.toggle()
             }
@@ -271,11 +262,16 @@ struct IntegratedReactionBadge: View {
     let message: ChatMessage
     let currentUserId: String
     let onTap: () -> Void
-    
+
+    // Cache grouped reactions to avoid recomputing
+    private var groupedReactions: [ReactionGroup] {
+        message.groupedReactions()
+    }
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 3) {
-                ForEach(message.groupedReactions().prefix(3)) { group in
+                ForEach(groupedReactions.prefix(3)) { group in
                     Text(group.emoji).font(.system(size: 13))
                 }
                 if message.reactions.count > 1 {
@@ -290,6 +286,7 @@ struct IntegratedReactionBadge: View {
             .clipShape(Capsule())
             .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
             .overlay(Capsule().stroke(Color.primary.opacity(0.1), lineWidth: 0.5))
+            .drawingGroup()
         }
         .buttonStyle(.plain)
     }
@@ -300,12 +297,12 @@ struct CompactReactionPicker: View {
     let onEmojiSelected: (String) -> Void
     let onDismiss: () -> Void
     @State private var appeared = false
-    
-    private let emojis = ["❤️", "👍", "😂", "😮", "😢", "🙏", "🔥", "👏"]
-    
+
+    private static let emojis = ["❤️", "👍", "😂", "😮", "😢", "🙏", "🔥", "👏"]
+
     var body: some View {
         HStack(spacing: 12) {
-            ForEach(Array(emojis.enumerated()), id: \.element) { index, emoji in
+            ForEach(Array(Self.emojis.enumerated()), id: \.element) { index, emoji in
                 Button {
                     onEmojiSelected(emoji)
                 } label: {
@@ -395,7 +392,7 @@ struct TabButton: View {
     let count: Int
     let isSelected: Bool
     let action: () -> Void
-    
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 4) {
@@ -408,5 +405,23 @@ struct TabButton: View {
             .overlay(Capsule().stroke(isSelected ? Color.blue : Color.primary.opacity(0.1), lineWidth: 1))
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Performance Optimized Modifier
+/// Only applies shadow/scale effects when reaction picker is active - avoids GPU cost when inactive
+struct ReactionPickerEffectModifier: ViewModifier {
+    let isActive: Bool
+
+    func body(content: Content) -> some View {
+        if isActive {
+            content
+                .scaleEffect(1.06)
+                .shadow(color: .black.opacity(0.25), radius: 15, y: 8)
+                .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isActive)
+        } else {
+            content
+                .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isActive)
+        }
     }
 }

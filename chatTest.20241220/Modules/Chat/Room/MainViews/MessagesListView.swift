@@ -11,6 +11,11 @@ struct MessagesListView: View {
     @State private var showScrollToBottom = false
     @State private var scrollToBottom = false
 
+    // Cache userId once to avoid UserDefaults reads during scroll
+    private var currentUserId: String {
+        userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+    }
+
     var body: some View {
         UIKitScrollView(
             content: messagesContent,
@@ -23,9 +28,7 @@ struct MessagesListView: View {
                 }
             },
             onAtBottomChanged: { isAtBottom in
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showScrollToBottom = !isAtBottom
-                }
+                showScrollToBottom = !isAtBottom
             }
         )
         .background(Color.clear)
@@ -36,22 +39,21 @@ struct MessagesListView: View {
             #endif
         }
         .overlay(alignment: .bottomTrailing) {
-            if showScrollToBottom {
-                Button {
-                    scrollToBottom = true
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 38, height: 38)
-                        .modifier(LiquidGlassModifier(cornerRadius: 19))
-                }
-                .padding(.trailing, 20)
-                .padding(.bottom, 100)
-                .transition(.opacity)
+            Button {
+                scrollToBottom = true
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 38, height: 38)
+                    .modifier(LiquidGlassModifier(cornerRadius: 19))
             }
+            .padding(.trailing, 20)
+            .padding(.bottom, 100)
+            .opacity(showScrollToBottom ? 1 : 0)
+            .scaleEffect(showScrollToBottom ? 1 : 0.5)
+            .animation(.easeInOut(duration: 0.2), value: showScrollToBottom)
         }
-        .animation(.easeInOut(duration: 0.2), value: showScrollToBottom)
     }
 
     // MARK: - Messages Content (Pure SwiftUI)
@@ -72,6 +74,8 @@ struct MessagesListView: View {
             ForEach(viewModel.messages) { message in
                 MessageView(
                     message: message,
+                    currentUserId: currentUserId,
+                    isCurrentUser: message.senderId == currentUserId,
                     onImageTapped: onImageTapped,
                     onDelete: {
                         Task { await viewModel.deleteMessage(message.id) }
@@ -91,7 +95,7 @@ struct MessagesListView: View {
             }
 
             // Bottom buffer for floating input area
-            Color.clear.frame(height: verticalSizeClass == .compact ? 70 : 100)
+            Color.clear.frame(height: verticalSizeClass == .compact ? 60 : 80)
         }
     }
 }

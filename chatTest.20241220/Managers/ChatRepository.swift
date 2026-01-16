@@ -201,9 +201,7 @@ class ChatRepository: ObservableObject {
             }
 
             if self.activeRoomId == roomId {
-                withAnimation {
-                    upsertMessages(messagesWithReactions, in: roomId, saveToDisk: true)
-                }
+                upsertMessages(messagesWithReactions, in: roomId, saveToDisk: true)
             }
         } catch {
             print("❌ ChatRepository: Failed to fetch older messages: \(error)")

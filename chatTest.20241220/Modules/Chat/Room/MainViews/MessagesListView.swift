@@ -16,12 +16,29 @@ struct MessagesListView: View {
             ScrollView {
                 LazyVStack(spacing: 8) {
                     // Adaptive top spacer based on orientation
-                    Spacer().frame(height: verticalSizeClass == .compact ? 80 : 120)
-
-                    if viewModel.isFetchingOlderMessages {
-                        ProgressView()
-                            .padding()
-                    }
+                    Spacer()
+                        .frame(height: verticalSizeClass == .compact ? 80 : 120)
+                        .id("top-spacer")
+                        .overlay(alignment: .bottom) {
+                            if viewModel.isFetchingOlderMessages {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .padding(.bottom, 8)
+                            }
+                        }
+                    
+                    // Invisible trigger for loading older messages
+                    // Only triggers when the user scrolls PAST the top message
+                    Color.clear
+                        .frame(height: 20)
+                        .id("top-load-trigger")
+                        .onAppear {
+                            if !viewModel.isFetchingOlderMessages, let firstMessageId = viewModel.messages.first?.id {
+                                // Anchor to the current top message to prevent jumping to the new top
+                                scrollPosition = firstMessageId
+                                Task { await viewModel.loadOlderMessages() }
+                            }
+                        }
 
                     ForEach(viewModel.messages) { message in
                         MessageView(
@@ -38,11 +55,6 @@ struct MessagesListView: View {
                         )
                         .padding(.horizontal)
                         .id(message.id)
-                        .onAppear {
-                            if let first = viewModel.messages.first, first.id == message.id {
-                                Task { await viewModel.loadOlderMessages() }
-                            }
-                        }
                     }
 
                     if let typingText = viewModel.typingText {
@@ -61,6 +73,7 @@ struct MessagesListView: View {
                         .onAppear { showScrollToBottom = false }
                         .onDisappear { showScrollToBottom = true }
                 }
+                .scrollTargetLayout()
             }
             .scrollPosition(id: $scrollPosition)
             .defaultScrollAnchor(.bottom)

@@ -73,11 +73,7 @@ struct ChatRoomView: View {
                     
                     Spacer()
                     
-                    Text(room.name)
-                        .font(.headline)
-                        .padding(.horizontal, 20)
-                        .frame(height: 44)
-                        .modifier(LiquidGlassModifier(cornerRadius: 22))
+                    RoomTitleView(title: room.name)
                     
                     Spacer()
                     
@@ -188,6 +184,61 @@ struct ChatRoomView: View {
                 )
             }
         )
+    }
+}
+
+struct RoomTitleView: View {
+    let title: String
+    @State private var isExpanded = false
+    @State private var textLayoutWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+
+    var body: some View {
+        Text(title)
+            .font(.headline)
+            .multilineTextAlignment(.center)
+            .lineLimit(isExpanded ? nil : 1)
+            .padding(.horizontal, 20)
+            .padding(.vertical, isExpanded ? 8 : 0)
+            .frame(minHeight: 44)
+            .frame(height: isExpanded ? nil : 44)
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { containerWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { _, newValue in containerWidth = newValue }
+                }
+            )
+            .background(
+                Text(title)
+                    .font(.headline)
+                    .fixedSize()
+                    .padding(.horizontal, 20)
+                    .hidden()
+                    .overlay(
+                        GeometryReader { proxy in
+                            Color.clear
+                                .onAppear { textLayoutWidth = proxy.size.width }
+                                .onChange(of: proxy.size.width) { _, newValue in textLayoutWidth = newValue }
+                        }
+                    )
+            )
+            .modifier(LiquidGlassModifier(cornerRadius: 22))
+            .onTapGesture {
+                // Heuristic: If text is wider than container, it's truncated
+                if textLayoutWidth > containerWidth {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                        isExpanded = true
+                    }
+                    
+                    // Auto-collapse after 3 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                        withAnimation {
+                            isExpanded = false
+                        }
+                    }
+                }
+            }
     }
 }
 

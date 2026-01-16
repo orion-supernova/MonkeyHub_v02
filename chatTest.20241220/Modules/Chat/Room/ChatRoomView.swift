@@ -18,6 +18,7 @@ struct ChatRoomView: View {
     @State private var showVoiceRecorder = false
     @State private var isShowingAttachmentMenu = false
     @State private var showRoomInfo = false
+    @Namespace private var imageZoomNamespace
     
     init(room: ChatRoom) {
         self.room = room
@@ -59,7 +60,10 @@ struct ChatRoomView: View {
             MessagesListView(
                 viewModel: viewModel,
                 isLoading: isLoading,
-                onImageTapped: { url in selectedImageUrl = url }
+                onImageTapped: { url in
+                    navigationState.path.append(url)
+                },
+                imageZoomNamespace: imageZoomNamespace
             )
             // Allows messages to scroll behind the top/bottom pebbles
             .ignoresSafeArea(.container, edges: .vertical)
@@ -131,6 +135,10 @@ struct ChatRoomView: View {
         } content: {
             RoomInfoView(room: room)
         }
+        .navigationDestination(for: URL.self) { url in
+            FullscreenImageView(url: url)
+                .navigationTransition(.zoom(sourceID: url, in: imageZoomNamespace))
+        }
         // ... (The rest of your fullScreenCover and sheet logic stays here)
         #if canImport(UIKit)
         .fullScreenCover(isPresented: $showCamera) {
@@ -149,7 +157,6 @@ struct ChatRoomView: View {
                 }
             }
         }
-        .fullScreenCover(item: $selectedImageUrl) { url in FullscreenImageView(url: url) }
         #else
         .sheet(isPresented: $showCamera) {
             CameraEditorView(isPresented: $showCamera) { _ in isShowingAttachmentMenu = false }
@@ -157,7 +164,6 @@ struct ChatRoomView: View {
         .sheet(isPresented: $showVoiceRecorder) {
             VoiceRecorderView(isPresented: $showVoiceRecorder) { _ in isShowingAttachmentMenu = false }
         }
-        .sheet(item: $selectedImageUrl) { url in FullscreenImageView(url: url) }
         #endif
         .onChange(of: selectedImage) { newImage in
             if let image = newImage {

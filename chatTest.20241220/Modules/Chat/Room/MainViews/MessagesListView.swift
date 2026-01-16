@@ -5,6 +5,7 @@ struct MessagesListView: View {
     let viewModel: ChatRoomViewModel
     let isLoading: Bool
     let onImageTapped: (URL) -> Void
+    let imageZoomNamespace: Namespace.ID
     @State private var activeReactionPickerMessageId: String?
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
@@ -33,7 +34,8 @@ struct MessagesListView: View {
                             showReactionPicker: Binding(
                                 get: { activeReactionPickerMessageId == message.id },
                                 set: { activeReactionPickerMessageId = $0 ? message.id : nil }
-                            )
+                            ),
+                            imageZoomNamespace: imageZoomNamespace
                         )
                         .padding(.horizontal)
                         .id(message.id)

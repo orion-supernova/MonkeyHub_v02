@@ -8,6 +8,7 @@ struct MessageView: View {
     let onDelete: () -> Void
     
     @Binding var showReactionPicker: Bool
+    let imageZoomNamespace: Namespace.ID
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @State private var showAllReactions = false
@@ -197,6 +198,7 @@ struct MessageView: View {
                     Image(uiImage: uiImage)
                         .resizable().scaledToFill()
                         .frame(width: 250, height: 250).clipped()
+                        .matchedTransitionSource(id: url, in: imageZoomNamespace)
                         .onTapGesture { onImageTapped(url) }
                 } else if url.isFileURL {
                     // Local file failed to load
@@ -213,6 +215,7 @@ struct MessageView: View {
                         if let image = phase.image {
                             image.resizable().scaledToFill()
                                 .frame(width: 250, height: 250).clipped()
+                                .matchedTransitionSource(id: url, in: imageZoomNamespace)
                                 .onTapGesture { onImageTapped(url) }
                         } else if phase.error != nil {
                             ZStack {

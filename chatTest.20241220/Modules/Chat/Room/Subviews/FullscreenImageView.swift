@@ -10,26 +10,31 @@ struct FullscreenImageView: View {
                 .ignoresSafeArea()
 
             ZoomableScrollView {
-                AsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .scaledToFit()
-                } placeholder: {
-                    ProgressView()
+                if url.isFileURL {
+                    if let uiImage = UIImage(contentsOfFile: url.path) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFit()
+                    } else {
+                        Image(systemName: "photo")
+                            .font(.largeTitle)
+                            .foregroundColor(.white)
+                    }
+                } else {
+                    AsyncImage(url: url) { image in
+                        image
+                            .resizable()
+                            .scaledToFit()
+                    } placeholder: {
+                        ProgressView()
+                            .tint(.white)
+                    }
                 }
             }
             .ignoresSafeArea()
         }
-        .overlay(alignment: .topLeading) {
-            Button(action: {
-                dismiss()
-            }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.largeTitle)
-                    .foregroundColor(.white)
-                    .shadow(radius: 2)
-            }
-            .padding()
+        .onTapGesture {
+            dismiss()
         }
     }
 }

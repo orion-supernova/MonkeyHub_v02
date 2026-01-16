@@ -19,6 +19,7 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
         scrollView.showsVerticalScrollIndicator = false
         scrollView.bouncesZoom = true
         scrollView.backgroundColor = .clear
+        scrollView.contentInsetAdjustmentBehavior = .never
 
         // Create a hosting controller for the SwiftUI content
         let hostingController = UIHostingController(rootView: content)

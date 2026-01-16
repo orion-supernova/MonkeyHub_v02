@@ -129,9 +129,9 @@ class ChatRepository: ObservableObject {
         guard roomId == activeRoomId else { return }
 
         do {
-            let messages = try await cloudKit.fetchRecentMessages(for: roomId, limit: 30)
+            let messages = try await cloudKit.fetchRecentMessages(for: roomId, limit: 50)
             
-            // Fetch reactions for all messages (gracefully handle if record type doesn't exist)
+            // Fetch reactions for all messages
             var messagesWithReactions = messages
             do {
                 let messageIds = messages.map { $0.id }
@@ -144,18 +144,17 @@ class ChatRepository: ObservableObject {
                     }
                 }
             } catch {
-                print("⚠️ ChatRepository: Could not fetch reactions (this is normal if reactions haven't been set up yet): \(error)")
-                // Continue without reactions
+                print("⚠️ ChatRepository: Could not fetch reactions: \(error)")
             }
             
             if self.activeRoomId == roomId {
                 let pendingMessages = self.activeRoomMessages.filter { $0.status == .pending }
 
                 // Clear and rebuild
-                var newList = messagesWithReactions  // Use messagesWithReactions instead of messages!
+                var newList = messagesWithReactions
                 newList.append(contentsOf: pendingMessages)
 
-                // Sort: Oldest to Newest
+                // Sort: Oldest (Top) to Newest (Bottom)
                 newList.sort { $0.timestamp < $1.timestamp }
 
                 withAnimation {
@@ -165,15 +164,16 @@ class ChatRepository: ObservableObject {
                 await persistence.saveMessages(activeRoomMessages, for: roomId)
             }
         } catch {
-            print("❌ ChatRepository: Failed to fetch messages for room \(roomId): \(error)")
+            print("❌ ChatRepository: Failed to fetch messages: \(error)")
         }
     }
 
     func fetchOlderMessages(for roomId: String) async {
         guard roomId == activeRoomId, !activeRoomMessages.isEmpty else { return }
 
-        // Get the oldest message timestamp (messages are sorted newest first)
-        let oldestMessage = activeRoomMessages.last { $0.status != .pending }
+        // FIX: In SSOT, activeRoomMessages is sorted OLDEST FIRST.
+        // So the "Older" messages should be before the FIRST message in our list.
+        let oldestMessage = activeRoomMessages.first { $0.status != .pending }
         guard let oldestDate = oldestMessage?.timestamp else { return }
 
         print("📡 ChatRepository: Fetching messages before \(oldestDate)")
@@ -185,21 +185,19 @@ class ChatRepository: ObservableObject {
                 return
             }
             
-            // Fetch reactions for older messages (gracefully handle if record type doesn't exist)
+            // Fetch reactions for older messages
             var messagesWithReactions = olderMessages
             do {
                 let messageIds = olderMessages.map { $0.id }
                 let reactionsMap = try await ReactionService.shared.fetchReactions(for: messageIds)
                 
-                // Attach reactions to messages
                 for i in 0..<messagesWithReactions.count {
                     if let reactions = reactionsMap[messagesWithReactions[i].id] {
                         messagesWithReactions[i].reactions = reactions
                     }
                 }
             } catch {
-                print("⚠️ ChatRepository: Could not fetch reactions for older messages (this is normal if reactions haven't been set up yet): \(error)")
-                // Continue without reactions
+                print("⚠️ ChatRepository: Could not fetch reactions for older messages: \(error)")
             }
 
             if self.activeRoomId == roomId {
@@ -208,7 +206,7 @@ class ChatRepository: ObservableObject {
                 }
             }
         } catch {
-            print("❌ ChatRepository: Failed to fetch older messages for room \(roomId): \(error)")
+            print("❌ ChatRepository: Failed to fetch older messages: \(error)")
         }
     }
     

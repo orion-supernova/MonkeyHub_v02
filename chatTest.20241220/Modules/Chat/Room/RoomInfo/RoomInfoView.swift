@@ -15,7 +15,9 @@ struct RoomInfoView: View {
     @State private var editedName = ""
     @State private var isEditingDescription = false
     @State private var editedDescription = ""
-    
+    @State private var showFullscreenAvatar = false
+    @Namespace private var avatarNamespace
+
     private let currentUserId: String
     private let isCreator: Bool
     
@@ -58,10 +60,12 @@ struct RoomInfoView: View {
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
                 }
             }
+            .onAppear {
+                loadRoomAvatar()
+            }
             .task {
                 await viewModel.refreshRoom()
                 await viewModel.loadMembers()
-                loadRoomAvatar()
             }
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(image: $selectedImage)
@@ -91,35 +95,80 @@ struct RoomInfoView: View {
                     }
                 }
             } message: {
-                Text(pendingVisibilityValue 
-                    ? "This will make the room private. Only members can see and join this room." 
+                Text(pendingVisibilityValue
+                    ? "This will make the room private. Only members can see and join this room."
                     : "This will make the room public. Anyone can search and join this room.")
+            }
+        }
+        .overlay {
+            if showFullscreenAvatar, let avatarImage = roomAvatarImage {
+                ZoomableAvatarOverlay(
+                    image: avatarImage,
+                    namespace: avatarNamespace,
+                    isPresented: $showFullscreenAvatar
+                )
             }
         }
     }
     
     private func loadRoomAvatar() {
-        guard let avatarAsset = viewModel.room.avatarAsset,
-              let fileURL = avatarAsset.fileURL else { return }
-        
-        if let data = try? Data(contentsOf: fileURL),
-           let image = PlatformImage.fromData(data) {
-            roomAvatarImage = image
+        // Try persisted avatarURL first (resolving filename to current session's path)
+        if let avatarURL = viewModel.room.avatarURL {
+            let filename = avatarURL.lastPathComponent
+            if let resolvedURL = AssetPersistenceService.shared.getURL(for: filename),
+               let data = try? Data(contentsOf: resolvedURL),
+               let image = PlatformImage.fromData(data) {
+                roomAvatarImage = image
+                return
+            }
+        }
+
+        // Fallback: fetch from CloudKit if local file not available
+        Task {
+            await fetchAvatarFromCloud()
+        }
+    }
+
+    private func fetchAvatarFromCloud() async {
+        do {
+            // Query by the "id" field, not recordID (they may differ)
+            let predicate = NSPredicate(format: "%K == %@", ChatRoom.idKey, viewModel.room.id)
+            let query = CKQuery(recordType: ChatRoom.recordType, predicate: predicate)
+
+            let (records, _) = try await CloudKitManager.shared.database.records(matching: query, resultsLimit: 1)
+            guard let record = try records.first?.1.get() else { return }
+
+            if let asset = record[ChatRoom.avatarAssetKey] as? CKAsset,
+               let fileURL = asset.fileURL,
+               let data = try? Data(contentsOf: fileURL),
+               let image = PlatformImage.fromData(data) {
+                await MainActor.run {
+                    roomAvatarImage = image
+                }
+            }
+        } catch {
+            // Silently fail - will show placeholder
+            print("Failed to fetch room avatar from cloud: \(error)")
         }
     }
     
     private var avatarSection: some View {
         VStack(spacing: 12) {
-            Button {
-                showImagePicker = true
-            } label: {
-                ZStack {
+            ZStack {
+                // Avatar image - tappable for fullscreen (when image exists)
+                Group {
                     if let avatarImage = roomAvatarImage {
                         Image(platformImage: avatarImage)
                             .resizable()
                             .scaledToFill()
                             .frame(width: 120, height: 120)
                             .clipShape(Circle())
+                            .matchedGeometryEffect(id: "roomAvatar", in: avatarNamespace, isSource: !showFullscreenAvatar)
+                            .onTapGesture {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                    showFullscreenAvatar = true
+                                }
+                            }
                     } else {
                         Circle()
                             .fill(
@@ -136,23 +185,28 @@ struct RoomInfoView: View {
                                     .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
                             )
                     }
-                    
-                    // Loading indicator overlay
-                    if viewModel.isLoading {
-                        Circle()
-                            .fill(Color.black.opacity(0.5))
-                            .frame(width: 120, height: 120)
-                        
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .scaleEffect(1.5)
-                    }
-                    
-                    if !viewModel.isLoading {
-                        VStack {
+                }
+
+                // Loading indicator overlay - only when uploading avatar
+                if viewModel.isUploadingAvatar {
+                    Circle()
+                        .fill(Color.black.opacity(0.5))
+                        .frame(width: 120, height: 120)
+
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(1.5)
+                }
+
+                // Camera button - tappable to change image
+                if !viewModel.isUploadingAvatar {
+                    VStack {
+                        Spacer()
+                        HStack {
                             Spacer()
-                            HStack {
-                                Spacer()
+                            Button {
+                                showImagePicker = true
+                            } label: {
                                 Image(systemName: "camera.circle.fill")
                                     .font(.title2)
                                     .foregroundStyle(.white)
@@ -161,14 +215,13 @@ struct RoomInfoView: View {
                                             .fill(selectedTheme.colors(for: colorScheme).accent)
                                             .frame(width: 32, height: 32)
                                     )
-                                    .offset(x: -8, y: -8)
                             }
+                            .offset(x: -8, y: -8)
                         }
-                        .frame(width: 120, height: 120)
                     }
+                    .frame(width: 120, height: 120)
                 }
             }
-            .disabled(viewModel.isLoading)
             
             if isEditingName {
                 HStack {
@@ -508,13 +561,83 @@ struct MemberRowView: View {
     
     private func loadAvatar() {
         guard let avatarAsset = member.avatarAsset,
-              let fileURL = avatarAsset.fileURL else { 
-            return 
+              let fileURL = avatarAsset.fileURL else {
+            return
         }
-        
+
         if let data = try? Data(contentsOf: fileURL),
            let image = PlatformImage.fromData(data) {
             avatarImage = image
+        }
+    }
+}
+
+// MARK: - Zoomable Avatar Overlay
+private struct ZoomableAvatarOverlay: View {
+    let image: PlatformImage
+    let namespace: Namespace.ID
+    @Binding var isPresented: Bool
+
+    @State private var backgroundOpacity: Double = 0
+    @State private var dragOffset: CGSize = .zero
+    @State private var scale: CGFloat = 1
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // Background
+                Color.black
+                    .opacity(backgroundOpacity)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        dismissWithAnimation()
+                    }
+
+                // Zoomed image
+                Image(platformImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .matchedGeometryEffect(id: "roomAvatar", in: namespace, isSource: isPresented)
+                    .scaleEffect(scale)
+                    .offset(dragOffset)
+                    .gesture(dragGesture)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                backgroundOpacity = 1
+            }
+        }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                dragOffset = value.translation
+                let progress = min(abs(value.translation.height) / 300, 1)
+                backgroundOpacity = 1 - (progress * 0.5)
+                scale = 1 - (progress * 0.15)
+            }
+            .onEnded { value in
+                let threshold: CGFloat = 100
+                if abs(value.translation.height) > threshold ||
+                   abs(value.predictedEndTranslation.height) > threshold * 2 {
+                    dismissWithAnimation()
+                } else {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        dragOffset = .zero
+                        backgroundOpacity = 1
+                        scale = 1
+                    }
+                }
+            }
+    }
+
+    private func dismissWithAnimation() {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            backgroundOpacity = 0
+            isPresented = false
         }
     }
 }

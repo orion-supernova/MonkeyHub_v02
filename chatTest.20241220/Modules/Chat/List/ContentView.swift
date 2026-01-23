@@ -608,12 +608,41 @@ struct EnhancedRoomCard: View {
     }
     
     private func loadRoomAvatar() {
-        guard let avatarAsset = room.avatarAsset,
-              let fileURL = avatarAsset.fileURL else { return }
-        
-        if let data = try? Data(contentsOf: fileURL),
-           let image = PlatformImage.fromData(data) {
-            roomAvatarImage = image
+        // Try persisted avatarURL first (resolving filename to current session's path)
+        if let avatarURL = room.avatarURL {
+            let filename = avatarURL.lastPathComponent
+            if let resolvedURL = AssetPersistenceService.shared.getURL(for: filename),
+               let data = try? Data(contentsOf: resolvedURL),
+               let image = PlatformImage.fromData(data) {
+                roomAvatarImage = image
+                return
+            }
+        }
+
+        // Fallback: fetch from CloudKit
+        Task {
+            await fetchAvatarFromCloud()
+        }
+    }
+
+    private func fetchAvatarFromCloud() async {
+        do {
+            let predicate = NSPredicate(format: "%K == %@", ChatRoom.idKey, room.id)
+            let query = CKQuery(recordType: ChatRoom.recordType, predicate: predicate)
+
+            let (records, _) = try await CloudKitManager.shared.database.records(matching: query, resultsLimit: 1)
+            guard let record = try records.first?.1.get() else { return }
+
+            if let asset = record[ChatRoom.avatarAssetKey] as? CKAsset,
+               let fileURL = asset.fileURL,
+               let data = try? Data(contentsOf: fileURL),
+               let image = PlatformImage.fromData(data) {
+                await MainActor.run {
+                    roomAvatarImage = image
+                }
+            }
+        } catch {
+            // Silently fail - will show placeholder
         }
     }
 }

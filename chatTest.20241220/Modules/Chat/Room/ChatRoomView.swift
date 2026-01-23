@@ -130,7 +130,7 @@ struct ChatRoomView: View {
             navigationState.currentScreen = .home
             navigationState.currentRoomId = nil
         }
-        .sheet(isPresented: $showRoomInfo) {
+        .fullScreenCover(isPresented: $showRoomInfo) {
             RoomInfoView(room: room)
         }
         .navigationDestination(for: URL.self) { url in

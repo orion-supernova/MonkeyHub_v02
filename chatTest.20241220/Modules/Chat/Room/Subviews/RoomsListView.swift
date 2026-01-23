@@ -1,4 +1,5 @@
 import SwiftUI
+import CloudKit
 
 struct RoomsListView: View {
     let rooms: [ChatRoom]
@@ -54,6 +55,7 @@ private struct RoomRow: View {
     let joinRoom: (ChatRoom) async -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
+    @State private var avatarImage: PlatformImage?
 
     var body: some View {
         Button {
@@ -76,24 +78,80 @@ private struct RoomRow: View {
         .buttonStyle(.plain)
         .disabled(isJoined)
         .opacity(isJoined ? 0.7 : 1.0)
+        .onAppear {
+            loadAvatar()
+        }
+        .onChange(of: room.avatarAsset) { _ in
+            loadAvatar()
+        }
+    }
+
+    private func loadAvatar() {
+        // Try persisted avatarURL first (resolving filename to current session's path)
+        if let avatarURL = room.avatarURL {
+            let filename = avatarURL.lastPathComponent
+            if let resolvedURL = AssetPersistenceService.shared.getURL(for: filename),
+               let data = try? Data(contentsOf: resolvedURL),
+               let image = PlatformImage.fromData(data) {
+                avatarImage = image
+                return
+            }
+        }
+
+        // Fallback: fetch from CloudKit if local file not available
+        Task {
+            await fetchAvatarFromCloud()
+        }
+    }
+
+    private func fetchAvatarFromCloud() async {
+        do {
+            // Query by the "id" field, not recordID (they may differ)
+            let predicate = NSPredicate(format: "%K == %@", ChatRoom.idKey, room.id)
+            let query = CKQuery(recordType: ChatRoom.recordType, predicate: predicate)
+
+            let (records, _) = try await CloudKitManager.shared.database.records(matching: query, resultsLimit: 1)
+            guard let record = try records.first?.1.get() else { return }
+
+            if let asset = record[ChatRoom.avatarAssetKey] as? CKAsset,
+               let fileURL = asset.fileURL,
+               let data = try? Data(contentsOf: fileURL),
+               let image = PlatformImage.fromData(data) {
+                await MainActor.run {
+                    avatarImage = image
+                }
+            }
+        } catch {
+            // Silently fail - will show placeholder
+        }
     }
 
     private var roomIcon: some View {
-        ZStack {
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: selectedTheme.colors(for: colorScheme).primary,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+        Group {
+            if let avatarImage = avatarImage {
+                Image(platformImage: avatarImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 44, height: 44)
+                    .clipShape(Circle())
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: selectedTheme.colors(for: colorScheme).primary,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
 
-            Image(systemName: room.type == .regular ? "bubble.left" : "lock.shield")
-                .font(.title3.bold())
-                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                    Image(systemName: room.type == .regular ? "bubble.left" : "lock.shield")
+                        .font(.title3.bold())
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                }
+                .frame(width: 44, height: 44)
+            }
         }
-        .frame(width: 44, height: 44)
     }
 
     private var roomInfo: some View {

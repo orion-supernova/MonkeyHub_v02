@@ -19,7 +19,8 @@ struct MessageInputView: View {
         // This HStack is the ONLY container. No .background means it's invisible except for the glass components.
         HStack(spacing: 12) {
             LiquidButton(icon: "plus") {
-                isTextFieldFocused = false
+                // Let the system handle keyboard dismiss with animation
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 isShowingAttachmentMenu.toggle()
             }
             

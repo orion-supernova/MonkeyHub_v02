@@ -38,24 +38,27 @@ struct UIKitScrollView<Content: View>: UIViewControllerRepresentable {
     }
 }
 
-final class UIKitScrollViewController<Content: View>: UIViewController, UIScrollViewDelegate {
+final class UIKitScrollViewController<Content: View>: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     let scrollView: UIScrollView = {
         let sv = UIScrollView()
         sv.translatesAutoresizingMaskIntoConstraints = false
         sv.backgroundColor = .clear
         sv.keyboardDismissMode = .interactive
+        sv.contentInsetAdjustmentBehavior = .automatic
         return sv
     }()
 
-    var hostingController: UIHostingController<Content>! // internal access
+    var hostingController: UIHostingController<Content>!
     var lastFirstItemId: String?
     var lastItemCount: Int = 0
     var onNearTop: (() -> Void)?
     var onAtBottomChanged: ((Bool) -> Void)?
     private var didInitialScroll = false
     private var contentSizeObservation: NSKeyValueObservation?
-    private var hasTriggeredNearTop = false // Ensure this is present
+    private var hasTriggeredNearTop = false
     private var lastAtBottomState = true
+    private var wasAtBottomBeforeKeyboard = true
+    private var shouldScrollToBottomAfterLayout = false
 
     init(content: Content) {
         super.init(nibName: nil, bundle: nil)
@@ -64,17 +67,140 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         setupScrollView()
         setupHostingController()
-        
+        setupKeyboardObservers()
+        setupKeyboardDismissGesture()
+
         contentSizeObservation = scrollView.observe(\.contentSize, options: [.new]) { [weak self] sv, _ in
             if let self = self, !self.didInitialScroll && sv.contentSize.height > sv.bounds.height {
                 self.didInitialScroll = true
                 self.scrollToBottom(animated: false)
             }
         }
+    }
+
+    private func setupKeyboardDismissGesture() {
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTapToDismissKeyboard(_:)))
+        tapGesture.cancelsTouchesInView = false
+        tapGesture.delegate = self
+        hostingController.view.addGestureRecognizer(tapGesture)
+    }
+
+    @objc private func handleTapToDismissKeyboard(_ gesture: UITapGestureRecognizer) {
+        view.window?.endEditing(true)
+    }
+
+    // MARK: - UIGestureRecognizerDelegate
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        return true
+    }
+
+    private func setupKeyboardObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillShow(_:)),
+            name: UIResponder.keyboardWillShowNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillHide(_:)),
+            name: UIResponder.keyboardWillHideNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillChangeFrame(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil
+        )
+    }
+
+    @objc private func keyboardWillChangeFrame(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let endFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
+              let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt else { return }
+
+        let screenHeight = UIScreen.main.bounds.height
+        let isKeyboardHiding = endFrame.origin.y >= screenHeight
+
+        // Only handle hide animation here
+        guard isKeyboardHiding else { return }
+
+        let animationCurve = UIView.AnimationOptions(rawValue: curveValue << 16)
+
+        UIView.animate(withDuration: duration, delay: 0, options: [animationCurve, .beginFromCurrentState]) {
+            // Force layout to animate with keyboard
+            self.view.layoutIfNeeded()
+        }
+    }
+
+    @objc private func keyboardWillShow(_ notification: Notification) {
+        wasAtBottomBeforeKeyboard = isAtBottom()
+
+        guard wasAtBottomBeforeKeyboard,
+              let userInfo = notification.userInfo,
+              let keyboardFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
+              let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt,
+              let window = view.window else { return }
+
+        // Calculate the expected bottom inset after keyboard appears
+        let scrollViewFrameInWindow = scrollView.convert(scrollView.bounds, to: window)
+        let keyboardOverlap = max(0, scrollViewFrameInWindow.maxY - keyboardFrame.origin.y)
+
+        let contentHeight = scrollView.contentSize.height
+        let frameHeight = scrollView.bounds.height
+        let currentInset = scrollView.adjustedContentInset.bottom
+        let expectedInset = currentInset + keyboardOverlap
+        let maxOffsetY = max(0, contentHeight - frameHeight + expectedInset)
+
+        let animationCurve = UIView.AnimationOptions(rawValue: curveValue << 16)
+
+        UIView.animate(withDuration: duration, delay: 0, options: [animationCurve, .beginFromCurrentState]) {
+            self.scrollView.contentOffset = CGPoint(x: 0, y: maxOffsetY)
+        }
+    }
+
+    @objc private func keyboardWillHide(_ notification: Notification) {
+        // System handles inset reset automatically
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+
+        if isAtBottom() {
+            shouldScrollToBottomAfterLayout = true
+
+            coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+                self?.shouldScrollToBottomAfterLayout = false
+            }
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+
+        if shouldScrollToBottomAfterLayout {
+            scrollToBottom(animated: false)
+        }
+    }
+
+    private func isAtBottom() -> Bool {
+        let contentHeight = scrollView.contentSize.height
+        let frameHeight = scrollView.bounds.height
+        let offsetY = scrollView.contentOffset.y
+        let adjustedInset = scrollView.adjustedContentInset.bottom
+        return (contentHeight - (offsetY + frameHeight - adjustedInset)) <= 100
     }
 
     private func setupScrollView() {
@@ -121,34 +247,40 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
     }
 
     func scrollToBottom(animated: Bool) {
-        let bottom = max(0, scrollView.contentSize.height - scrollView.bounds.height + scrollView.adjustedContentInset.bottom)
-        scrollView.setContentOffset(CGPoint(x: 0, y: bottom), animated: animated)
+        let contentHeight = scrollView.contentSize.height
+        let frameHeight = scrollView.bounds.height
+        let bottomInset = scrollView.adjustedContentInset.bottom
+        let maxOffsetY = max(0, contentHeight - frameHeight + bottomInset)
+        scrollView.setContentOffset(CGPoint(x: 0, y: maxOffsetY), animated: animated)
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            let offsetY = scrollView.contentOffset.y
-            let contentHeight = scrollView.contentSize.height
-            let frameHeight = scrollView.bounds.height
+        let offsetY = scrollView.contentOffset.y
+        let contentHeight = scrollView.contentSize.height
+        let frameHeight = scrollView.bounds.height
+        let bottomInset = scrollView.adjustedContentInset.bottom
 
-            // 1. Wrap Near Top detection in async to fix "Modifying state" error
-            if offsetY <= 150 && contentHeight > frameHeight {
-                if !hasTriggeredNearTop {
-                    hasTriggeredNearTop = true
-                    DispatchQueue.main.async { [weak self] in
-                        self?.onNearTop?()
-                    }
-                }
-            } else if offsetY > 200 {
-                hasTriggeredNearTop = false
-            }
-
-            // 2. Wrap At Bottom detection in async as well
-            let isAtBottom = (contentHeight - (offsetY + frameHeight)) <= 100
-            if isAtBottom != lastAtBottomState {
-                lastAtBottomState = isAtBottom
+        // 1. Wrap Near Top detection in async to fix "Modifying state" error
+        if offsetY <= 150 && contentHeight > frameHeight {
+            if !hasTriggeredNearTop {
+                hasTriggeredNearTop = true
                 DispatchQueue.main.async { [weak self] in
-                    self?.onAtBottomChanged?(isAtBottom)
+                    self?.onNearTop?()
                 }
+            }
+        } else if offsetY > 200 {
+            hasTriggeredNearTop = false
+        }
+
+        // 2. Wrap At Bottom detection in async as well
+        // Account for bottom inset when calculating if at bottom
+        let distanceFromBottom = contentHeight - (offsetY + frameHeight - bottomInset)
+        let isAtBottom = distanceFromBottom <= 100
+        if isAtBottom != lastAtBottomState {
+            lastAtBottomState = isAtBottom
+            DispatchQueue.main.async { [weak self] in
+                self?.onAtBottomChanged?(isAtBottom)
             }
         }
+    }
 }

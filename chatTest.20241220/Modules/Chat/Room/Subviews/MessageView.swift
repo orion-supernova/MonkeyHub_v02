@@ -2,19 +2,22 @@ import SwiftUI
 import AVKit
 
 // MARK: - Main Message View
+import SwiftUI
+import AVKit
+
 struct MessageView: View {
     let message: ChatMessage
     let currentUserId: String
     let isCurrentUser: Bool
     let onImageTapped: (URL) -> Void
     let onDelete: () -> Void
+    let onRequestReactionPicker: () -> Void
+    let isReactionPickerActive: Bool
 
-    @Binding var showReactionPicker: Bool
     let imageZoomNamespace: Namespace.ID
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAllReactions = false
-    @State private var imageRetryCount = 0
-    
+
     var body: some View {
         if message.senderId == ChatMessage.systemSenderId {
             systemMessageView
@@ -22,7 +25,7 @@ struct MessageView: View {
             regularMessageView
         }
     }
-    
+
     private var systemMessageView: some View {
         HStack {
             Spacer()
@@ -36,30 +39,9 @@ struct MessageView: View {
             Spacer()
         }
     }
-    
+
     private var regularMessageView: some View {
         VStack(alignment: isCurrentUser ? .trailing : .leading, spacing: 0) {
-            
-            // 1. REACTION PICKER
-            if showReactionPicker {
-                CompactReactionPicker(
-                    onEmojiSelected: { emoji in
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        toggleReaction(emoji)
-                        withAnimation(.spring(response: 0.3)) { showReactionPicker = false }
-                    },
-                    onDismiss: {
-                        withAnimation { showReactionPicker = false }
-                    }
-                )
-                .padding(.bottom, 8)
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.1, anchor: isCurrentUser ? .bottomTrailing : .bottomLeading).combined(with: .opacity),
-                    removal: .opacity
-                ))
-                .zIndex(100)
-            }
-            
             HStack(alignment: .bottom, spacing: 0) {
                 if isCurrentUser { Spacer(minLength: 60) }
 
@@ -69,38 +51,28 @@ struct MessageView: View {
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(.secondary)
                             .padding(.leading, 12)
-                            .padding(.bottom, -2)
                     }
 
-                    // 2. MESSAGE BUBBLE
-                    HStack(alignment: .center, spacing: 4) {
-                        ZStack(alignment: isCurrentUser ? .bottomTrailing : .bottomLeading) {
-                            messageContentWrapper
+                    ZStack(alignment: isCurrentUser ? .bottomTrailing : .bottomLeading) {
+                        messageContentWrapper
 
-                            // Integrated Badge
-                            if !message.reactions.isEmpty {
-                                IntegratedReactionBadge(
-                                    message: message,
-                                    currentUserId: currentUserId,
-                                    onTap: { showAllReactions = true }
-                                )
-                                .offset(x: isCurrentUser ? -12 : 12, y: 14)
-                                .zIndex(110)
-                            }
-                        }
-
-                        // 3. STATUS INDICATOR (Only for current user's pending/error messages)
-                        if isCurrentUser && message.status != .sent {
-                            statusIndicator
+                        // Reaction Badge (The small one on the bubble)
+                        if !message.reactions.isEmpty {
+                            IntegratedReactionBadge(
+                                message: message,
+                                currentUserId: currentUserId,
+                                onTap: { showAllReactions = true }
+                            )
+                            .offset(x: isCurrentUser ? -12 : 12, y: 14)
+                            .zIndex(110)
                         }
                     }
                 }
 
                 if !isCurrentUser { Spacer(minLength: 60) }
             }
-            .padding(.bottom, message.reactions.isEmpty ? 6 : 20)
+            .padding(.bottom, message.reactions.isEmpty ? 6 : 22)
         }
-        .zIndex(showReactionPicker ? 1000 : 1)
         .sheet(isPresented: $showAllReactions) {
             AllReactionsView(message: message, currentUserId: currentUserId) { reactionId in
                 Task {
@@ -113,65 +85,77 @@ struct MessageView: View {
     }
 
     @ViewBuilder
-    private var messageContentWrapper: some View {
-        Group {
-            if message.type == .audio || message.type == .image || message.type == .video {
-                messageContent
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-            } else {
-                messageContent
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(bubbleBackground)
-                    .cornerRadius(20)
-            }
-        }
-        .modifier(ReactionPickerEffectModifier(isActive: showReactionPicker))
-        .onTapGesture(count: 2) {
-            let generator = UIImpactFeedbackGenerator(style: .heavy)
-            generator.impactOccurred()
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                showReactionPicker.toggle()
-            }
-        }
-        .contextMenu {
-            Button { withAnimation { showReactionPicker = true } } label: {
-                Label("React", systemImage: "face.smiling")
-            }
-            if isCurrentUser {
-                Button(role: .destructive, action: onDelete) {
-                    Label("Delete", systemImage: "trash")
+        private var messageContentWrapper: some View {
+            let content = Group {
+                if message.type == .audio || message.type == .image || message.type == .video {
+                    messageContent
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                } else {
+                    messageContent
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(bubbleBackground)
+                        .cornerRadius(20)
                 }
             }
+
+            content
+                // Tells iOS exactly what shape to "lift" for the context menu
+                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .contextMenu {
+                    Button(action: {
+                        // Small delay to let menu close before picker pops
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            onRequestReactionPicker()
+                        }
+                    }) {
+                        Label("React", systemImage: "face.smiling")
+                    }
+
+                    if isCurrentUser {
+                        Button(role: .destructive, action: onDelete) {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+                // THE PICKER OVERLAY
+                .overlay(alignment: isCurrentUser ? .topTrailing : .topLeading) {
+                    if isReactionPickerActive {
+                        CompactReactionPicker(
+                            onEmojiSelected: { emoji in
+                                toggleReaction(emoji)
+                                onRequestReactionPicker()
+                            }
+                        )
+                        .offset(y: -55)
+                        // High Z-index here to ensure it's above the badge
+                        .zIndex(1000)
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.1, anchor: isCurrentUser ? .bottomTrailing : .bottomLeading).combined(with: .opacity),
+                            removal: .opacity.combined(with: .scale(scale: 0.8))
+                        ))
+                    }
+                }
+                .onTapGesture(count: 2) {
+                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                    onRequestReactionPicker()
+                }
+                .onTapGesture {
+                    // Only handle reaction picker dismissal here
+                    // Image taps are handled directly on the image view
+                    if isReactionPickerActive {
+                        onRequestReactionPicker()
+                    }
+                }
         }
-    }
     
-    // FIXED GRADIENT LOGIC
     private var bubbleBackground: some View {
         Group {
             if isCurrentUser {
-                Rectangle()
-                    .fill(Color.blue.gradient)
+                Rectangle().fill(Color.blue.gradient)
             } else {
-                Rectangle()
-                    .fill(Color(.systemGray5).opacity(colorScheme == .dark ? 0.8 : 1.0))
+                Rectangle().fill(Color(.systemGray5).opacity(colorScheme == .dark ? 0.8 : 1.0))
             }
-        }
-    }
-
-    @ViewBuilder
-    private var statusIndicator: some View {
-        switch message.status {
-        case .pending:
-            ProgressView()
-                .scaleEffect(0.5)
-                .frame(width: 12, height: 12)
-        case .error:
-            Image(systemName: "exclamationmark.circle.fill")
-                .foregroundColor(.red)
-                .font(.caption)
-        case .sent:
-            EmptyView()
         }
     }
 
@@ -181,16 +165,14 @@ struct MessageView: View {
         case .text:
             Text(message.content)
                 .font(.system(size: 16))
-                .foregroundColor(isCurrentUser ? .white : .primary)
+                .foregroundColor(isCurrentUser ? .white : (colorScheme == .dark ? .white : .primary))
         case .image:
             if let url = message.assetURL {
-                // REMOVED messageId parameter to match the new optimized struct
                 CachedAsyncImage(
                     url: url,
                     imageZoomNamespace: imageZoomNamespace,
                     onTap: { onImageTapped(url) }
                 )
-                .id(url.absoluteString) // Stable ID for transitions
             }
         case .video:
             if let url = message.assetURL {
@@ -199,8 +181,7 @@ struct MessageView: View {
             }
         case .audio:
             if let url = message.assetURL {
-                AudioPlayerView(url: url)
-                    .padding(8)
+                AudioPlayerView(url: url).padding(8)
             }
         default: EmptyView()
         }
@@ -213,29 +194,61 @@ struct MessageView: View {
             )
         }
     }
-
 }
 
-// MARK: - Modern Integrated Reaction Badge
+// MARK: - FIXED Compact Reaction Picker
+struct CompactReactionPicker: View {
+    let onEmojiSelected: (String) -> Void
+    @State private var appeared = false
+    @Environment(\.colorScheme) var colorScheme
+    private static let emojis = ["❤️", "👍", "😂", "😮", "😢", "🙏", "🔥", "👏"]
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ForEach(Array(Self.emojis.enumerated()), id: \.element) { index, emoji in
+                Button {
+                    onEmojiSelected(emoji)
+                } label: {
+                    Text(emoji)
+                        .font(.system(size: 26))
+                        .scaleEffect(appeared ? 1.0 : 0.4)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.6).delay(Double(index) * 0.02), value: appeared)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 52)
+        // ADDED: A solid background behind the material so it doesn't look dark when dimmed
+        .background(
+            ZStack {
+//                Capsule().fill(colorScheme == .dark ? Color(white: 0.2) : Color.white)
+                Capsule().fill(.ultraThinMaterial)
+            }
+        )
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.2), radius: 15, y: 10)
+        .overlay(Capsule().stroke(Color.primary.opacity(0.1), lineWidth: 0.5))
+        .fixedSize()
+        .onAppear { appeared = true }
+    }
+}
+
+// MARK: - Integrated Badge
 struct IntegratedReactionBadge: View {
     let message: ChatMessage
     let currentUserId: String
     let onTap: () -> Void
 
-    // Cache grouped reactions to avoid recomputing
-    private var groupedReactions: [ReactionGroup] {
-        message.groupedReactions()
-    }
-
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 3) {
-                ForEach(groupedReactions.prefix(3)) { group in
-                    Text(group.emoji).font(.system(size: 13))
+            HStack(spacing: 4) {
+                ForEach(message.groupedReactions().prefix(3)) { group in
+                    Text(group.emoji).font(.system(size: 12))
                 }
                 if message.reactions.count > 1 {
                     Text("\(message.reactions.count)")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -243,47 +256,13 @@ struct IntegratedReactionBadge: View {
             .padding(.vertical, 4)
             .background(.ultraThinMaterial)
             .clipShape(Capsule())
-            .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
-            .overlay(Capsule().stroke(Color.primary.opacity(0.1), lineWidth: 0.5))
-            .drawingGroup()
+            .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
         }
         .buttonStyle(.plain)
     }
 }
 
-// MARK: - Modern Compact Reaction Picker
-struct CompactReactionPicker: View {
-    let onEmojiSelected: (String) -> Void
-    let onDismiss: () -> Void
-    @State private var appeared = false
-
-    private static let emojis = ["❤️", "👍", "😂", "😮", "😢", "🙏", "🔥", "👏"]
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ForEach(Array(Self.emojis.enumerated()), id: \.element) { index, emoji in
-                Button {
-                    onEmojiSelected(emoji)
-                } label: {
-                    Text(emoji)
-                        .font(.system(size: 28))
-                        .scaleEffect(appeared ? 1.0 : 0.4)
-                        .animation(.spring(response: 0.3, dampingFraction: 0.6).delay(Double(index) * 0.04), value: appeared)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
-        .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 0.5))
-        .onAppear { appeared = true }
-    }
-}
-
-// MARK: - All Reactions Detail View (Sheet)
+// MARK: - All Reactions Detail (Sheet)
 struct AllReactionsView: View {
     let message: ChatMessage
     let currentUserId: String
@@ -293,7 +272,7 @@ struct AllReactionsView: View {
     @State private var selectedTab = 0
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 0) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
@@ -311,28 +290,21 @@ struct AllReactionsView: View {
                         HStack {
                             Text(reaction.emoji).font(.title3)
                             Text(reaction.userId == currentUserId ? "You" : (userNames[reaction.userId] ?? "User"))
-                                .font(.body)
                             Spacer()
                             if reaction.userId == currentUserId {
-                                Button(action: {
-                                    onRemove(reaction.id)
-                                    if message.reactions.count <= 1 { dismiss() }
-                                }) {
+                                Button(action: { onRemove(reaction.id) }) {
                                     Image(systemName: "xmark.circle.fill").foregroundColor(.secondary)
                                 }
                             }
                         }
-                        .padding(.vertical, 4)
                     }
                 }
                 .listStyle(.plain)
             }
             .navigationTitle("Reactions")
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .task {
-                let ids = message.reactions.map { $0.userId }
-                userNames = await UserCacheService.shared.getUserNames(for: ids)
+                userNames = await UserCacheService.shared.getUserNames(for: message.reactions.map { $0.userId })
             }
         }
     }
@@ -340,14 +312,13 @@ struct AllReactionsView: View {
     private var displayedReactions: [MessageReaction] {
         if selectedTab == 0 { return message.reactions }
         let groups = message.groupedReactions()
-        guard selectedTab - 1 < groups.count else { return [] }
-        return groups[selectedTab - 1].reactions
+        return groups.indices.contains(selectedTab - 1) ? groups[selectedTab - 1].reactions : []
     }
 }
 
 struct TabButton: View {
-    var emoji: String? = nil
-    var title: String? = nil
+    var emoji: String?
+    var title: String?
     let count: Int
     let isSelected: Bool
     let action: () -> Void
@@ -367,64 +338,23 @@ struct TabButton: View {
     }
 }
 
-// MARK: - Performance Optimized Modifier
-struct ReactionPickerEffectModifier: ViewModifier {
-    let isActive: Bool
-
-    func body(content: Content) -> some View {
-        if isActive {
-            content
-                .scaleEffect(1.06)
-                .shadow(color: .black.opacity(0.25), radius: 15, y: 8)
-                .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isActive)
-        } else {
-            content
-                .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isActive)
-        }
-    }
-}
-
-// MARK: - Cached Async Image (works with LazyVStack + UIKit)
-import SwiftUI
-import ImageIO
-
+// MARK: - Image Loader Manager (UIKit/IO Optimized)
 final class ImageLoaderManager {
     static let shared = ImageLoaderManager()
     private let cache = NSCache<NSURL, UIImage>()
-    
-    func getCachedImage(for url: URL) -> UIImage? {
-        return cache.object(forKey: url as NSURL)
-    }
+    func getCachedImage(for url: URL) -> UIImage? { cache.object(forKey: url as NSURL) }
 
     func loadAndPrepare(url: URL) async -> UIImage? {
         if let cached = cache.object(forKey: url as NSURL) { return cached }
-        
         return await Task.detached(priority: .userInitiated) {
-            var retryCount = 0
-            let maxRetries = 5
-            
-            // If the re-basing worked, this loop will handle the tiny
-            // delay while CloudKit finishes writing the file.
-            while retryCount < maxRetries {
-                if FileManager.default.fileExists(atPath: url.path) {
-                    break
-                }
-                try? await Task.sleep(nanoseconds: 200_000_000) // 0.2s delay
-                retryCount += 1
-            }
-
             let options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceShouldCacheImmediately: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
                 kCGImageSourceThumbnailMaxPixelSize: 600
             ]
-            
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                  let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-                return nil
-            }
-            
+                  let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
             let uiImage = UIImage(cgImage: cgImage)
             self.cache.setObject(uiImage, forKey: url as NSURL)
             return uiImage
@@ -435,16 +365,8 @@ final class ImageLoaderManager {
 struct CachedAsyncImage: View {
     let url: URL
     let imageZoomNamespace: Namespace.ID
-    let onTap: () -> Void
+    let onTap: (() -> Void)?
     @State private var displayImage: UIImage?
-    @State private var loadFailed = false // Add this
-
-    init(url: URL, imageZoomNamespace: Namespace.ID, onTap: @escaping () -> Void) {
-        self.url = url
-        self.imageZoomNamespace = imageZoomNamespace
-        self.onTap = onTap
-        _displayImage = State(initialValue: ImageLoaderManager.shared.getCachedImage(for: url))
-    }
 
     var body: some View {
         ZStack {
@@ -453,44 +375,20 @@ struct CachedAsyncImage: View {
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(width: 250, height: 250)
-                    .clipped()
                     .matchedTransitionSource(id: url, in: imageZoomNamespace)
-                    .onTapGesture(perform: onTap)
-            } else if loadFailed {
-                // FAILURE STATE
-                Button {
-                    loadFailed = false
-                    Task { await loadImage() }
-                } label: {
-                    VStack(spacing: 8) {
-                        Image(systemName: "arrow.clockwise.circle.fill")
-                            .font(.title)
-                        Text("Tap to retry").font(.caption)
-                    }
-                    .foregroundColor(.secondary)
-                    .frame(width: 250, height: 250)
-                    .background(Color(.systemGray6))
-                }
             } else {
-                // LOADING STATE
-                Rectangle().fill(Color(.systemGray6))
-                    .frame(width: 250, height: 250)
+                Rectangle().fill(Color(.systemGray6)).frame(width: 250, height: 250)
                     .overlay { ProgressView() }
             }
         }
-        .task(id: url) {
-            await loadImage()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap?()
         }
-    }
-    
-    private func loadImage() async {
-        if displayImage != nil { return }
-        if let img = await ImageLoaderManager.shared.loadAndPrepare(url: url) {
-            withAnimation(.easeIn(duration: 0.2)) {
-                self.displayImage = img
+        .task {
+            if displayImage == nil {
+                displayImage = await ImageLoaderManager.shared.loadAndPrepare(url: url)
             }
-        } else {
-            self.loadFailed = true
         }
     }
 }

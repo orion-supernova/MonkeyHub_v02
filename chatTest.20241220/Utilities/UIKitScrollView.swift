@@ -172,7 +172,20 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
     }
 
     @objc private func keyboardWillHide(_ notification: Notification) {
-        // System handles inset reset automatically
+        guard wasAtBottomBeforeKeyboard,
+              let userInfo = notification.userInfo,
+              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
+              let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt else { return }
+
+        let animationCurve = UIView.AnimationOptions(rawValue: curveValue << 16)
+
+        // Delay slightly to let the system adjust insets first
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
+            guard let self = self else { return }
+            UIView.animate(withDuration: duration - 0.01, delay: 0, options: [animationCurve, .beginFromCurrentState]) {
+                self.scrollToBottom(animated: false)
+            }
+        }
     }
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {

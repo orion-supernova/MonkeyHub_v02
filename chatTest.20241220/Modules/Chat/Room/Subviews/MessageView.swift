@@ -32,9 +32,13 @@ struct MessageView: View {
             Text(message.content)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.secondary.opacity(0.15))
+                )
                 .padding(.vertical, 8)
             Spacer()
         }
@@ -94,8 +98,10 @@ struct MessageView: View {
                     messageContent
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
-                        .background(bubbleBackground)
-                        .cornerRadius(20)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(isCurrentUser ? AnyShapeStyle(bubbleColor.gradient) : AnyShapeStyle(bubbleColor))
+                        )
                 }
             }
 
@@ -149,14 +155,8 @@ struct MessageView: View {
                 }
         }
     
-    private var bubbleBackground: some View {
-        Group {
-            if isCurrentUser {
-                Rectangle().fill(Color.blue.gradient)
-            } else {
-                Rectangle().fill(Color(.systemGray5).opacity(colorScheme == .dark ? 0.8 : 1.0))
-            }
-        }
+    private var bubbleColor: Color {
+        isCurrentUser ? .blue : Color(.systemGray5).opacity(colorScheme == .dark ? 0.8 : 1.0)
     }
 
     @ViewBuilder

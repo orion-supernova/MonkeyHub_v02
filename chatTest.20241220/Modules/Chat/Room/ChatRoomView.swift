@@ -19,7 +19,8 @@ struct ChatRoomView: View {
     @State private var isShowingAttachmentMenu = false
     @State private var showRoomInfo = false
     @Namespace private var imageZoomNamespace
-    
+    @State private var roomAvatarImage: PlatformImage?
+
     init(room: ChatRoom) {
         self.room = room
         self._viewModel = StateObject(wrappedValue: ChatRoomViewModel(roomId: room.id))
@@ -74,13 +75,13 @@ struct ChatRoomView: View {
                     LiquidButton(icon: "chevron.left") {
                         dismiss()
                     }
-                    
+
                     Spacer()
-                    
-                    RoomTitleView(title: room.name)
-                    
+
+                    RoomTitleView(title: room.name, avatarImage: roomAvatarImage)
+
                     Spacer()
-                    
+
                     LiquidButton(icon: "info.circle") {
                         showRoomInfo = true
                     }
@@ -125,6 +126,7 @@ struct ChatRoomView: View {
         .onAppear {
             navigationState.currentScreen = .chatRoom
             navigationState.currentRoomId = room.id
+            loadRoomAvatar()
         }
         .onDisappear {
             navigationState.currentScreen = .home
@@ -189,60 +191,95 @@ struct ChatRoomView: View {
             }
         )
     }
+
+    private func loadRoomAvatar() {
+        // Try persisted avatarURL first (resolving filename to current session's path)
+        if let avatarURL = room.avatarURL {
+            let filename = avatarURL.lastPathComponent
+            if let resolvedURL = AssetPersistenceService.shared.getURL(for: filename),
+               let data = try? Data(contentsOf: resolvedURL),
+               let image = PlatformImage.fromData(data) {
+                roomAvatarImage = image
+            }
+        }
+    }
 }
 
 struct RoomTitleView: View {
     let title: String
+    let avatarImage: PlatformImage?
+
     @State private var isExpanded = false
     @State private var textLayoutWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
 
+    init(title: String, avatarImage: PlatformImage? = nil) {
+        self.title = title
+        self.avatarImage = avatarImage
+    }
+
     var body: some View {
-        Text(title)
-            .font(.headline)
-            .multilineTextAlignment(.center)
-            .lineLimit(isExpanded ? nil : 1)
-            .padding(.horizontal, 20)
-            .padding(.vertical, isExpanded ? 8 : 0)
-            .frame(minHeight: 44)
-            .frame(height: isExpanded ? nil : 44)
-            .background(
-                GeometryReader { geo in
-                    Color.clear
-                        .onAppear { containerWidth = geo.size.width }
-                        .onChange(of: geo.size.width) { _, newValue in containerWidth = newValue }
-                }
-            )
-            .background(
-                Text(title)
-                    .font(.headline)
-                    .fixedSize()
-                    .padding(.horizontal, 20)
-                    .hidden()
+        HStack(spacing: avatarImage != nil ? 10 : 0) {
+            // Avatar - only shown if image exists
+            if let avatar = avatarImage {
+                Image(platformImage: avatar)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 32, height: 32)
+                    .clipShape(Circle())
                     .overlay(
-                        GeometryReader { proxy in
-                            Color.clear
-                                .onAppear { textLayoutWidth = proxy.size.width }
-                                .onChange(of: proxy.size.width) { _, newValue in textLayoutWidth = newValue }
-                        }
+                        Circle()
+                            .strokeBorder(.white.opacity(0.2), lineWidth: 1)
                     )
-            )
-            .modifier(LiquidGlassModifier(cornerRadius: 22))
-            .onTapGesture {
-                // Heuristic: If text is wider than container, it's truncated
-                if textLayoutWidth > containerWidth {
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                        isExpanded = true
+            }
+
+            Text(title)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .lineLimit(isExpanded ? nil : 1)
+        }
+        .padding(.leading, avatarImage != nil ? 6 : 20)
+        .padding(.trailing, 20)
+        .padding(.vertical, isExpanded ? 8 : 0)
+        .frame(minHeight: 44)
+        .frame(height: isExpanded ? nil : 44)
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { containerWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, newValue in containerWidth = newValue }
+            }
+        )
+        .background(
+            Text(title)
+                .font(.headline)
+                .fixedSize()
+                .padding(.horizontal, 20)
+                .hidden()
+                .overlay(
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onAppear { textLayoutWidth = proxy.size.width }
+                            .onChange(of: proxy.size.width) { _, newValue in textLayoutWidth = newValue }
                     }
-                    
-                    // Auto-collapse after 3 seconds
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                        withAnimation {
-                            isExpanded = false
-                        }
+                )
+        )
+        .modifier(LiquidGlassModifier(cornerRadius: 22))
+        .onTapGesture {
+            // Heuristic: If text is wider than container, it's truncated
+            if textLayoutWidth > containerWidth {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                    isExpanded = true
+                }
+
+                // Auto-collapse after 3 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    withAnimation {
+                        isExpanded = false
                     }
                 }
             }
+        }
     }
 }
 

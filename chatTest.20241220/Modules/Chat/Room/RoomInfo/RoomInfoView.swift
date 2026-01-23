@@ -224,30 +224,55 @@ struct RoomInfoView: View {
             }
             
             if isEditingName {
-                HStack {
-                    TextField("Room Name", text: $editedName)
+                VStack(spacing: 12) {
+                    TextField("Room Name", text: $editedName, axis: .vertical)
                         .font(.title2)
                         .fontWeight(.bold)
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
                         .multilineTextAlignment(.center)
-                        .textFieldStyle(.roundedBorder)
-                    
-                    Button {
-                        Task {
-                            await viewModel.updateRoomName(editedName)
+                        .lineLimit(1...5)
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(selectedTheme.colors(for: colorScheme).accent.opacity(0.3), lineWidth: 1)
+                        )
+
+                    HStack(spacing: 16) {
+                        Button {
                             isEditingName = false
+                            editedName = viewModel.room.name
+                        } label: {
+                            Text("Cancel")
+                                .font(.subheadline)
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 10)
+                                .background(
+                                    Capsule()
+                                        .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+                                )
                         }
-                    } label: {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                    }
-                    
-                    Button {
-                        isEditingName = false
-                        editedName = viewModel.room.name
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+
+                        Button {
+                            Task {
+                                await viewModel.updateRoomName(editedName)
+                                isEditingName = false
+                            }
+                        } label: {
+                            Text("Save")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 10)
+                                .background(
+                                    Capsule()
+                                        .fill(selectedTheme.colors(for: colorScheme).accent)
+                                )
+                        }
                     }
                 }
                 .padding(.horizontal)

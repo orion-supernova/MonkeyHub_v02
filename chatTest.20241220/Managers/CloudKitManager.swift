@@ -386,13 +386,28 @@ class CloudKitManager: ObservableObject {
         let predicate = NSPredicate(
             format: "%K CONTAINS %@", ChatRoom.participantsKey, userId)
         let query = CKQuery(recordType: ChatRoom.recordType, predicate: predicate)
-        query.sortDescriptors = [NSSortDescriptor(key: ChatRoom.createdAtKey, ascending: false)]
+        // Sort by last activity, with creation date as fallback for rooms with no messages
+        query.sortDescriptors = [
+            NSSortDescriptor(key: ChatRoom.lastMessageDateKey, ascending: false),
+            NSSortDescriptor(key: ChatRoom.createdAtKey, ascending: false)
+        ]
 
         let (records, _) = try await database.records(matching: query)
-        return try records.compactMap { result in
+        var rooms = try records.compactMap { result in
             let record = try result.1.get()
             return try ChatRoom(from: record)
         }
+
+        // Client-side sort to handle nil lastMessageDate (new rooms with no messages)
+        // Rooms with messages: sorted by lastMessageDate (most recent first)
+        // Rooms without messages: sorted by createdAt (newest first), appear after active rooms
+        rooms.sort { room1, room2 in
+            let date1 = room1.lastMessageDate ?? room1.createdAt
+            let date2 = room2.lastMessageDate ?? room2.createdAt
+            return date1 > date2
+        }
+
+        return rooms
     }
 
     func fetchChatRoom(byId roomId: String) async throws -> ChatRoom? {

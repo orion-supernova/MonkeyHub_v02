@@ -666,7 +666,6 @@ struct EnhancedNewRoomSheet: View {
         ("5 minutes", 300),
         ("1 hour", 3600),
         ("24 hours", 86400),
-        ("7 days", 604800),
     ]
 
     var body: some View {
@@ -843,13 +842,16 @@ struct EnhancedNewRoomSheet: View {
                             }
                         } label: {
                             HStack(spacing: 12) {
-                                Image(
-                                    systemName: selectedType == .regular
-                                        ? "plus.circle.fill" : "lock.shield.fill"
-                                )
-                                .transition(.scale.combined(with: .opacity))
-
-                                Text("Create \(selectedType == .regular ? "Room" : "Secret Room")")
+                                if selectedType == .secret {
+                                    Image(systemName: "wand.and.rays")
+                                        .symbolEffect(.variableColor.cumulative.hideInactiveLayers.nonReversing, options: .repeat(.continuous))
+                                        .transition(.scale.combined(with: .opacity))
+                                    Text("Coming Soon!")
+                                } else {
+                                    Image(systemName: "plus.circle.fill")
+                                        .transition(.scale.combined(with: .opacity))
+                                    Text("Create Room")
+                                }
                             }
                             .font(.headline)
                             .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
@@ -857,20 +859,23 @@ struct EnhancedNewRoomSheet: View {
                             .padding()
                             .background(
                                 LinearGradient(
-                                    colors: selectedTheme.colors(for: colorScheme).primary,
+                                    colors: selectedType == .secret
+                                        ? [Color.gray, Color.gray.opacity(0.7)]
+                                        : selectedTheme.colors(for: colorScheme).primary,
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
                             )
                             .clipShape(RoundedRectangle(cornerRadius: 16))
                             .shadow(
-                                color: selectedTheme.colors(for: colorScheme).primary[0].opacity(
-                                    0.3),
+                                color: selectedType == .secret
+                                    ? Color.clear
+                                    : selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
                                 radius: 5, y: 2
                             )
-                            .scaleEffect(roomName.isEmpty ? 0.98 : 1)
+                            .scaleEffect(roomName.isEmpty || selectedType == .secret ? 0.98 : 1)
                         }
-                        .disabled(roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedType == .secret)
                         .opacity(animateContent ? 1 : 0)
                         .offset(y: animateContent ? 0 : 20)
                     }

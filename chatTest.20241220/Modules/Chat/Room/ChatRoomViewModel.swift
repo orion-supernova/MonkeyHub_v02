@@ -6,6 +6,7 @@ import Combine
 class ChatRoomViewModel: ObservableObject {
     @Published private(set) var messages: [ChatMessage] = []
     @Published private(set) var isFetchingOlderMessages = false
+    @Published private(set) var isFetchingNewMessages = false  // Loading indicator for incremental sync
     @Published var typingText: String? = nil
     
     // Dependencies
@@ -78,25 +79,31 @@ class ChatRoomViewModel: ObservableObject {
 
     private var hasLoadedInitialData = false
 
-        func loadMessages() async {
-            // 1. EXIT EARLY if we already have data
-            // This stops the CloudKit/Database fetch when dismissing images
-            guard !hasLoadedInitialData else {
-                print("✋ ChatRoomViewModel: Data already loaded, skipping refresh")
-                return
-            }
-            
-            await loadUserData()
-            
-            // 2. This is the expensive call from your logs
-            await repository.fetchMessages(for: roomId)
-            
-            // 3. Subscription is idempotent, but we only need to call it once
-            await NotificationSubscriptionManager.shared.subscribeToRoom(roomId)
-            
-            // 4. Mark as complete
-            self.hasLoadedInitialData = true
+    func loadMessages() async {
+        // 1. EXIT EARLY if we already have data
+        // This stops the CloudKit/Database fetch when dismissing images
+        guard !hasLoadedInitialData else {
+            print("✋ ChatRoomViewModel: Data already loaded, skipping refresh")
+            return
         }
+
+        await loadUserData()
+
+        // 2. Show loading indicator while fetching
+        isFetchingNewMessages = true
+
+        // 3. This now uses smart incremental sync
+        await repository.fetchMessages(for: roomId)
+
+        // 4. Hide loading indicator
+        isFetchingNewMessages = false
+
+        // 5. Subscription is idempotent, but we only need to call it once
+        await NotificationSubscriptionManager.shared.subscribeToRoom(roomId)
+
+        // 6. Mark as complete
+        self.hasLoadedInitialData = true
+    }
 
         private var canLoadMoreOlderMessages = true // ADD THIS
 

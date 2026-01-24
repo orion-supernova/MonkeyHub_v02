@@ -124,44 +124,73 @@ class ChatRepository: ObservableObject {
     }
     
     // MARK: - Message Management
-    
+
+    /// Fetches messages using smart incremental sync.
+    /// If we have cached messages, only fetches messages AFTER the latest cached timestamp.
+    /// This dramatically improves room loading times for rooms with history.
     func fetchMessages(for roomId: String) async {
         guard roomId == activeRoomId else { return }
 
         do {
-            let messages = try await cloudKit.fetchRecentMessages(for: roomId, limit: 50)
-            
-            // Fetch reactions for all messages
-            var messagesWithReactions = messages
-            do {
-                let messageIds = messages.map { $0.id }
-                let reactionsMap = try await ReactionService.shared.fetchReactions(for: messageIds)
-                
-                // Attach reactions to messages
-                for i in 0..<messagesWithReactions.count {
-                    if let reactions = reactionsMap[messagesWithReactions[i].id] {
-                        messagesWithReactions[i].reactions = reactions
-                    }
-                }
-            } catch {
-                print("⚠️ ChatRepository: Could not fetch reactions: \(error)")
+            // Get the latest cached message timestamp (excluding pending messages)
+            let cachedMessages = activeRoomMessages.filter { $0.status != .pending }
+            let latestCachedTimestamp = cachedMessages.map { $0.timestamp }.max()
+
+            let newMessages: [ChatMessage]
+
+            if let latestTimestamp = latestCachedTimestamp, !cachedMessages.isEmpty {
+                // INCREMENTAL SYNC: Only fetch messages AFTER what we have cached
+                print("⚡️ ChatRepository: Incremental sync - fetching messages after \(latestTimestamp)")
+                newMessages = try await cloudKit.fetchMessagesAfter(for: roomId, after: latestTimestamp, limit: 100)
+                print("⚡️ ChatRepository: Fetched \(newMessages.count) new messages (incremental)")
+            } else {
+                // FULL FETCH: No cache, fetch recent messages
+                print("📥 ChatRepository: Full fetch - no cached messages found")
+                newMessages = try await cloudKit.fetchRecentMessages(for: roomId, limit: 50)
             }
-            
-            if self.activeRoomId == roomId {
-                let pendingMessages = self.activeRoomMessages.filter { $0.status == .pending }
 
-                // Clear and rebuild
-                var newList = messagesWithReactions
-                newList.append(contentsOf: pendingMessages)
+            // Skip if no new messages to process
+            guard !newMessages.isEmpty || cachedMessages.isEmpty else {
+                print("✅ ChatRepository: Messages up to date, no new messages from server")
+                return
+            }
 
-                // Sort: Oldest (Top) to Newest (Bottom)
-                newList.sort { $0.timestamp < $1.timestamp }
+            // Fetch reactions for new messages only
+            var messagesWithReactions = newMessages
+            if !newMessages.isEmpty {
+                do {
+                    let messageIds = newMessages.map { $0.id }
+                    let reactionsMap = try await ReactionService.shared.fetchReactions(for: messageIds)
 
-                withAnimation {
-                    self.activeRoomMessages = newList
+                    // Attach reactions to messages
+                    for i in 0..<messagesWithReactions.count {
+                        if let reactions = reactionsMap[messagesWithReactions[i].id] {
+                            messagesWithReactions[i].reactions = reactions
+                        }
+                    }
+                } catch {
+                    print("⚠️ ChatRepository: Could not fetch reactions: \(error)")
                 }
+            }
 
-                await persistence.saveMessages(activeRoomMessages, for: roomId)
+            if self.activeRoomId == roomId {
+                if latestCachedTimestamp != nil && !cachedMessages.isEmpty {
+                    // INCREMENTAL: Merge new messages with existing cache
+                    upsertMessages(messagesWithReactions, in: roomId, saveToDisk: true)
+                } else {
+                    // FULL FETCH: Replace with fetched messages (keep pending)
+                    let pendingMessages = self.activeRoomMessages.filter { $0.status == .pending }
+
+                    var newList = messagesWithReactions
+                    newList.append(contentsOf: pendingMessages)
+                    newList.sort { $0.timestamp < $1.timestamp }
+
+                    withAnimation {
+                        self.activeRoomMessages = newList
+                    }
+
+                    await persistence.saveMessages(activeRoomMessages, for: roomId)
+                }
             }
         } catch {
             print("❌ ChatRepository: Failed to fetch messages: \(error)")

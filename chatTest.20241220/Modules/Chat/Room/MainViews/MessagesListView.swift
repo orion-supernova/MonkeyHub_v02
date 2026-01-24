@@ -172,7 +172,7 @@ struct MessageRow: View, Equatable {
 struct TypingIndicatorView: View {
     let text: String
     @State private var isAnimating = false
-    
+
     var body: some View {
         HStack(spacing: 8) {
             HStack(spacing: 4) {
@@ -194,7 +194,7 @@ struct TypingIndicatorView: View {
             .padding(.vertical, 10)
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            
+
             Text(text)
                 .font(.system(size: 13))
                 .foregroundColor(.secondary)
@@ -202,5 +202,24 @@ struct TypingIndicatorView: View {
         .onAppear {
             isAnimating = true
         }
+    }
+}
+
+// MARK: - Syncing Indicator View (Loading new messages)
+struct SyncingIndicatorView: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+
+            Text("Syncing...")
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .transition(.opacity.combined(with: .scale(scale: 0.9)))
     }
 }

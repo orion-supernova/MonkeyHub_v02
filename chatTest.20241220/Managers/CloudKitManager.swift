@@ -921,6 +921,34 @@ class CloudKitManager: ObservableObject {
         return try records.compactMap { try ChatMessage(from: try $0.1.get()) }
     }
 
+    /// Fetch messages AFTER a given timestamp (for incremental sync)
+    /// This is the key optimization - only fetch new messages, not entire history
+    func fetchMessagesAfter(for roomId: String, after date: Date, limit: Int = 100)
+        async throws -> [ChatMessage]
+    {
+        let predicates: [NSPredicate] = [
+            NSPredicate(format: "%K == %@", ChatMessage.roomIdKey, roomId),
+            NSPredicate(format: "%K > %@", ChatMessage.timestampKey, date as CVarArg)
+        ]
+
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+        let query = CKQuery(recordType: ChatMessage.recordType, predicate: predicate)
+        query.sortDescriptors = [
+            NSSortDescriptor(key: ChatMessage.timestampKey, ascending: true)  // Oldest first for chronological order
+        ]
+
+        Logger.debug("Fetching messages AFTER \(date) for room: \(roomId)", category: .database)
+
+        let (records, _) = try await database.records(
+            matching: query,
+            resultsLimit: limit
+        )
+
+        let messages = try records.compactMap { try ChatMessage(from: try $0.1.get()) }
+        Logger.info("⚡️ Incremental sync: Fetched \(messages.count) new messages for room \(roomId)", category: .database)
+        return messages
+    }
+
     func fetchUserRooms(sortBy: ChatRoomSortOption = .lastActivity) async throws -> [ChatRoom] {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         let predicate = NSPredicate(

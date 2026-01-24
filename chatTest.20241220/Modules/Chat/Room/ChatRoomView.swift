@@ -93,23 +93,32 @@ struct ChatRoomView: View {
             
             // --- BOTTOM FLOATING INPUT ---
             .safeAreaInset(edge: .bottom) {
-                MessageInputView(
-                    messageText: $messageText,
-                    showImagePicker: $showImagePicker,
-                    isShowingAttachmentMenu: $isShowingAttachmentMenu,
-                    onSendMessage: { text in
-                        Task {
-                            await viewModel.sendMessage(text)
-                            await MainActor.run { messageText = "" }
-                        }
-                    },
-                    onTextChanged: { text in viewModel.onTextChanged(text) },
-                    onTakePhoto: { isShowingAttachmentMenu = false; showCamera = true },
-                    onTakeVideo: { isShowingAttachmentMenu = false; showCamera = true },
-                    onRecordAudio: { isShowingAttachmentMenu = false; showVoiceRecorder = true }
-                )
+                VStack(spacing: 8) {
+                    // Syncing indicator above input field
+                    if viewModel.isFetchingNewMessages {
+                        SyncingIndicatorView()
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+
+                    MessageInputView(
+                        messageText: $messageText,
+                        showImagePicker: $showImagePicker,
+                        isShowingAttachmentMenu: $isShowingAttachmentMenu,
+                        onSendMessage: { text in
+                            Task {
+                                await viewModel.sendMessage(text)
+                                await MainActor.run { messageText = "" }
+                            }
+                        },
+                        onTextChanged: { text in viewModel.onTextChanged(text) },
+                        onTakePhoto: { isShowingAttachmentMenu = false; showCamera = true },
+                        onTakeVideo: { isShowingAttachmentMenu = false; showCamera = true },
+                        onRecordAudio: { isShowingAttachmentMenu = false; showVoiceRecorder = true }
+                    )
+                }
                 .padding(.bottom, 8)
                 .background(Color.clear)
+                .animation(.easeInOut(duration: 0.2), value: viewModel.isFetchingNewMessages)
             }
         }
         // FIXED: Conditional compilation for cross-platform support

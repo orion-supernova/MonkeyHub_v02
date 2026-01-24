@@ -1,9 +1,13 @@
 import SwiftUI
 import AVKit
 
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
+
 // MARK: - Main Message View
-import SwiftUI
-import AVKit
 
 struct MessageView: View {
     let message: ChatMessage
@@ -107,7 +111,9 @@ struct MessageView: View {
 
             content
                 // Tells iOS exactly what shape to "lift" for the context menu
+                #if os(iOS)
                 .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 20, style: .continuous))
+                #endif
                 .contextMenu {
                     Button(action: {
                         // Small delay to let menu close before picker pops
@@ -143,7 +149,9 @@ struct MessageView: View {
                     }
                 }
                 .onTapGesture(count: 2) {
+                    #if canImport(UIKit)
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                    #endif
                     onRequestReactionPicker()
                 }
                 .onTapGesture {
@@ -156,7 +164,7 @@ struct MessageView: View {
         }
     
     private var bubbleColor: Color {
-        isCurrentUser ? .blue : Color(.systemGray5).opacity(colorScheme == .dark ? 0.8 : 1.0)
+        isCurrentUser ? .blue : Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.15)
     }
 
     @ViewBuilder
@@ -283,7 +291,7 @@ struct AllReactionsView: View {
                     }
                     .padding()
                 }
-                .background(Color(.secondarySystemBackground))
+                .background(Color.gray.opacity(0.1))
                 
                 List {
                     ForEach(displayedReactions) { reaction in
@@ -302,7 +310,11 @@ struct AllReactionsView: View {
                 .listStyle(.plain)
             }
             .navigationTitle("Reactions")
+            #if os(iOS)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            #else
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            #endif
             .task {
                 userNames = await UserCacheService.shared.getUserNames(for: message.reactions.map { $0.userId })
             }
@@ -338,14 +350,17 @@ struct TabButton: View {
     }
 }
 
-// MARK: - Image Loader Manager (UIKit/IO Optimized)
+// MARK: - Image Loader Manager (Cross-Platform Optimized)
 final class ImageLoaderManager {
     static let shared = ImageLoaderManager()
-    private let cache = NSCache<NSURL, UIImage>()
-    func getCachedImage(for url: URL) -> UIImage? { cache.object(forKey: url as NSURL) }
+    private let cache = NSCache<NSURL, PlatformImageWrapper>()
 
-    func loadAndPrepare(url: URL) async -> UIImage? {
-        if let cached = cache.object(forKey: url as NSURL) { return cached }
+    func getCachedImage(for url: URL) -> PlatformImage? {
+        cache.object(forKey: url as NSURL)?.image
+    }
+
+    func loadAndPrepare(url: URL) async -> PlatformImage? {
+        if let cached = cache.object(forKey: url as NSURL) { return cached.image }
         return await Task.detached(priority: .userInitiated) {
             let options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -355,29 +370,41 @@ final class ImageLoaderManager {
             ]
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                   let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-            let uiImage = UIImage(cgImage: cgImage)
-            self.cache.setObject(uiImage, forKey: url as NSURL)
-            return uiImage
+
+            #if canImport(UIKit)
+            let image = UIImage(cgImage: cgImage)
+            #elseif canImport(AppKit)
+            let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+            #endif
+
+            self.cache.setObject(PlatformImageWrapper(image: image), forKey: url as NSURL)
+            return image
         }.value
     }
+}
+
+// Wrapper class for NSCache (requires class type)
+final class PlatformImageWrapper {
+    let image: PlatformImage
+    init(image: PlatformImage) { self.image = image }
 }
 
 struct CachedAsyncImage: View {
     let url: URL
     let imageZoomNamespace: Namespace.ID
     let onTap: (() -> Void)?
-    @State private var displayImage: UIImage?
+    @State private var displayImage: PlatformImage?
 
     var body: some View {
         ZStack {
-            if let uiImage = displayImage {
-                Image(uiImage: uiImage)
+            if let platformImage = displayImage {
+                Image(platformImage: platformImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(width: 250, height: 250)
                     .matchedTransitionSource(id: url, in: imageZoomNamespace)
             } else {
-                Rectangle().fill(Color(.systemGray6)).frame(width: 250, height: 250)
+                Rectangle().fill(Color.gray.opacity(0.1)).frame(width: 250, height: 250)
                     .overlay { ProgressView() }
             }
         }

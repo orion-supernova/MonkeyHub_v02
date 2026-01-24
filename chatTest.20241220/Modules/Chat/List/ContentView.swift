@@ -326,7 +326,9 @@ struct ContentView: View {
                     .onAppear {
                         viewModel.clearUnread(for: room.id)
                     }
+                    #if os(iOS)
                     .navigationTransition(.zoom(sourceID: room.id, in: animationNamespace))
+                    #endif
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenChatRoom"))) { notification in
                 if let roomId = notification.userInfo?["roomId"] as? String {

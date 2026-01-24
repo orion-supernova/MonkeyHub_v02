@@ -1,4 +1,6 @@
 import SwiftUI
+
+#if canImport(UIKit)
 import UIKit
 
 struct UIKitScrollView<Content: View>: UIViewControllerRepresentable {
@@ -297,3 +299,193 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         }
     }
 }
+
+#elseif canImport(AppKit)
+import AppKit
+
+// MARK: - macOS Implementation using AppKit
+struct UIKitScrollView<Content: View>: NSViewControllerRepresentable {
+    let content: Content
+    let firstItemId: String?
+    let itemCount: Int
+    @Binding var scrollToBottom: Bool
+    var onNearTop: (() -> Void)?
+    var onAtBottomChanged: ((Bool) -> Void)?
+
+    func makeNSViewController(context: Context) -> MacScrollViewController<Content> {
+        let vc = MacScrollViewController(content: content)
+        vc.onNearTop = onNearTop
+        vc.onAtBottomChanged = onAtBottomChanged
+        return vc
+    }
+
+    func updateNSViewController(_ vc: MacScrollViewController<Content>, context: Context) {
+        let wasPrepended = vc.lastFirstItemId != nil && firstItemId != nil &&
+                          vc.lastFirstItemId != firstItemId && itemCount > vc.lastItemCount
+
+        if wasPrepended {
+            vc.preservePositionDuringUpdate(content: content)
+        } else {
+            vc.updateContent(content)
+        }
+
+        vc.lastFirstItemId = firstItemId
+        vc.lastItemCount = itemCount
+
+        if scrollToBottom {
+            DispatchQueue.main.async {
+                vc.scrollToBottom(animated: true)
+                self.scrollToBottom = false
+            }
+        }
+    }
+}
+
+final class MacScrollViewController<Content: View>: NSViewController {
+    private var scrollView: NSScrollView!
+    private var hostingView: NSHostingView<Content>!
+
+    var lastFirstItemId: String?
+    var lastItemCount: Int = 0
+    var onNearTop: (() -> Void)?
+    var onAtBottomChanged: ((Bool) -> Void)?
+
+    private var didInitialScroll = false
+    private var hasTriggeredNearTop = false
+    private var lastAtBottomState = true
+    private var contentSizeObservation: NSKeyValueObservation?
+
+    init(content: Content) {
+        super.init(nibName: nil, bundle: nil)
+        self.hostingView = NSHostingView(rootView: content)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func loadView() {
+        // Create scroll view
+        scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.backgroundColor = .clear
+        scrollView.drawsBackground = false
+
+        // Configure the hosting view
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+
+        // Create a flipped clip view for natural top-to-bottom content
+        let clipView = FlippedClipView()
+        clipView.documentView = hostingView
+        clipView.drawsBackground = false
+        scrollView.contentView = clipView
+
+        // Set constraints for hosting view width
+        NSLayoutConstraint.activate([
+            hostingView.widthAnchor.constraint(equalTo: clipView.widthAnchor)
+        ])
+
+        self.view = scrollView
+
+        // Observe scroll position
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(scrollViewDidScroll(_:)),
+            name: NSScrollView.didLiveScrollNotification,
+            object: scrollView
+        )
+
+        // Observe content size changes for initial scroll
+        contentSizeObservation = hostingView.observe(\.fittingSize, options: [.new]) { [weak self] _, _ in
+            guard let self = self else { return }
+            if !self.didInitialScroll {
+                DispatchQueue.main.async {
+                    self.didInitialScroll = true
+                    self.scrollToBottom(animated: false)
+                }
+            }
+        }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func scrollViewDidScroll(_ notification: Notification) {
+        guard let clipView = scrollView.contentView as? NSClipView else { return }
+
+        let offsetY = clipView.bounds.origin.y
+        let contentHeight = hostingView.fittingSize.height
+        let frameHeight = scrollView.bounds.height
+
+        // Near top detection
+        if offsetY <= 150 && contentHeight > frameHeight {
+            if !hasTriggeredNearTop {
+                hasTriggeredNearTop = true
+                DispatchQueue.main.async { [weak self] in
+                    self?.onNearTop?()
+                }
+            }
+        } else if offsetY > 200 {
+            hasTriggeredNearTop = false
+        }
+
+        // At bottom detection
+        let distanceFromBottom = contentHeight - (offsetY + frameHeight)
+        let isAtBottom = distanceFromBottom <= 100
+        if isAtBottom != lastAtBottomState {
+            lastAtBottomState = isAtBottom
+            DispatchQueue.main.async { [weak self] in
+                self?.onAtBottomChanged?(isAtBottom)
+            }
+        }
+    }
+
+    func updateContent(_ content: Content) {
+        hostingView.rootView = content
+    }
+
+    func preservePositionDuringUpdate(content: Content) {
+        guard let clipView = scrollView.contentView as? NSClipView else {
+            updateContent(content)
+            return
+        }
+
+        let oldHeight = hostingView.fittingSize.height
+        let oldOffset = clipView.bounds.origin.y
+
+        hostingView.rootView = content
+        hostingView.layoutSubtreeIfNeeded()
+
+        let delta = hostingView.fittingSize.height - oldHeight
+        if delta > 0 {
+            clipView.scroll(to: NSPoint(x: 0, y: oldOffset + delta))
+        }
+    }
+
+    func scrollToBottom(animated: Bool) {
+        guard let clipView = scrollView.contentView as? NSClipView else { return }
+
+        let contentHeight = hostingView.fittingSize.height
+        let frameHeight = scrollView.bounds.height
+        let maxOffsetY = max(0, contentHeight - frameHeight)
+
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.3
+                context.allowsImplicitAnimation = true
+                clipView.scroll(to: NSPoint(x: 0, y: maxOffsetY))
+            }
+        } else {
+            clipView.scroll(to: NSPoint(x: 0, y: maxOffsetY))
+        }
+        scrollView.reflectScrolledClipView(clipView)
+    }
+}
+
+// Flipped clip view for proper scroll behavior (content starts at top)
+final class FlippedClipView: NSClipView {
+    override var isFlipped: Bool { true }
+}
+
+#endif

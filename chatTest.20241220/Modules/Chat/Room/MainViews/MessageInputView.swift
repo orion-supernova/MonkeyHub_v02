@@ -20,7 +20,9 @@ struct MessageInputView: View {
         HStack(spacing: 12) {
             LiquidButton(icon: "plus") {
                 // Let the system handle keyboard dismiss with animation
+                #if canImport(UIKit)
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                #endif
                 isShowingAttachmentMenu.toggle()
             }
             

@@ -24,6 +24,15 @@ extension PlatformImage {
     static func fromData(_ data: Data) -> PlatformImage? {
         return PlatformImage(data: data)
     }
+
+    /// Create PlatformImage from file path
+    static func fromFile(_ path: String) -> PlatformImage? {
+        #if canImport(UIKit)
+        return UIImage(contentsOfFile: path)
+        #elseif canImport(AppKit)
+        return NSImage(contentsOfFile: path)
+        #endif
+    }
 }
 
 /// A platform-agnostic SwiftUI Image initializer

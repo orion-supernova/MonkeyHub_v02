@@ -21,8 +21,8 @@ struct FullscreenImageView: View {
                 // Image with zoom animation
                 ZoomableScrollView {
                     if url.isFileURL {
-                        if let uiImage = UIImage(contentsOfFile: url.path) {
-                            Image(uiImage: uiImage)
+                        if let platformImage = PlatformImage.fromFile(url.path) {
+                            Image(platformImage: platformImage)
                                 .resizable()
                                 .scaledToFit()
                                 .scaleEffect(imageScale)

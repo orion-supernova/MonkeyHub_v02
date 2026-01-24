@@ -141,6 +141,7 @@ struct ChatRoomView: View {
             navigationState.currentScreen = .home
             navigationState.currentRoomId = nil
         }
+        #if os(iOS)
         .fullScreenCover(isPresented: $showRoomInfo) {
             RoomInfoView(room: room)
         }
@@ -148,6 +149,14 @@ struct ChatRoomView: View {
             FullscreenImageView(url: url)
                 .navigationTransition(.zoom(sourceID: url, in: imageZoomNamespace))
         }
+        #else
+        .sheet(isPresented: $showRoomInfo) {
+            RoomInfoView(room: room)
+        }
+        .navigationDestination(for: URL.self) { url in
+            FullscreenImageView(url: url)
+        }
+        #endif
         // ... (The rest of your fullScreenCover and sheet logic stays here)
         #if canImport(UIKit)
         .fullScreenCover(isPresented: $showCamera) {

@@ -39,7 +39,27 @@ class ChatListViewModel: ObservableObject {
         await repository.fetchRooms()
         isLoading = false
     }
-    
+
+    func addRoomOptimistically(_ room: ChatRoom) {
+        // Update local list immediately for instant UI feedback
+        if !myRooms.contains(where: { $0.id == room.id }) {
+            withAnimation {
+                myRooms.insert(room, at: 0)
+            }
+        }
+        // Also update repository for persistence
+        repository.addRoomOptimistically(room)
+    }
+
+    func removeRoomOptimistically(_ roomId: String) {
+        // Update local list immediately for instant UI feedback
+        withAnimation {
+            myRooms.removeAll { $0.id == roomId }
+        }
+        // Also update repository for persistence
+        repository.removeRoomOptimistically(roomId)
+    }
+
     func clearUnread(for roomId: String) {
         // In the future, this should also tell Repo to clear it potentially
         unreadCounts[roomId] = 0

@@ -47,7 +47,7 @@ final class NotificationSubscriptionManager: ObservableObject {
         pendingOperations[roomId] = nil
     }
     
-    /// Unsubscribe from messages and reactions in a room
+    /// Unsubscribe from messages, reactions, and room changes in a room
     /// - Parameter roomId: The room to unsubscribe from
     func unsubscribeFromRoom(_ roomId: String) async {
         // Not subscribed? Skip
@@ -72,6 +72,14 @@ final class NotificationSubscriptionManager: ObservableObject {
             print("⚠️ NotificationSubscriptionManager: Failed to unsubscribe from reactions (might not exist): \(error)")
         }
 
+        // Try to unsubscribe from room changes (ignore errors if subscription doesn't exist)
+        do {
+            try await cloudKit.unsubscribeFromRoomChanges(for: roomId)
+            print("✅ NotificationSubscriptionManager: Unsubscribed from room changes for \(roomId)")
+        } catch {
+            print("⚠️ NotificationSubscriptionManager: Failed to unsubscribe from room changes (might not exist): \(error)")
+        }
+
         activeSubscriptions.remove(roomId)
         print("✅ NotificationSubscriptionManager: Removed room \(roomId) from active subscriptions")
     }
@@ -86,10 +94,17 @@ final class NotificationSubscriptionManager: ObservableObject {
     /// Subscribe to all rooms the user has joined (typically called on app launch)
     func subscribeToAllJoinedRooms() async {
         print("📱 NotificationSubscriptionManager: Subscribing to all joined rooms...")
-        
+
+        // Subscribe to "my rooms" for same-account multi-device sync
+        do {
+            try await cloudKit.subscribeToMyRooms()
+        } catch {
+            print("⚠️ NotificationSubscriptionManager: Failed to subscribe to my rooms: \(error)")
+        }
+
         do {
             let rooms = try await cloudKit.fetchUserRooms()
-            
+
             // Subscribe in parallel for better performance
             await withTaskGroup(of: Void.self) { group in
                 for room in rooms {
@@ -98,7 +113,7 @@ final class NotificationSubscriptionManager: ObservableObject {
                     }
                 }
             }
-            
+
             print("✅ NotificationSubscriptionManager: Subscribed to \(rooms.count) rooms")
         } catch {
             print("❌ NotificationSubscriptionManager: Failed to fetch rooms: \(error)")
@@ -143,6 +158,7 @@ final class NotificationSubscriptionManager: ObservableObject {
     private func performSubscription(roomId: String) async {
         var messageSubscriptionSuccess = false
         var reactionSubscriptionSuccess = false
+        var roomChangesSubscriptionSuccess = false
 
         // Subscribe to messages (critical - must succeed)
         do {
@@ -171,10 +187,24 @@ final class NotificationSubscriptionManager: ObservableObject {
             // Don't fail - reactions are optional
         }
 
+        // Subscribe to room changes (important for membership updates)
+        do {
+            try await cloudKit.subscribeToRoomChanges(for: roomId)
+            roomChangesSubscriptionSuccess = true
+            print("✅ NotificationSubscriptionManager: Subscribed to room changes for \(roomId)")
+        } catch let error as CKError where error.code == .serverRejectedRequest {
+            // Duplicate subscription - treat as success
+            roomChangesSubscriptionSuccess = true
+            print("ℹ️ NotificationSubscriptionManager: Room changes subscription already exists for \(roomId)")
+        } catch {
+            print("⚠️ NotificationSubscriptionManager: Failed to subscribe to room changes for \(roomId): \(error)")
+            // Don't fail - room changes are optional but important
+        }
+
         // Mark as subscribed if at least messages succeeded
         if messageSubscriptionSuccess {
             activeSubscriptions.insert(roomId)
-            print("✅ NotificationSubscriptionManager: Successfully subscribed to room \(roomId) (messages: ✓, reactions: \(reactionSubscriptionSuccess ? "✓" : "✗"))")
+            print("✅ NotificationSubscriptionManager: Successfully subscribed to room \(roomId) (messages: ✓, reactions: \(reactionSubscriptionSuccess ? "✓" : "✗"), roomChanges: \(roomChangesSubscriptionSuccess ? "✓" : "✗"))")
         } else {
             print("❌ NotificationSubscriptionManager: Failed to subscribe to room \(roomId)")
         }

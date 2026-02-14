@@ -245,8 +245,21 @@ struct SearchView: View {
                             joinRoom: { room in
                                 Task {
                                     try? await CloudKitManager.shared.joinRoom(room)
+                                    // Update room object to include current user as participant
+                                    var joinedRoom = room
+                                    let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
+                                    if !joinedRoom.participants.contains(userId) {
+                                        joinedRoom.participants.append(userId)
+                                    }
                                     dismiss()
+                                    // Navigate to the room after joining (pass updated room object)
+                                    NavigationStateManager.shared.navigateToRoom(joinedRoom)
                                 }
+                            },
+                            openRoom: { room in
+                                // Room is already joined - just navigate to it
+                                dismiss()
+                                NavigationStateManager.shared.navigateToRoom(room)
                             }
                         )
                     } else {
@@ -263,6 +276,8 @@ struct SearchView: View {
                                     )
                                     try? await CloudKitManager.shared.createChatRoom(room)
                                     dismiss()
+                                    // Navigate to the newly created room
+                                    NavigationStateManager.shared.navigateToRoom(room)
                                 }
                             }
                         )

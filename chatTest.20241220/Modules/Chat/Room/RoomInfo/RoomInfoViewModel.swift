@@ -207,16 +207,16 @@ final class RoomInfoViewModel: ObservableObject {
         let content = "\(currentUserName) updated the room avatar"
         await sendSystemMessage(content)
     }
-    
+
     private func sendNameChangeMessage(oldName: String, newName: String) async {
         let currentUserName = await fetchCurrentUserName()
         let content = "\(currentUserName) changed the room name from \"\(oldName)\" to \"\(newName)\""
         await sendSystemMessage(content)
     }
-    
+
     private func sendDescriptionChangeMessage(oldDescription: String?, newDescription: String) async {
         let currentUserName = await fetchCurrentUserName()
-        
+
         let content: String
         if let oldDesc = oldDescription, !oldDesc.isEmpty {
             if newDescription.isEmpty {
@@ -227,14 +227,14 @@ final class RoomInfoViewModel: ObservableObject {
         } else {
             content = "\(currentUserName) added a room description"
         }
-        
+
         await sendSystemMessage(content)
     }
-    
+
     private func sendPrivacyChangeMessage(isPrivate: Bool) async {
         let currentUserName = await fetchCurrentUserName()
-        let content = isPrivate 
-            ? "\(currentUserName) made this room private" 
+        let content = isPrivate
+            ? "\(currentUserName) made this room private"
             : "\(currentUserName) made this room public"
         await sendSystemMessage(content)
     }
@@ -256,7 +256,7 @@ final class RoomInfoViewModel: ObservableObject {
             type: .system,
             roomId: room.id
         )
-        
+
         try? await cloudKit.sendMessage(systemMessage)
     }
     
@@ -277,20 +277,42 @@ final class RoomInfoViewModel: ObservableObject {
     func removeMember(_ userId: String) async {
         isLoading = true
         error = nil
-        
+
+        // Get the member name BEFORE removing (so we have it for the system message)
+        let removedMemberName = members.first(where: { $0.id == userId })?.name ?? "a member"
+
         do {
-            var updatedRoom = room
-            updatedRoom.participants.removeAll { $0 == userId }
-            
-            let record = updatedRoom.toRecord()
+            // IMPORTANT: Fetch the existing record from CloudKit first (required for proper update)
+            let recordID = CKRecord.ID(recordName: room.id)
+            let record = try await cloudKit.database.record(for: recordID)
+
+            // Update participants on the fetched record
+            var participants = record[ChatRoom.participantsKey] as? [String] ?? []
+            participants.removeAll { $0 == userId }
+            record[ChatRoom.participantsKey] = participants
+
+            // Save the updated record
             _ = try await cloudKit.database.modifyRecords(saving: [record], deleting: [])
-            
+
+            // Update local state
+            var updatedRoom = room
+            updatedRoom.participants = participants
             room = updatedRoom
             members.removeAll { $0.id == userId }
+
+            // Send system message about member removal
+            await sendMemberRemovedMessage(removedMemberName: removedMemberName)
+
             isLoading = false
         } catch {
             self.error = error as? CloudKitError ?? .unknown(error)
             isLoading = false
         }
+    }
+
+    private func sendMemberRemovedMessage(removedMemberName: String) async {
+        let currentUserName = await fetchCurrentUserName()
+        let content = "\(currentUserName) removed \(removedMemberName) from the room"
+        await sendSystemMessage(content)
     }
 }

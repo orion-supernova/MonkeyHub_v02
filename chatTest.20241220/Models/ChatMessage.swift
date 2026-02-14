@@ -27,7 +27,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     let assetURL: URL? // The active URL for the current session
     var status: MessageStatus
     var reactions: [MessageReaction]
-    
+
     // System message identifier
     static let systemSenderId = "system"
     static let systemSenderName = "System"
@@ -88,7 +88,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         roomId = try container.decode(String.self, forKey: .roomId)
         status = try container.decode(MessageStatus.self, forKey: .status)
         reactions = try container.decode([MessageReaction].self, forKey: .reactions)
-        
+
         // Re-base the URL: Get the filename and resolve it to the current sandbox path
         let fileName = try container.decodeIfPresent(String.self, forKey: .assetFileName)
         assetURL = AssetPersistenceService.shared.getURL(for: fileName)
@@ -105,7 +105,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         try container.encode(roomId, forKey: .roomId)
         try container.encode(status, forKey: .status)
         try container.encode(reactions, forKey: .reactions)
-        
+
         // Persist ONLY the filename, not the absolute URL
         try container.encodeIfPresent(assetURL?.lastPathComponent, forKey: .assetFileName)
     }
@@ -138,7 +138,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         } else {
             self.assetURL = nil
         }
-        
+
         self.reactions = []
         self.status = .sent
     }
@@ -146,7 +146,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     func toRecord() -> CKRecord {
         let recordID = CKRecord.ID(recordName: id)
         let record = CKRecord(recordType: ChatMessage.recordType, recordID: recordID)
-        
+
         record[ChatMessage.idKey] = id
         record[ChatMessage.senderIdKey] = senderId
         record[ChatMessage.senderNameKey] = senderName

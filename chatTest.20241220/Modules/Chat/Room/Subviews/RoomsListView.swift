@@ -5,6 +5,7 @@ struct RoomsListView: View {
     let rooms: [ChatRoom]
     let joinedRoomIds: Set<String>
     let joinRoom: (ChatRoom) async -> Void
+    var openRoom: ((ChatRoom) -> Void)? = nil
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
 
@@ -17,7 +18,8 @@ struct RoomsListView: View {
                     RoomRow(
                         room: room,
                         isJoined: joinedRoomIds.contains(room.id),
-                        joinRoom: joinRoom
+                        joinRoom: joinRoom,
+                        openRoom: openRoom
                     )
                 }
             }
@@ -53,13 +55,18 @@ private struct RoomRow: View {
     let room: ChatRoom
     let isJoined: Bool
     let joinRoom: (ChatRoom) async -> Void
+    var openRoom: ((ChatRoom) -> Void)? = nil
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
     @State private var avatarImage: PlatformImage?
 
     var body: some View {
         Button {
-            if !isJoined {
+            if isJoined {
+                // Already joined - open the room directly
+                openRoom?(room)
+            } else {
+                // Not joined - join first
                 Task {
                     await joinRoom(room)
                 }
@@ -76,8 +83,6 @@ private struct RoomRow: View {
             .overlay(cardBorder)
         }
         .buttonStyle(.plain)
-        .disabled(isJoined)
-        .opacity(isJoined ? 0.7 : 1.0)
         .onAppear {
             loadAvatar()
         }
@@ -216,5 +221,5 @@ private struct RoomRow: View {
 }
 
 #Preview {
-    RoomsListView(rooms: [], joinedRoomIds: [], joinRoom: { _ in })
+    RoomsListView(rooms: [], joinedRoomIds: [], joinRoom: { _ in }, openRoom: { _ in })
 }

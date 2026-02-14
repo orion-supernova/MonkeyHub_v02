@@ -20,6 +20,9 @@ struct ChatRoomView: View {
     @State private var showRoomInfo = false
     @Namespace private var imageZoomNamespace
     @State private var roomAvatarImage: PlatformImage?
+    @State private var isUserMember = true  // Assume member until checked
+    @State private var showRoomDeletedAlert = false
+    @State private var showRemovedFromRoomAlert = false
 
     init(room: ChatRoom) {
         self.room = room
@@ -94,27 +97,45 @@ struct ChatRoomView: View {
             // --- BOTTOM FLOATING INPUT ---
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 8) {
-                    // Syncing indicator above input field
-                    if viewModel.isFetchingNewMessages {
-                        SyncingIndicatorView()
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
+                    if isUserMember {
+                        // Syncing indicator above input field
+                        if viewModel.isFetchingNewMessages {
+                            SyncingIndicatorView()
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
 
-                    MessageInputView(
-                        messageText: $messageText,
-                        showImagePicker: $showImagePicker,
-                        isShowingAttachmentMenu: $isShowingAttachmentMenu,
-                        onSendMessage: { text in
-                            Task {
-                                await viewModel.sendMessage(text)
-                                await MainActor.run { messageText = "" }
-                            }
-                        },
-                        onTextChanged: { text in viewModel.onTextChanged(text) },
-                        onTakePhoto: { isShowingAttachmentMenu = false; showCamera = true },
-                        onTakeVideo: { isShowingAttachmentMenu = false; showCamera = true },
-                        onRecordAudio: { isShowingAttachmentMenu = false; showVoiceRecorder = true }
-                    )
+                        MessageInputView(
+                            messageText: $messageText,
+                            showImagePicker: $showImagePicker,
+                            isShowingAttachmentMenu: $isShowingAttachmentMenu,
+                            onSendMessage: { text in
+                                Task {
+                                    await viewModel.sendMessage(text)
+                                    await MainActor.run { messageText = "" }
+                                }
+                            },
+                            onTextChanged: { text in viewModel.onTextChanged(text) },
+                            onTakePhoto: { isShowingAttachmentMenu = false; showCamera = true },
+                            onTakeVideo: { isShowingAttachmentMenu = false; showCamera = true },
+                            onRecordAudio: { isShowingAttachmentMenu = false; showVoiceRecorder = true }
+                        )
+                    } else {
+                        // User is no longer a member
+                        HStack(spacing: 8) {
+                            Image(systemName: "person.slash.fill")
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
+                            Text("You are no longer a member of this room")
+                                .font(.subheadline)
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+                        )
+                        .padding(.horizontal, 16)
+                    }
                 }
                 .padding(.bottom, 8)
                 .background(Color.clear)
@@ -129,6 +150,8 @@ struct ChatRoomView: View {
         .navigationBarBackButtonHidden()
         #endif
         .task {
+            // Check if user is still a member of this room
+            await checkMembership()
             await viewModel.loadMessages()
             isLoading = false
         }
@@ -140,6 +163,38 @@ struct ChatRoomView: View {
         .onDisappear {
             navigationState.currentScreen = .home
             navigationState.currentRoomId = nil
+        }
+        // Listen for real-time room deletion notifications
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RoomWasDeleted"))) { notification in
+            if let roomId = notification.userInfo?["roomId"] as? String, roomId == room.id {
+                showRoomDeletedAlert = true
+            }
+        }
+        // Listen for real-time removal from room notifications
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserRemovedFromRoom"))) { notification in
+            if let roomId = notification.userInfo?["roomId"] as? String, roomId == room.id {
+                withAnimation {
+                    isUserMember = false
+                }
+                showRemovedFromRoomAlert = true
+            }
+        }
+        .alert("Room Deleted", isPresented: $showRoomDeletedAlert) {
+            Button("OK") {
+                dismiss()
+            }
+        } message: {
+            Text("This room has been deleted by another user.")
+        }
+        .alert("Removed from Room", isPresented: $showRemovedFromRoomAlert) {
+            Button("OK") {
+                // Stay in the room to view history, but can't send messages
+            }
+            Button("Leave") {
+                dismiss()
+            }
+        } message: {
+            Text("You have been removed from this room. You can still view message history but cannot send new messages.")
         }
         #if os(iOS)
         .fullScreenCover(isPresented: $showRoomInfo) {
@@ -208,6 +263,29 @@ struct ChatRoomView: View {
                 )
             }
         )
+    }
+
+    /// Check if current user is still a member of this room
+    private func checkMembership() async {
+        let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
+
+        do {
+            // Fetch the latest room data from CloudKit
+            if let latestRoom = try await CloudKitManager.shared.fetchChatRoom(byId: room.id) {
+                isUserMember = latestRoom.participants.contains(userId)
+                if !isUserMember {
+                    print("⚠️ User is no longer a member of room: \(room.name)")
+                }
+            } else {
+                // Room doesn't exist anymore
+                isUserMember = false
+                print("⚠️ Room no longer exists: \(room.id)")
+            }
+        } catch {
+            // On error, assume still a member (fail open for better UX)
+            print("⚠️ Failed to check membership: \(error)")
+            isUserMember = true
+        }
     }
 
     private func loadRoomAvatar() {

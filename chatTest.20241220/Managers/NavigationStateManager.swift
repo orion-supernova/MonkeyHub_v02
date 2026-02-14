@@ -24,6 +24,14 @@ class NavigationStateManager: ObservableObject {
         )
     }
 
+    func navigateToRoom(_ room: ChatRoom) {
+        NotificationCenter.default.post(
+            name: NSNotification.Name("OpenChatRoom"),
+            object: nil,
+            userInfo: ["room": room]
+        )
+    }
+
     var shouldShowFloatingMenu: Bool {
         // Only show if we are on root View and not deep in navigation
         return (currentScreen == .home || currentScreen == .feedView || currentScreen == .settings) && path.isEmpty

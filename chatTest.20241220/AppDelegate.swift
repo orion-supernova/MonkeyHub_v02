@@ -122,11 +122,15 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
             router.route(userInfo)
         }
 
-        // Check if user is currently viewing this chatroom
+        // Check if notification should be silent
         if router.shouldSuppressUI(for: userInfo) {
             // Silent: Don't show banner/sound (but data was still processed above)
             completionHandler([])
             print("🔕 Notification UI suppressed - user in active chatroom")
+        } else if router.isSystemMessage(userInfo) {
+            // System messages are silent - no banner, just process data
+            completionHandler([])
+            print("🔕 System message - silent notification")
         } else {
             // Show banner and play sound
             #if canImport(UIKit)
@@ -178,14 +182,14 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
     
     private func handleQuickReply(userInfo: [AnyHashable: Any], text: String) {
         guard let roomId = router.extractRoomId(from: userInfo) else { return }
-        
+
         print("📤 Quick reply: \(text) to room \(roomId)")
-        
+
         // Send message in background
         Task { @MainActor in
             let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
             let userName = UserDefaults.standard.string(forKey: "userName") ?? "You"
-            
+
             let message = ChatMessage(
                 senderId: userId,
                 senderName: userName,
@@ -193,7 +197,7 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
                 type: .text,
                 roomId: roomId
             )
-            
+
             await ChatRepository.shared.sendMessage(message)
         }
     }

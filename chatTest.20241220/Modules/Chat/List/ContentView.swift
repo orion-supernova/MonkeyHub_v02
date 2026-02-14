@@ -18,11 +18,17 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isShowingJoinRoomSheet = false
     @State private var availableRooms: [ChatRoom] = []
     @State private var isShowingSearchView = false
     @StateObject private var navigationState = NavigationStateManager.shared
     @Namespace private var animationNamespace
+
+    // MARK: - Leave Room State
+    @State private var showingLeaveRoomAlert = false
+    @State private var showingDeleteRoomAlert = false
+    @State private var roomToLeave: ChatRoom?
 
     // MARK: - Room Operations
     private func loadData() async {
@@ -41,19 +47,57 @@ struct ContentView: View {
 
         do {
             try await cloudKit.createChatRoom(room)
-            await loadData()
+
+            // Add room optimistically and navigate to it
+            viewModel.addRoomOptimistically(room)
             isShowingNewRoomSheet = false
             newRoomName = ""
+
+            // Navigate to the new room after a brief delay (let sheet dismiss)
+            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+            navigationState.path.append(room)
         } catch let error {
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
 
+    private func initiateLeaveRoom(_ room: ChatRoom) {
+        roomToLeave = room
+        let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
+        let isLastUser = room.participants.count == 1 && room.participants.contains(userId)
+
+        if isLastUser {
+            showingDeleteRoomAlert = true
+        } else {
+            showingLeaveRoomAlert = true
+        }
+    }
+
     private func leaveRoom(_ room: ChatRoom) async {
+        // Optimistically remove from UI immediately
+        viewModel.removeRoomOptimistically(room.id)
         do {
             try await cloudKit.leaveRoom(room)
-            await loadData()
+            // Don't call loadData() immediately - CloudKit eventual consistency
+            // will return stale data and add the room back. Let the next
+            // natural refresh (pull-to-refresh, app foreground) sync the data.
         } catch let error {
+            // Revert on error
+            viewModel.addRoomOptimistically(room)
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+        }
+    }
+
+    private func deleteRoomCompletely(_ room: ChatRoom) async {
+        // Optimistically remove from UI immediately
+        viewModel.removeRoomOptimistically(room.id)
+        do {
+            try await cloudKit.deleteRoomAndMessages(room)
+            // Don't call loadData() immediately - CloudKit eventual consistency
+            // will return stale data and add the room back.
+        } catch let error {
+            // Revert on error
+            viewModel.addRoomOptimistically(room)
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
@@ -281,9 +325,7 @@ struct ContentView: View {
                                             ForEach(viewModel.myRooms) { room in
                                                 NavigationLink(value: room) {
                                                     EnhancedRoomCard(room: room, unreadCount: viewModel.unreadCounts[room.id] ?? 0) {
-                                                        Task {
-//                                                            await leaveRoom(room)
-                                                        }
+                                                        initiateLeaveRoom(room)
                                                     }
                                                     .matchedTransitionSource(id: room.id, in: animationNamespace)
                                                 }
@@ -331,7 +373,16 @@ struct ContentView: View {
                     #endif
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenChatRoom"))) { notification in
-                if let roomId = notification.userInfo?["roomId"] as? String {
+                // Handle room object passed directly (for newly joined rooms from search)
+                if let room = notification.userInfo?["room"] as? ChatRoom {
+                    // Add to local list if not present, then navigate
+                    if !viewModel.myRooms.contains(where: { $0.id == room.id }) {
+                        viewModel.addRoomOptimistically(room)
+                    }
+                    navigationState.path.append(room)
+                }
+                // Handle room ID (for existing rooms already in myRooms)
+                else if let roomId = notification.userInfo?["roomId"] as? String {
                     if let room = viewModel.myRooms.first(where: { $0.id == roomId }) {
                         navigationState.path.append(room)
                     }
@@ -366,7 +417,12 @@ struct ContentView: View {
 //                    }
 //                )
 //            }
-            .sheet(isPresented: $isShowingSearchView) {
+            .sheet(isPresented: $isShowingSearchView, onDismiss: {
+                // Refresh room list after search sheet is dismissed (in case user joined a room)
+                Task {
+                    await loadData()
+                }
+            }) {
                 SearchView()
             }
         }
@@ -375,6 +431,29 @@ struct ContentView: View {
         }
         .refreshable {
             await loadData()
+        }
+        .onChange(of: scenePhase) { newPhase in
+            if newPhase == .active {
+                // Refresh room list when app comes to foreground
+                // This handles: removed from rooms, added to new rooms
+                Task {
+                    await loadData()
+                }
+            }
+        }
+        // Listen for real-time room deletion notifications
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RoomWasDeleted"))) { notification in
+            if let roomId = notification.userInfo?["roomId"] as? String {
+                print("📥 ContentView: Room \(roomId) was deleted, updating UI")
+                viewModel.removeRoomOptimistically(roomId)
+            }
+        }
+        // Listen for real-time removal from room notifications
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserRemovedFromRoom"))) { notification in
+            if let roomId = notification.userInfo?["roomId"] as? String {
+                print("📥 ContentView: User removed from room \(roomId), updating UI")
+                viewModel.removeRoomOptimistically(roomId)
+            }
         }
         .alert("Sign Out", isPresented: $showingSignOutAlert) {
             Button("Cancel", role: .cancel) {}
@@ -385,6 +464,40 @@ struct ContentView: View {
             }
         } message: {
             Text("Are you sure you want to sign out?")
+        }
+        .alert("Leave Room", isPresented: $showingLeaveRoomAlert) {
+            Button("Cancel", role: .cancel) {
+                roomToLeave = nil
+            }
+            Button("Leave", role: .destructive) {
+                if let room = roomToLeave {
+                    Task {
+                        await leaveRoom(room)
+                        roomToLeave = nil
+                    }
+                }
+            }
+        } message: {
+            Text("Are you sure you want to leave this room?")
+        }
+        .alert("Delete Room", isPresented: $showingDeleteRoomAlert) {
+            Button("Cancel", role: .cancel) {
+                roomToLeave = nil
+            }
+            Button("Delete", role: .destructive) {
+                if let room = roomToLeave {
+                    Task {
+                        await deleteRoomCompletely(room)
+                        roomToLeave = nil
+                    }
+                }
+            }
+        } message: {
+            if let room = roomToLeave {
+                Text("You are the only member of \"\(room.name)\". Leaving will permanently delete this room and all its messages. This action cannot be undone.")
+            } else {
+                Text("This room will be permanently deleted.")
+            }
         }
     }
 

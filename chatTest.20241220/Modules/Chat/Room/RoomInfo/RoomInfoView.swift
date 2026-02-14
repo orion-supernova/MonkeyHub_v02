@@ -16,6 +16,8 @@ struct RoomInfoView: View {
     @State private var isEditingDescription = false
     @State private var editedDescription = ""
     @State private var showFullscreenAvatar = false
+    @State private var showDeleteRoomAlert = false
+    @State private var isDeleting = false
     @Namespace private var avatarNamespace
 
     private let currentUserId: String
@@ -34,12 +36,16 @@ struct RoomInfoView: View {
                     avatarSection
                     roomInfoSection
                     membersSection
-                    
+
                     if isCreator {
                         actionsSection
                     }
                 }
                 .padding()
+            }
+            .refreshable {
+                await viewModel.refreshRoom()
+                await viewModel.loadMembers()
             }
             .background(selectedTheme.colors(for: colorScheme).background)
             .navigationTitle("Room Info")
@@ -98,6 +104,20 @@ struct RoomInfoView: View {
                 Text(pendingVisibilityValue
                     ? "This will make the room private. Only members can see and join this room."
                     : "This will make the room public. Anyone can search and join this room.")
+            }
+            // Listen for room deletion - dismiss if this room was deleted
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RoomWasDeleted"))) { notification in
+                if let roomId = notification.userInfo?["roomId"] as? String,
+                   roomId == viewModel.room.id {
+                    dismiss()
+                }
+            }
+            // Listen for user removal - dismiss if current user was removed
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserRemovedFromRoom"))) { notification in
+                if let roomId = notification.userInfo?["roomId"] as? String,
+                   roomId == viewModel.room.id {
+                    dismiss()
+                }
             }
         }
         .overlay {
@@ -482,15 +502,50 @@ struct RoomInfoView: View {
     private var actionsSection: some View {
         VStack(spacing: 12) {
             Button(role: .destructive) {
-                // TODO: Add delete room functionality
+                showDeleteRoomAlert = true
             } label: {
-                Label("Delete Room", systemImage: "trash.fill")
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))
-                    .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
-                    .cornerRadius(12)
+                HStack {
+                    if isDeleting {
+                        ProgressView()
+                            .tint(selectedTheme.colors(for: colorScheme).destructive)
+                    }
+                    Label("Delete Room", systemImage: "trash.fill")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
+                .cornerRadius(12)
             }
+            .disabled(isDeleting)
+        }
+        .alert("Delete Room", isPresented: $showDeleteRoomAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task {
+                    await deleteRoom()
+                }
+            }
+        } message: {
+            Text("Are you sure you want to delete \"\(viewModel.room.name)\"? This will permanently delete the room and all its messages. This action cannot be undone.")
+        }
+    }
+
+    private func deleteRoom() async {
+        isDeleting = true
+        do {
+            try await CloudKitManager.shared.deleteRoomAndMessages(viewModel.room)
+            // Remove from local list
+            ChatRepository.shared.removeRoomOptimistically(viewModel.room.id)
+            // Dismiss this view
+            await MainActor.run {
+                dismiss()
+            }
+            // Navigate back to room list
+            NavigationStateManager.shared.path.removeLast(NavigationStateManager.shared.path.count)
+        } catch {
+            isDeleting = false
+            AlertManager.shared.showAlert(title: "Error", message: "Failed to delete room: \(error.localizedDescription)")
         }
     }
 }

@@ -108,6 +108,32 @@ class ChatRepository: ObservableObject {
         }
     }
 
+    /// Optimistically adds a room to the local list immediately (before CloudKit sync completes)
+    /// This ensures the UI updates instantly after room creation
+    func addRoomOptimistically(_ room: ChatRoom) {
+        // Only add if not already present
+        if !rooms.contains(where: { $0.id == room.id }) {
+            withAnimation {
+                rooms.insert(room, at: 0)  // Add to top of list (newest first)
+            }
+            Task {
+                await persistence.saveRooms(rooms)
+            }
+            print("✅ ChatRepository: Optimistically added room '\(room.name)'")
+        }
+    }
+
+    /// Removes a room from the local list immediately (for optimistic UI updates)
+    func removeRoomOptimistically(_ roomId: String) {
+        withAnimation {
+            rooms.removeAll { $0.id == roomId }
+        }
+        Task {
+            await persistence.saveRooms(rooms)
+        }
+        print("✅ ChatRepository: Optimistically removed room \(roomId)")
+    }
+
     func setActiveRoom(_ roomId: String?) {
         self.activeRoomId = roomId
         if let roomId = roomId {
@@ -125,10 +151,14 @@ class ChatRepository: ObservableObject {
     
     // MARK: - Message Management
 
-    /// Fetches messages using smart incremental sync.
-    /// If we have cached messages, only fetches messages AFTER the latest cached timestamp.
-    /// This dramatically improves room loading times for rooms with history.
-    func fetchMessages(for roomId: String) async {
+    /// Track fetch count for periodic full sync
+    private var incrementalFetchCount: [String: Int] = [:]
+    private let fullSyncInterval = 5 // Do full sync every N incremental fetches
+
+    /// Fetches messages using smart incremental sync with overlap.
+    /// Uses overlap to catch any messages that might have been missed.
+    /// Periodically does a full sync to ensure no gaps.
+    func fetchMessages(for roomId: String, forceFullSync: Bool = false) async {
         guard roomId == activeRoomId else { return }
 
         do {
@@ -136,18 +166,35 @@ class ChatRepository: ObservableObject {
             let cachedMessages = activeRoomMessages.filter { $0.status != .pending }
             let latestCachedTimestamp = cachedMessages.map { $0.timestamp }.max()
 
+            // Track incremental fetches for periodic full sync
+            let fetchCount = incrementalFetchCount[roomId] ?? 0
+            let shouldDoFullSync = forceFullSync || (fetchCount > 0 && fetchCount % fullSyncInterval == 0)
+
             let newMessages: [ChatMessage]
 
-            if let latestTimestamp = latestCachedTimestamp, !cachedMessages.isEmpty {
-                // INCREMENTAL SYNC: Only fetch messages AFTER what we have cached
-                print("⚡️ ChatRepository: Incremental sync - fetching messages after \(latestTimestamp)")
-                newMessages = try await cloudKit.fetchMessagesAfter(for: roomId, after: latestTimestamp, limit: 100)
-                print("⚡️ ChatRepository: Fetched \(newMessages.count) new messages (incremental)")
+            if shouldDoFullSync {
+                // PERIODIC FULL SYNC: Fetch all recent messages to catch any gaps
+                print("🔄 ChatRepository: Periodic full sync for room \(roomId)")
+                newMessages = try await cloudKit.fetchRecentMessages(for: roomId, limit: 100)
+                print("🔄 ChatRepository: Full sync fetched \(newMessages.count) messages")
+            } else if let latestTimestamp = latestCachedTimestamp, !cachedMessages.isEmpty {
+                // INCREMENTAL SYNC WITH OVERLAP: Fetch messages with 2-minute overlap
+                // This ensures we catch any messages that might have been missed due to
+                // network issues, race conditions, or clock skew
+                let overlapSeconds: TimeInterval = 120 // 2 minutes overlap
+                let fetchFromTimestamp = latestTimestamp.addingTimeInterval(-overlapSeconds)
+
+                print("⚡️ ChatRepository: Incremental sync with overlap - fetching messages after \(fetchFromTimestamp)")
+                newMessages = try await cloudKit.fetchMessagesAfter(for: roomId, after: fetchFromTimestamp, limit: 100)
+                print("⚡️ ChatRepository: Fetched \(newMessages.count) messages (incremental with overlap)")
             } else {
                 // FULL FETCH: No cache, fetch recent messages
                 print("📥 ChatRepository: Full fetch - no cached messages found")
                 newMessages = try await cloudKit.fetchRecentMessages(for: roomId, limit: 50)
             }
+
+            // Update fetch count
+            incrementalFetchCount[roomId] = fetchCount + 1
 
             // Skip if no new messages to process
             guard !newMessages.isEmpty || cachedMessages.isEmpty else {
@@ -174,23 +221,8 @@ class ChatRepository: ObservableObject {
             }
 
             if self.activeRoomId == roomId {
-                if latestCachedTimestamp != nil && !cachedMessages.isEmpty {
-                    // INCREMENTAL: Merge new messages with existing cache
-                    upsertMessages(messagesWithReactions, in: roomId, saveToDisk: true)
-                } else {
-                    // FULL FETCH: Replace with fetched messages (keep pending)
-                    let pendingMessages = self.activeRoomMessages.filter { $0.status == .pending }
-
-                    var newList = messagesWithReactions
-                    newList.append(contentsOf: pendingMessages)
-                    newList.sort { $0.timestamp < $1.timestamp }
-
-                    withAnimation {
-                        self.activeRoomMessages = newList
-                    }
-
-                    await persistence.saveMessages(activeRoomMessages, for: roomId)
-                }
+                // Always use upsert to merge and deduplicate
+                upsertMessages(messagesWithReactions, in: roomId, saveToDisk: true)
             }
         } catch {
             print("❌ ChatRepository: Failed to fetch messages: \(error)")
@@ -306,6 +338,31 @@ class ChatRepository: ObservableObject {
         let content = recordFields[ChatMessage.contentKey] as? String ?? "New Message"
         let senderId = recordFields[ChatMessage.senderIdKey] as? String ?? "unknown"
         let timestamp = Date() // Approximate
+        let messageType = recordFields[ChatMessage.typeKey] as? String
+
+        // Check for member change system messages - update room data
+        if messageType == MessageType.system.rawValue {
+            let isRemoval = content.contains("removed") && content.contains("from the room")
+            let isLeave = content.contains("left the room")
+            let isJoin = content.contains("joined the room")
+            let isRoomDeleted = content.contains("deleted this room")
+
+            if isRoomDeleted {
+                // Room is being deleted - remove from list immediately
+                Task {
+                    await handleRoomDeletedNotification(roomId: roomId)
+                }
+            } else if isRemoval || isLeave || isJoin {
+                Task {
+                    // Always refresh room to update participant count in list
+                    await refreshRoomInList(roomId: roomId)
+                    // Also check if current user was removed (if we're in this room)
+                    if isRemoval && activeRoomId == roomId {
+                        await checkMembershipAfterRemoval(roomId: roomId)
+                    }
+                }
+            }
+        }
 
         // Update unread count for any room (new or existing)
         let currentUserId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
@@ -420,6 +477,205 @@ class ChatRepository: ObservableObject {
             if roomId == activeRoomId {
                await fetchMessages(for: roomId)
             }
+        }
+    }
+
+    // MARK: - Room List Updates (triggered by system messages)
+
+    /// Handles room deletion notification - removes room from list immediately
+    private func handleRoomDeletedNotification(roomId: String) async {
+        print("🗑️ ChatRepository: Room \(roomId) is being deleted, removing from list")
+
+        await MainActor.run {
+            withAnimation {
+                rooms.removeAll { $0.id == roomId }
+            }
+
+            // Always post notification - ContentView, ChatRoomView, and RoomInfoView all listen
+            NotificationCenter.default.post(
+                name: NSNotification.Name("RoomWasDeleted"),
+                object: nil,
+                userInfo: ["roomId": roomId]
+            )
+        }
+
+        // Persist and unsubscribe
+        await persistence.saveRooms(rooms)
+        await NotificationSubscriptionManager.shared.unsubscribeFromRoom(roomId)
+    }
+
+    /// Refreshes a room's data in the local list (e.g., after participant changes)
+    /// This updates participant count and other room details in the lobby
+    private func refreshRoomInList(roomId: String) async {
+        do {
+            if let latestRoom = try await cloudKit.fetchChatRoom(byId: roomId) {
+                // Update the room in our local list
+                await MainActor.run {
+                    if let index = rooms.firstIndex(where: { $0.id == roomId }) {
+                        withAnimation {
+                            rooms[index] = latestRoom
+                        }
+                        print("✅ ChatRepository: Updated room \(roomId) in list (participants: \(latestRoom.participants.count))")
+                    }
+                }
+                // Persist
+                await persistence.saveRooms(rooms)
+            } else {
+                // Room no longer exists - remove from list
+                print("⚠️ ChatRepository: Room \(roomId) no longer exists, removing from list")
+                await MainActor.run {
+                    withAnimation {
+                        rooms.removeAll { $0.id == roomId }
+                    }
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("RoomWasDeleted"),
+                        object: nil,
+                        userInfo: ["roomId": roomId]
+                    )
+                }
+                await persistence.saveRooms(rooms)
+            }
+        } catch {
+            print("⚠️ ChatRepository: Failed to refresh room \(roomId): \(error)")
+        }
+    }
+
+    // MARK: - Membership Check (triggered by removal system messages)
+
+    /// Checks if current user is still a member after a removal system message
+    /// This is only called when we receive a "removed X from the room" message
+    private func checkMembershipAfterRemoval(roomId: String) async {
+        let currentUserId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
+
+        do {
+            if let room = try await cloudKit.fetchChatRoom(byId: roomId) {
+                if !room.participants.contains(currentUserId) {
+                    // Current user was removed
+                    print("⚠️ ChatRepository: Current user was removed from room \(roomId)")
+                    await MainActor.run {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("UserRemovedFromRoom"),
+                            object: nil,
+                            userInfo: ["roomId": roomId]
+                        )
+                    }
+                }
+            }
+        } catch {
+            print("⚠️ ChatRepository: Failed to check membership after removal: \(error)")
+        }
+    }
+
+    // MARK: - Room Change Notification Handling
+
+    /// Called by NotificationRouter when a room change notification arrives
+    /// This handles membership changes and room deletions in real-time
+    func handleRoomChange(_ userInfo: [AnyHashable: Any], queryNotification: CKQueryNotification, roomId: String) {
+        let notificationType = queryNotification.queryNotificationReason
+
+        print("📥 ChatRepository: Processing room change notification for room \(roomId), type: \(notificationType.rawValue)")
+
+        let currentUserId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
+
+        if notificationType == .recordDeleted {
+            // Room was deleted
+            print("🗑️ ChatRepository: Room \(roomId) was deleted")
+            handleRoomDeleted(roomId: roomId)
+        } else if notificationType == .recordUpdated {
+            // Room was updated - check if we're still a participant
+            Task {
+                await handleRoomUpdated(roomId: roomId, currentUserId: currentUserId)
+            }
+        }
+    }
+
+    /// Handle room deletion - remove from local state and notify UI
+    private func handleRoomDeleted(roomId: String) {
+        // Remove from local rooms list
+        withAnimation {
+            rooms.removeAll { $0.id == roomId }
+        }
+
+        // Persist
+        Task {
+            await persistence.saveRooms(rooms)
+        }
+
+        // If user is currently in this room, notify them
+        if activeRoomId == roomId {
+            print("⚠️ ChatRepository: User is in deleted room, posting notification")
+            NotificationCenter.default.post(
+                name: NSNotification.Name("RoomWasDeleted"),
+                object: nil,
+                userInfo: ["roomId": roomId]
+            )
+        }
+
+        // Unsubscribe from this room
+        Task {
+            await NotificationSubscriptionManager.shared.unsubscribeFromRoom(roomId)
+        }
+
+        print("✅ ChatRepository: Handled room deletion for \(roomId)")
+    }
+
+    /// Handle room update - check membership and update local state
+    private func handleRoomUpdated(roomId: String, currentUserId: String) async {
+        do {
+            // Fetch the latest room data from CloudKit
+            if let latestRoom = try await cloudKit.fetchChatRoom(byId: roomId) {
+                let isStillMember = latestRoom.participants.contains(currentUserId)
+
+                if !isStillMember {
+                    // User was removed from the room
+                    print("⚠️ ChatRepository: User was removed from room \(roomId)")
+
+                    // Remove from local rooms list
+                    await MainActor.run {
+                        withAnimation {
+                            rooms.removeAll { $0.id == roomId }
+                        }
+                    }
+
+                    // Persist
+                    await persistence.saveRooms(rooms)
+
+                    // If user is currently in this room, notify them
+                    if activeRoomId == roomId {
+                        await MainActor.run {
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("UserRemovedFromRoom"),
+                                object: nil,
+                                userInfo: ["roomId": roomId]
+                            )
+                        }
+                    }
+
+                    // Unsubscribe from this room
+                    await NotificationSubscriptionManager.shared.unsubscribeFromRoom(roomId)
+
+                    print("✅ ChatRepository: Handled user removal from room \(roomId)")
+                } else {
+                    // User is still a member - update room details locally
+                    await MainActor.run {
+                        if let index = rooms.firstIndex(where: { $0.id == roomId }) {
+                            withAnimation {
+                                rooms[index] = latestRoom
+                            }
+                        }
+                    }
+
+                    // Persist
+                    await persistence.saveRooms(rooms)
+
+                    print("✅ ChatRepository: Updated room details for \(roomId)")
+                }
+            } else {
+                // Room doesn't exist anymore (deleted)
+                handleRoomDeleted(roomId: roomId)
+            }
+        } catch {
+            print("❌ ChatRepository: Failed to fetch room update: \(error)")
         }
     }
 

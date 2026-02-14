@@ -32,6 +32,12 @@ final class NotificationRouter {
             } else if subscriptionID.hasPrefix("reactions-") {
                 routeToReactionHandler(userInfo: userInfo, queryNotification: queryNotification)
                 return
+            } else if subscriptionID.hasPrefix("room-changes-") {
+                routeToRoomChangeHandler(userInfo: userInfo, queryNotification: queryNotification)
+                return
+            } else if subscriptionID.hasPrefix("my-rooms-") {
+                routeToMyRoomsHandler(queryNotification: queryNotification)
+                return
             }
         }
         
@@ -72,6 +78,19 @@ final class NotificationRouter {
         }
         return roomId
     }
+
+    /// Check if notification is for a system message (should be silent)
+    /// - Parameter userInfo: The notification payload
+    /// - Returns: True if this is a system message
+    nonisolated func isSystemMessage(_ userInfo: [AnyHashable: Any]) -> Bool {
+        guard let cloudKitNotification = CKNotification(fromRemoteNotificationDictionary: userInfo),
+              let queryNotification = cloudKitNotification as? CKQueryNotification,
+              let recordFields = queryNotification.recordFields,
+              let messageType = recordFields[ChatMessage.typeKey] as? String else {
+            return false
+        }
+        return messageType == MessageType.system.rawValue
+    }
     
     // MARK: - Private Routing
     
@@ -100,5 +119,34 @@ final class NotificationRouter {
 
         print("📥 NotificationRouter: Routing reaction notification to ChatRepository (message: \(messageId))")
         ChatRepository.shared.handleIncomingReaction(userInfo, queryNotification: queryNotification)
+    }
+
+    private func routeToMyRoomsHandler(queryNotification: CKQueryNotification) {
+        // This fires when any room where user is a participant changes (create, update, delete)
+        // Used for same-account multi-device sync
+        print("📥 NotificationRouter: My rooms changed, refreshing room list")
+
+        Task {
+            await ChatRepository.shared.fetchRooms()
+        }
+    }
+
+    private func routeToRoomChangeHandler(userInfo: [AnyHashable: Any], queryNotification: CKQueryNotification) {
+        guard let recordFields = queryNotification.recordFields,
+              let roomId = recordFields[ChatRoom.idKey] as? String else {
+            // For deletions, recordFields might be nil but we can get roomId from subscription
+            if let subscriptionID = queryNotification.subscriptionID,
+               subscriptionID.hasPrefix("room-changes-") {
+                let roomId = String(subscriptionID.dropFirst("room-changes-".count))
+                print("📥 NotificationRouter: Routing room deletion notification (room: \(roomId))")
+                ChatRepository.shared.handleRoomChange(userInfo, queryNotification: queryNotification, roomId: roomId)
+                return
+            }
+            print("⚠️ NotificationRouter: Missing roomId in room change notification")
+            return
+        }
+
+        print("📥 NotificationRouter: Routing room change notification (room: \(roomId))")
+        ChatRepository.shared.handleRoomChange(userInfo, queryNotification: queryNotification, roomId: roomId)
     }
 }

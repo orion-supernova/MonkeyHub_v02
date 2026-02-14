@@ -436,30 +436,147 @@ class CloudKitManager: ObservableObject {
 
     func joinRoom(_ room: ChatRoom) async throws {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-        var updatedRoom = room
-        if !updatedRoom.participants.contains(userId) {
-            updatedRoom.participants.append(userId)
+
+        // Get user name for system message
+        let userName: String
+        if let user = try? await fetchCurrentUser() {
+            userName = user.name
+        } else {
+            userName = "Someone"
         }
-        
-        let record = updatedRoom.toRecord()
-        _ = try await database.modifyRecords(saving: [record], deleting: [])
-            .saveResults.first?.1.get()
-        
+
+        // IMPORTANT: Fetch the existing record from CloudKit first (required for proper update)
+        // Creating a new CKRecord with the same ID doesn't properly update - it may overwrite or fail
+        let recordID = CKRecord.ID(recordName: room.id)
+        let record = try await database.record(for: recordID)
+
+        // Update participants on the fetched record
+        var participants = record[ChatRoom.participantsKey] as? [String] ?? []
+        if !participants.contains(userId) {
+            participants.append(userId)
+            record[ChatRoom.participantsKey] = participants
+
+            // Save the updated record
+            _ = try await database.modifyRecords(saving: [record], deleting: [])
+                .saveResults.first?.1.get()
+
+            // Send system message about joining (so other users see the update)
+            let systemMessage = ChatMessage(
+                senderId: ChatMessage.systemSenderId,
+                senderName: ChatMessage.systemSenderName,
+                content: "\(userName) joined the room",
+                type: .system,
+                roomId: room.id
+            )
+            try? await sendMessage(systemMessage)
+
+            Logger.info("✅ User \(userId) joined room \(room.name)", category: .cloudKit)
+        }
+
         // Subscribe to notifications (idempotent - managed by subscription manager)
         await NotificationSubscriptionManager.shared.subscribeToRoom(room.id)
     }
 
     func leaveRoom(_ room: ChatRoom) async throws {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-        var updatedRoom = room
-        updatedRoom.participants.removeAll { $0 == userId }
-        
-        let record = updatedRoom.toRecord()
+
+        // Get user name for system message before leaving
+        let userName: String
+        if let user = try? await fetchCurrentUser() {
+            userName = user.name
+        } else {
+            userName = "Someone"
+        }
+
+        // IMPORTANT: Fetch the existing record from CloudKit first (required for proper update)
+        let recordID = CKRecord.ID(recordName: room.id)
+        let record = try await database.record(for: recordID)
+
+        // Update participants on the fetched record
+        var participants = record[ChatRoom.participantsKey] as? [String] ?? []
+        participants.removeAll { $0 == userId }
+        record[ChatRoom.participantsKey] = participants
+
+        // Save the updated record
         _ = try await database.modifyRecords(saving: [record], deleting: [])
             .saveResults.first?.1.get()
-        
+
+        // Send system message about leaving (so other users see the update)
+        let systemMessage = ChatMessage(
+            senderId: ChatMessage.systemSenderId,
+            senderName: ChatMessage.systemSenderName,
+            content: "\(userName) left the room",
+            type: .system,
+            roomId: room.id
+        )
+        try? await sendMessage(systemMessage)
+
         // Unsubscribe from notifications (managed by subscription manager)
         await NotificationSubscriptionManager.shared.unsubscribeFromRoom(room.id)
+
+        Logger.info("✅ User \(userId) left room \(room.name)", category: .cloudKit)
+    }
+
+    /// Delete a room and all its messages from CloudKit
+    /// - Parameter room: The room to delete
+    func deleteRoomAndMessages(_ room: ChatRoom) async throws {
+        // Send a "room deleted" system message BEFORE deleting
+        // This notifies other users so they can update their UI
+        let userName: String
+        if let user = try? await fetchCurrentUser() {
+            userName = user.name
+        } else {
+            userName = "Someone"
+        }
+
+        let deletionMessage = ChatMessage(
+            senderId: ChatMessage.systemSenderId,
+            senderName: ChatMessage.systemSenderName,
+            content: "🗑️ \(userName) deleted this room",
+            type: .system,
+            roomId: room.id
+        )
+        try? await sendMessage(deletionMessage)
+
+        // Brief delay to allow notification delivery before deletion
+        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+
+        // First, fetch all messages for this room
+        let messagePredicate = NSPredicate(format: "%K == %@", ChatMessage.roomIdKey, room.id)
+        let messageQuery = CKQuery(recordType: ChatMessage.recordType, predicate: messagePredicate)
+
+        var messageRecordIDs: [CKRecord.ID] = []
+        var cursor: CKQueryOperation.Cursor? = nil
+
+        // Fetch all message record IDs (may require multiple fetches for large rooms)
+        repeat {
+            let (results, newCursor): ([(CKRecord.ID, Result<CKRecord, Error>)], CKQueryOperation.Cursor?)
+            if let existingCursor = cursor {
+                (results, newCursor) = try await database.records(continuingMatchFrom: existingCursor)
+            } else {
+                (results, newCursor) = try await database.records(matching: messageQuery)
+            }
+
+            messageRecordIDs.append(contentsOf: results.map { $0.0 })
+            cursor = newCursor
+        } while cursor != nil
+
+        // Delete messages in batches (CloudKit has a limit of 400 records per operation)
+        let batchSize = 400
+        for batchStart in stride(from: 0, to: messageRecordIDs.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, messageRecordIDs.count)
+            let batch = Array(messageRecordIDs[batchStart..<batchEnd])
+            _ = try await database.modifyRecords(saving: [], deleting: batch)
+        }
+
+        // Now delete the room itself
+        let roomRecordID = CKRecord.ID(recordName: room.id)
+        _ = try await database.modifyRecords(saving: [], deleting: [roomRecordID])
+
+        // Unsubscribe from notifications
+        await NotificationSubscriptionManager.shared.unsubscribeFromRoom(room.id)
+
+        Logger.info("✅ Deleted room '\(room.name)' and \(messageRecordIDs.count) messages", category: .cloudKit)
     }
 
     // MARK: - Message Operations
@@ -616,7 +733,7 @@ class CloudKitManager: ObservableObject {
         notificationInfo.alertLocalizationKey = "%1$@: %2$@"
         notificationInfo.alertLocalizationArgs = [ChatMessage.senderNameKey, ChatMessage.contentKey]
         notificationInfo.soundName = "default"
-        
+
         // Add notification category for Reply action
         notificationInfo.category = "CHAT_MESSAGE"
 
@@ -630,7 +747,7 @@ class CloudKitManager: ObservableObject {
             ChatMessage.roomIdKey,
             ChatMessage.typeKey
         ]
-        
+
         subscription.notificationInfo = notificationInfo
 
         do {
@@ -712,6 +829,113 @@ class CloudKitManager: ObservableObject {
 
     func unsubscribeFromReactions(in roomId: String) async throws {
         try await database.deleteSubscription(withID: "reactions-\(roomId)")
+    }
+
+    /// Subscribe to room changes (updates and deletions) for real-time membership tracking
+    /// This enables instant UI updates when:
+    /// - User is removed from a room
+    /// - Room is deleted
+    /// - Room details change (name, description, privacy)
+    /// - New participants are added
+    /// - Parameter roomId: The room to subscribe to
+    /// - Throws: CloudKitError if subscription fails
+    func subscribeToRoomChanges(for roomId: String) async throws {
+        let predicate = NSPredicate(format: "%K == %@", ChatRoom.idKey, roomId)
+
+        let subscription = CKQuerySubscription(
+            recordType: ChatRoom.recordType,
+            predicate: predicate,
+            subscriptionID: "room-changes-\(roomId)",
+            options: [.firesOnRecordUpdate, .firesOnRecordDeletion]
+        )
+
+        let notificationInfo = CKSubscription.NotificationInfo()
+
+        // Silent notification - we handle UI updates in-app
+        notificationInfo.shouldSendContentAvailable = true
+        notificationInfo.shouldBadge = false
+        notificationInfo.alertBody = ""  // No alert
+
+        // Include room fields in notification payload for efficient processing
+        notificationInfo.desiredKeys = [
+            ChatRoom.idKey,
+            ChatRoom.participantsKey,
+            ChatRoom.nameKey
+        ]
+
+        subscription.notificationInfo = notificationInfo
+
+        do {
+            let savedSubscription = try await database.modifySubscriptions(
+                saving: [subscription], deleting: []
+            ).saveResults.first?.1.get()
+
+            guard savedSubscription != nil else {
+                throw CloudKitError.operationFailed
+            }
+            Logger.info("✅ Successfully subscribed to room changes for \(roomId)", category: .cloudKit)
+        } catch let error as CKError where error.code == .serverRejectedRequest {
+            // Duplicate subscription - treat as success
+            Logger.info("ℹ️ Room change subscription already exists for \(roomId)", category: .cloudKit)
+        } catch {
+            Logger.error("❌ Room change subscription failed for \(roomId): \(error)", category: .cloudKit)
+            throw error
+        }
+    }
+
+    func unsubscribeFromRoomChanges(for roomId: String) async throws {
+        try await database.deleteSubscription(withID: "room-changes-\(roomId)")
+    }
+
+    /// Subscribe to changes in rooms where the current user is a participant
+    /// This enables same-account multi-device sync for room list updates
+    func subscribeToMyRooms() async throws {
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+        guard !userId.isEmpty else {
+            Logger.error("Cannot subscribe to my rooms: no user ID", category: .cloudKit)
+            return
+        }
+
+        // Subscribe to rooms where current user is in participants array
+        let predicate = NSPredicate(format: "%K CONTAINS %@", ChatRoom.participantsKey, userId)
+
+        let subscription = CKQuerySubscription(
+            recordType: ChatRoom.recordType,
+            predicate: predicate,
+            subscriptionID: "my-rooms-\(userId)",
+            options: [.firesOnRecordCreation, .firesOnRecordUpdate, .firesOnRecordDeletion]
+        )
+
+        let notificationInfo = CKSubscription.NotificationInfo()
+        notificationInfo.shouldSendContentAvailable = true
+        notificationInfo.shouldBadge = false
+        notificationInfo.alertBody = ""
+
+        notificationInfo.desiredKeys = [
+            ChatRoom.idKey,
+            ChatRoom.nameKey,
+            ChatRoom.participantsKey
+        ]
+
+        subscription.notificationInfo = notificationInfo
+
+        do {
+            let savedSubscription = try await database.save(subscription)
+            guard savedSubscription != nil else {
+                throw CloudKitError.operationFailed
+            }
+            Logger.info("✅ Subscribed to my rooms changes", category: .cloudKit)
+        } catch let error as CKError where error.code == .serverRejectedRequest {
+            Logger.info("ℹ️ My rooms subscription already exists", category: .cloudKit)
+        } catch {
+            Logger.error("❌ My rooms subscription failed: \(error)", category: .cloudKit)
+            throw error
+        }
+    }
+
+    func unsubscribeFromMyRooms() async throws {
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+        try await database.deleteSubscription(withID: "my-rooms-\(userId)")
     }
 
     func deleteChatMessage(_ messageId: String) async throws {

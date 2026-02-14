@@ -139,7 +139,7 @@ class ChatRoomViewModel: ObservableObject {
 
     func sendMessage(_ text: String) async {
         onSendMessage()
-        
+
         let message = ChatMessage(
             senderId: userId,
             senderName: userName,

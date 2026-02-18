@@ -112,10 +112,22 @@ struct GlassTextField: View {
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
                 .focused($isTextFieldFocused)
+                .submitLabel(.send)
+                .onSubmit { onSend() }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .modifier(LiquidGlassModifier(cornerRadius: 22))
-                .onChange(of: text) { oldValue, newValue in onTextChanged(newValue) }
+                .onChange(of: text) { oldValue, newValue in
+                    // If the user hits Return, send the message and strip the newline
+                    if newValue.contains("\n") {
+                        let trimmed = newValue.replacingOccurrences(of: "\n", with: "")
+                        text = trimmed
+                        onTextChanged(trimmed)
+                        onSend()
+                    } else {
+                        onTextChanged(newValue)
+                    }
+                }
 #endif
         }
     }
@@ -251,3 +263,4 @@ class CenteredTextView: NSTextView {
     }
 }
 #endif
+

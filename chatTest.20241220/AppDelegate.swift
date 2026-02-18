@@ -215,8 +215,7 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
         
         // Clear unread count
         Task { @MainActor in
-            ChatRepository.shared.unreadCounts[roomId] = 0
-            BadgeManager.shared.updateBadge(count: ChatRepository.shared.unreadCounts.values.reduce(0, +))
+            ChatRepository.shared.markRoomAsRead(roomId: roomId)
         }
     }
 

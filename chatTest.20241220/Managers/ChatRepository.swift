@@ -28,12 +28,33 @@ class ChatRepository: ObservableObject {
     private init() {
         rooms = persistence.loadRooms()
         unreadCounts = persistence.loadUnreadCounts()
+        
+        // Ensure unread counts only exist for rooms we actually have
+        reconcileUnreadCounts()
+        
         // Initialize badge on start
         updateGlobalBadge()
     }
 
+    /// Ensures unreadCounts dictionary only contains entries for rooms currently in the 'rooms' list.
+    /// This prevents "ghost" badge counts from deleted or left rooms.
+    private func reconcileUnreadCounts() {
+        let validRoomIds = Set(rooms.map { $0.id })
+        let staleRoomIds = unreadCounts.keys.filter { !validRoomIds.contains($0) }
+        
+        if !staleRoomIds.isEmpty {
+            print("🧹 ChatRepository: Removing \(staleRoomIds.count) stale unread count entries")
+            for roomId in staleRoomIds {
+                unreadCounts.removeValue(forKey: roomId)
+            }
+        }
+    }
+
     private func updateGlobalBadge() {
-        let total = unreadCounts.values.reduce(0, +)
+        // Sum only for rooms that are in our local list
+        let validRoomIds = Set(rooms.map { $0.id })
+        let total = unreadCounts.filter { validRoomIds.contains($0.key) }.values.reduce(0, +)
+        
         BadgeManager.shared.updateBadge(count: total)
         
         // Persist
@@ -99,6 +120,11 @@ class ChatRepository: ObservableObject {
         do {
             let fetchedRooms = try await cloudKit.fetchChatRooms()
             self.rooms = fetchedRooms
+            
+            // Reconcile unread counts with the updated room list
+            reconcileUnreadCounts()
+            updateGlobalBadge()
+            
             Task {
                 await persistence.saveRooms(fetchedRooms)
             }
@@ -134,12 +160,16 @@ class ChatRepository: ObservableObject {
         print("✅ ChatRepository: Optimistically removed room \(roomId)")
     }
 
+    func markRoomAsRead(roomId: String) {
+        unreadCounts[roomId] = 0
+        updateGlobalBadge()
+    }
+    
     func setActiveRoom(_ roomId: String?) {
         self.activeRoomId = roomId
         if let roomId = roomId {
             // Clear unread count
-            unreadCounts[roomId] = 0
-            updateGlobalBadge()
+            markRoomAsRead(roomId: roomId)
             // Load cached messages immediately
             let cachedMessages = persistence.loadMessages(for: roomId)
             self.activeRoomMessages = cachedMessages
@@ -489,6 +519,9 @@ class ChatRepository: ObservableObject {
         await MainActor.run {
             withAnimation {
                 rooms.removeAll { $0.id == roomId }
+                // Clean up unread count for the deleted room
+                unreadCounts.removeValue(forKey: roomId)
+                updateGlobalBadge()
             }
 
             // Always post notification - ContentView, ChatRoomView, and RoomInfoView all listen
@@ -594,6 +627,9 @@ class ChatRepository: ObservableObject {
         // Remove from local rooms list
         withAnimation {
             rooms.removeAll { $0.id == roomId }
+            // Clean up unread count for the deleted room
+            unreadCounts.removeValue(forKey: roomId)
+            updateGlobalBadge()
         }
 
         // Persist
@@ -634,6 +670,9 @@ class ChatRepository: ObservableObject {
                     await MainActor.run {
                         withAnimation {
                             rooms.removeAll { $0.id == roomId }
+                            // Clean up unread count when user is removed
+                            unreadCounts.removeValue(forKey: roomId)
+                            updateGlobalBadge()
                         }
                     }
 

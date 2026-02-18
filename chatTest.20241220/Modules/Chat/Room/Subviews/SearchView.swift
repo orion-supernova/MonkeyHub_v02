@@ -51,10 +51,17 @@ struct SearchView: View {
                         dismiss()
                     }
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                    #if os(macOS)
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    #endif
                 }
                 #endif
             }
         }
+        #if os(macOS)
+        .frame(minWidth: 600, idealWidth: 700, minHeight: 500, idealHeight: 600)
+        #endif
     }
 
     private var headerContent: some View {
@@ -91,6 +98,11 @@ struct SearchView: View {
                                 .foregroundStyle(
                                     selectedTheme.colors(for: colorScheme).text.opacity(0.6))
                         }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        #endif
+                        .contentShape(Circle())
                     }
 
                     if viewModel.isSearching {
@@ -187,6 +199,11 @@ struct SearchView: View {
                     )
                     .clipShape(Capsule())
                 }
+                #if os(macOS)
+                .buttonStyle(.plain)
+                .focusable(false)
+                #endif
+                .contentShape(Capsule())
             }
         }
         .padding(4)

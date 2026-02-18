@@ -30,7 +30,7 @@ struct RoomInfoView: View {
     }
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
                     avatarSection
@@ -64,6 +64,10 @@ struct RoomInfoView: View {
                         dismiss()
                     }
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                    #if os(macOS)
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    #endif
                 }
             }
             .onAppear {
@@ -120,6 +124,10 @@ struct RoomInfoView: View {
                 }
             }
         }
+        #if os(macOS)
+        .frame(minWidth: 820, minHeight: 680)
+        .frame(idealWidth: 900, idealHeight: 740)
+        #endif
         .overlay {
             if showFullscreenAvatar, let avatarImage = roomAvatarImage {
                 ZoomableAvatarOverlay(
@@ -236,6 +244,11 @@ struct RoomInfoView: View {
                                             .frame(width: 32, height: 32)
                                     )
                             }
+                            #if os(macOS)
+                            .buttonStyle(.plain)
+                            .focusable(false)
+                            #endif
+                            .contentShape(Circle())
                             .offset(x: -8, y: -8)
                         }
                     }
@@ -276,6 +289,11 @@ struct RoomInfoView: View {
                                         .fill(selectedTheme.colors(for: colorScheme).cardBackground)
                                 )
                         }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        #endif
+                        .contentShape(RoundedRectangle(cornerRadius: 12))
 
                         Button {
                             Task {
@@ -293,6 +311,11 @@ struct RoomInfoView: View {
                                         .fill(selectedTheme.colors(for: colorScheme).accent)
                                 )
                         }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        #endif
+                        .contentShape(RoundedRectangle(cornerRadius: 12))
                     }
                 }
                 .padding(.horizontal)
@@ -310,6 +333,11 @@ struct RoomInfoView: View {
                         Image(systemName: "pencil.circle.fill")
                             .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
                     }
+                    #if os(macOS)
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    #endif
+                    .contentShape(Circle())
                 }
             }
             
@@ -341,6 +369,11 @@ struct RoomInfoView: View {
                             Image(systemName: "pencil.circle.fill")
                                 .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
                         }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        #endif
+                        .contentShape(Circle())
                     }
                 }
                 
@@ -435,6 +468,11 @@ struct RoomInfoView: View {
                             .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
                             .cornerRadius(8)
                     }
+                    #if os(macOS)
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    #endif
+                    .contentShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
             .padding()
@@ -517,6 +555,11 @@ struct RoomInfoView: View {
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
                 .cornerRadius(12)
             }
+            #if os(macOS)
+            .buttonStyle(.plain)
+            .focusable(false)
+            #endif
+            .contentShape(RoundedRectangle(cornerRadius: 12))
             .disabled(isDeleting)
         }
         .alert("Delete Room", isPresented: $showDeleteRoomAlert) {
@@ -634,6 +677,11 @@ struct MemberRowView: View {
                         .font(.title3)
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
                 }
+                #if os(macOS)
+                .buttonStyle(.plain)
+                .focusable(false)
+                #endif
+                .contentShape(Circle())
             }
         }
         .padding()

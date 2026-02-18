@@ -128,6 +128,11 @@ struct FloatingMenu: View {
                         .rotationEffect(.degrees(rotation))
                 }
             }
+            #if os(macOS)
+            .buttonStyle(.plain)
+            .focusable(false)
+            #endif
+            .contentShape(Circle())
         }
     }
 }
@@ -169,6 +174,11 @@ struct MenuButton: View {
                         )
                 }
         }
+        #if os(macOS)
+        .buttonStyle(.plain)
+        .focusable(false)
+        #endif
+        .contentShape(Circle())
         .offset(
             x: cos(angle) * distance,
             y: sin(angle) * distance

@@ -25,6 +25,10 @@ struct ContentView: View {
     @StateObject private var navigationState = NavigationStateManager.shared
     @Namespace private var animationNamespace
 
+    // MARK: - Keyboard Navigation (macOS)
+    @State private var selectedRoomIndex: Int? = nil
+    @FocusState private var isContentFocused: Bool
+
     // MARK: - Leave Room State
     @State private var showingLeaveRoomAlert = false
     @State private var showingDeleteRoomAlert = false
@@ -119,6 +123,37 @@ struct ContentView: View {
         }
     }
 
+    #if os(macOS)
+    private var columnCount: Int { gridColumns.count }
+
+    private func handleMoveCommand(_ direction: MoveCommandDirection) {
+        let roomCount = viewModel.myRooms.count
+        guard roomCount > 0 else { return }
+
+        guard let current = selectedRoomIndex else {
+            selectedRoomIndex = 0
+            return
+        }
+
+        var newIndex = current
+        switch direction {
+        case .left:
+            newIndex = max(current - 1, 0)
+        case .right:
+            newIndex = min(current + 1, roomCount - 1)
+        case .up:
+            let candidate = current - columnCount
+            if candidate >= 0 { newIndex = candidate }
+        case .down:
+            let candidate = current + columnCount
+            if candidate < roomCount { newIndex = candidate }
+        @unknown default:
+            break
+        }
+        selectedRoomIndex = newIndex
+    }
+    #endif
+
     private var headerHeight: CGFloat {
         switch verticalSizeClass {
         case .compact:
@@ -212,6 +247,10 @@ struct ContentView: View {
                                                     lineWidth: 1
                                                 )
                                         )
+#if os(macOS)
+                                        .buttonStyle(.plain)
+                                        .contentShape(RoundedRectangle(cornerRadius: 16))
+#endif
                                     }
 
                                     // Search button
@@ -249,9 +288,16 @@ struct ContentView: View {
                                                     lineWidth: 1
                                                 )
                                         )
+#if os(macOS)
+                                        .buttonStyle(.plain)
+                                        .contentShape(RoundedRectangle(cornerRadius: 16))
+#endif
                                     }
                                 }
                                 .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
+#if os(macOS)
+                                .buttonStyle(.plain)
+#endif
                             }
                             .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
                             .padding(.bottom, verticalSizeClass == .compact ? 16 : 24)
@@ -322,9 +368,9 @@ struct ContentView: View {
 
                                         // Rooms grid
                                         LazyVGrid(columns: gridColumns, spacing: 16) {
-                                            ForEach(viewModel.myRooms) { room in
+                                            ForEach(Array(viewModel.myRooms.enumerated()), id: \.element.id) { index, room in
                                                 NavigationLink(value: room) {
-                                                    EnhancedRoomCard(room: room, unreadCount: viewModel.unreadCounts[room.id] ?? 0) {
+                                                    EnhancedRoomCard(room: room, unreadCount: viewModel.unreadCounts[room.id] ?? 0, isSelected: selectedRoomIndex == index) {
                                                         initiateLeaveRoom(room)
                                                     }
                                                     .matchedTransitionSource(id: room.id, in: animationNamespace)
@@ -389,6 +435,30 @@ struct ContentView: View {
                 }
             }
             .background(selectedTheme.colors(for: colorScheme).background)
+            #if os(macOS)
+            .focused($isContentFocused)
+            .focusEffectDisabled()
+            .onAppear { isContentFocused = true }
+            .onMoveCommand { direction in
+                handleMoveCommand(direction)
+            }
+            .onExitCommand {
+                selectedRoomIndex = nil
+            }
+            .onKeyPress(.return) {
+                if let index = selectedRoomIndex, index < viewModel.myRooms.count {
+                    navigationState.path.append(viewModel.myRooms[index])
+                    selectedRoomIndex = nil
+                    return .handled
+                }
+                return .ignored
+            }
+            .onChange(of: viewModel.myRooms.count) { _, newCount in
+                if let index = selectedRoomIndex, index >= newCount {
+                    selectedRoomIndex = newCount > 0 ? newCount - 1 : nil
+                }
+            }
+            #endif
             .sheet(isPresented: $isShowingNewRoomSheet) {
                 EnhancedNewRoomSheet(
                     isShowingSheet: $isShowingNewRoomSheet,
@@ -602,6 +672,7 @@ struct ContentView: View {
 struct EnhancedRoomCard: View {
     let room: ChatRoom
     let unreadCount: Int
+    var isSelected: Bool = false
     let action: () -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
@@ -667,6 +738,10 @@ struct EnhancedRoomCard: View {
                             .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))
                             .clipShape(Circle())
                     }
+                    .contentShape(Circle())
+#if os(macOS)
+                    .buttonStyle(.borderless)
+#endif
                 }
             }
 
@@ -718,8 +793,13 @@ struct EnhancedRoomCard: View {
         .overlay(
             RoundedRectangle(cornerRadius: 20)
                 .strokeBorder(
-                    selectedTheme.colors(for: colorScheme).accent.opacity(0.1), lineWidth: 1)
+                    isSelected
+                        ? selectedTheme.colors(for: colorScheme).accent
+                        : selectedTheme.colors(for: colorScheme).accent.opacity(0.1),
+                    lineWidth: isSelected ? 2.5 : 1)
         )
+        .scaleEffect(isSelected ? 1.03 : 1.0)
+        .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
     
     private func loadRoomAvatar() {
@@ -993,6 +1073,11 @@ struct EnhancedNewRoomSheet: View {
                         .disabled(roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedType == .secret)
                         .opacity(animateContent ? 1 : 0)
                         .offset(y: animateContent ? 0 : 20)
+#if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+#endif
+                        .contentShape(RoundedRectangle(cornerRadius: 16))
                     }
                     .padding(20)
                     .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 20 : 16)
@@ -1040,6 +1125,11 @@ struct EnhancedNewRoomSheet: View {
                                 .foregroundStyle(
                                     selectedTheme.colors(for: colorScheme).textSecondary)
                         }
+#if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+#endif
+                        .contentShape(Circle())
                     }
                 }
             }
@@ -1055,6 +1145,9 @@ struct EnhancedNewRoomSheet: View {
                 #endif
             }
         }
+        #if os(macOS)
+        .frame(minWidth: 500, idealWidth: 560, minHeight: 500, idealHeight: 620)
+        #else
         .presentationDetents([
             .height(selectedType == .secret ? 760 : 620),
             .large,
@@ -1062,6 +1155,7 @@ struct EnhancedNewRoomSheet: View {
         .presentationDragIndicator(.visible)
         .presentationBackground(selectedTheme.colors(for: colorScheme).background)
         .interactiveDismissDisabled()
+        #endif
     }
 }
 
@@ -1288,3 +1382,4 @@ struct RoomTypeButton: View {
         .offset(y: animateContent ? 0 : 20)
     }
 }
+

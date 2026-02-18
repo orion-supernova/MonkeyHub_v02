@@ -24,6 +24,10 @@ struct ChatRoomView: View {
     @State private var showRoomDeletedAlert = false
     @State private var showRemovedFromRoomAlert = false
 
+    // Keyboard navigation (macOS) — nil means text field cursor mode
+    @State private var navIndex: Int? = nil
+    @FocusState private var isNavActive: Bool
+
     init(room: ChatRoom) {
         self.room = room
         self._viewModel = StateObject(wrappedValue: ChatRoomViewModel(roomId: room.id))
@@ -75,17 +79,17 @@ struct ChatRoomView: View {
             // --- TOP FLOATING PEBBLES ---
             .safeAreaInset(edge: .top) {
                 HStack {
-                    LiquidButton(icon: "chevron.left") {
+                    LiquidButton(icon: "chevron.left", showFocusRing: navIndex == 0) {
                         dismiss()
                     }
 
                     Spacer()
 
-                    RoomTitleView(title: room.name, avatarImage: roomAvatarImage)
+                    RoomTitleView(title: room.name, avatarImage: roomAvatarImage, showFocusRing: navIndex == 1)
 
                     Spacer()
 
-                    LiquidButton(icon: "info.circle") {
+                    LiquidButton(icon: "info.circle", showFocusRing: navIndex == 2) {
                         showRoomInfo = true
                     }
                 }
@@ -108,6 +112,7 @@ struct ChatRoomView: View {
                             messageText: $messageText,
                             showImagePicker: $showImagePicker,
                             isShowingAttachmentMenu: $isShowingAttachmentMenu,
+                            navHighlight: navIndex,
                             onSendMessage: { text in
                                 Task {
                                     await viewModel.sendMessage(text)
@@ -148,6 +153,40 @@ struct ChatRoomView: View {
         #else
         .navigationTitle("")
         .navigationBarBackButtonHidden()
+        .focusable()
+        .focused($isNavActive)
+        .focusEffectDisabled()
+        .onMoveCommand { direction in
+            guard navIndex != nil else { return }
+            let row = navIndex! / 3
+            let col = navIndex! % 3
+            switch direction {
+            case .left:
+                if col > 0 { navIndex = row * 3 + (col - 1) }
+            case .right:
+                if col < 2 { navIndex = row * 3 + (col + 1) }
+            case .up:
+                if row > 0 { navIndex = (row - 1) * 3 + col }
+            case .down:
+                if row < 1 { navIndex = (row + 1) * 3 + col }
+            @unknown default:
+                break
+            }
+        }
+        .onKeyPress(.return) {
+            guard let idx = navIndex else { return .ignored }
+            activateNavElement(idx)
+            return .handled
+        }
+        .onExitCommand {
+            if navIndex != nil {
+                dismiss()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ChatRoomEnterNavMode"))) { _ in
+            navIndex = 4
+            isNavActive = true
+        }
         #endif
         .task {
             // Check if user is still a member of this room
@@ -288,6 +327,34 @@ struct ChatRoomView: View {
         }
     }
 
+    #if os(macOS)
+    private func activateNavElement(_ index: Int) {
+        switch index {
+        case 0: dismiss()
+        case 1: break // room title
+        case 2: showRoomInfo = true
+        case 3: isShowingAttachmentMenu.toggle()
+        case 4:
+            // Re-enter text field cursor mode
+            navIndex = nil
+            isNavActive = false
+            // Delay to let focus change complete before refocusing text field
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                NotificationCenter.default.post(name: NSNotification.Name("ChatRoomFocusTextField"), object: nil)
+            }
+        case 5:
+            // Send message
+            let trimmed = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                let textToSend = messageText
+                messageText = ""
+                Task { await viewModel.sendMessage(textToSend) }
+            }
+        default: break
+        }
+    }
+    #endif
+
     private func loadRoomAvatar() {
         // Try persisted avatarURL first (resolving filename to current session's path)
         if let avatarURL = room.avatarURL {
@@ -305,13 +372,17 @@ struct RoomTitleView: View {
     let title: String
     let avatarImage: PlatformImage?
 
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
+    var showFocusRing: Bool = false
     @State private var isExpanded = false
     @State private var textLayoutWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
 
-    init(title: String, avatarImage: PlatformImage? = nil) {
+    init(title: String, avatarImage: PlatformImage? = nil, showFocusRing: Bool = false) {
         self.title = title
         self.avatarImage = avatarImage
+        self.showFocusRing = showFocusRing
     }
 
     var body: some View {
@@ -361,6 +432,19 @@ struct RoomTitleView: View {
                 )
         )
         .modifier(LiquidGlassModifier(cornerRadius: 22))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: selectedTheme.colors(for: colorScheme).primary,
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 2.5
+                )
+                .opacity(showFocusRing ? 1 : 0)
+                .animation(.easeInOut(duration: 0.15), value: showFocusRing)
+        )
         .onTapGesture {
             // Heuristic: If text is wider than container, it's truncated
             if textLayoutWidth > containerWidth {

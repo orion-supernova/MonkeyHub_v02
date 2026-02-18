@@ -9,6 +9,8 @@ struct MessageInputView: View {
     @Binding var showImagePicker: Bool
     @Binding var isShowingAttachmentMenu: Bool
     
+    var navHighlight: Int? = nil
+
     let onSendMessage: (String) async -> Void
     let onTextChanged: (String) -> Void
     let onTakePhoto: () -> Void
@@ -18,7 +20,7 @@ struct MessageInputView: View {
     var body: some View {
         // This HStack is the ONLY container. No .background means it's invisible except for the glass components.
         HStack(spacing: 12) {
-            LiquidButton(icon: "plus") {
+            LiquidButton(icon: "plus", showFocusRing: navHighlight == 3) {
                 // Let the system handle keyboard dismiss with animation
                 #if canImport(UIKit)
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -29,13 +31,15 @@ struct MessageInputView: View {
             GlassTextField(
                 text: $messageText,
                 isTextFieldFocused: $isTextFieldFocused,
+                showFocusRing: navHighlight == 4,
                 onTextChanged: onTextChanged,
                 onSend: { Task { await sendIfNotEmpty() } }
             )
             
             LiquidButton(
                 icon: "arrow.up",
-                isDisabled: messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                isDisabled: messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                showFocusRing: navHighlight == 5
             ) {
                 Task { await sendIfNotEmpty() }
             }
@@ -62,6 +66,7 @@ struct LiquidButton: View {
     @Environment(\.colorScheme) private var colorScheme
     let icon: String
     var isDisabled: Bool = false
+    var showFocusRing: Bool = false
     let action: () -> Void
     
     var body: some View {
@@ -78,17 +83,55 @@ struct LiquidButton: View {
                       ))
                 )
                 .frame(width: 44, height: 44)
+#if os(macOS)
+                .background(
+                    Circle().fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    Circle().stroke(LinearGradient(
+                        colors: [
+                            .white.opacity(colorScheme == .dark ? 0.5 : 0.8),
+                            .white.opacity(0.2),
+                            .black.opacity(colorScheme == .dark ? 0 : 0.05)
+                        ],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ), lineWidth: 1.5)
+                )
+#else
                 .modifier(LiquidGlassModifier(cornerRadius: 22))
+#endif
+                .contentShape(Circle())
         }
+#if os(macOS)
+        .buttonStyle(.plain)
+        .focusable(false)
+        .overlay(
+            Circle()
+                .strokeBorder(
+                    LinearGradient(
+                        colors: selectedTheme.colors(for: colorScheme).primary,
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 2.5
+                )
+                .frame(width: 48, height: 48)
+                .opacity(showFocusRing ? 1 : 0)
+                .animation(.easeInOut(duration: 0.15), value: showFocusRing)
+        )
+#else
         .buttonStyle(LiquidButtonStyle())
+#endif
         .disabled(isDisabled)
     }
 }
 
 struct GlassTextField: View {
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
     @Binding var text: String
     @FocusState.Binding var isTextFieldFocused: Bool
+    var showFocusRing: Bool = false
     let onTextChanged: (String) -> Void
     let onSend: () -> Void
     
@@ -107,6 +150,19 @@ struct GlassTextField: View {
                 .padding(.vertical, 8)
             }
             .modifier(LiquidGlassModifier(cornerRadius: 18))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: selectedTheme.colors(for: colorScheme).primary,
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 2.5
+                    )
+                    .opacity(showFocusRing ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.15), value: showFocusRing)
+            )
 #else
             TextField("Message", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -208,6 +264,13 @@ struct EnterToSendTextView: NSViewRepresentable {
         }
 
         scrollView.documentView = textView
+        context.coordinator.textView = textView
+
+        // Auto-focus the text view when entering the room
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            textView.window?.makeFirstResponder(textView)
+        }
+
         return scrollView
     }
 
@@ -222,7 +285,26 @@ struct EnterToSendTextView: NSViewRepresentable {
 
     class Coordinator: NSObject, NSTextViewDelegate {
         var parent: EnterToSendTextView
-        init(_ parent: EnterToSendTextView) { self.parent = parent }
+        weak var textView: NSTextView?
+
+        init(_ parent: EnterToSendTextView) {
+            self.parent = parent
+            super.init()
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(refocusTextField),
+                name: NSNotification.Name("ChatRoomFocusTextField"),
+                object: nil
+            )
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        @objc func refocusTextField() {
+            textView?.window?.makeFirstResponder(textView)
+        }
 
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
@@ -233,6 +315,12 @@ struct EnterToSendTextView: NSViewRepresentable {
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 parent.onSend(textView.string)
+                return true
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                // Escape: blur text field and enter keyboard navigation mode
+                textView.window?.makeFirstResponder(nil)
+                NotificationCenter.default.post(name: NSNotification.Name("ChatRoomEnterNavMode"), object: nil)
                 return true
             }
             return false

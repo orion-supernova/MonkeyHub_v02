@@ -136,6 +136,39 @@ class ChatRepository: ObservableObject {
         }
     }
 
+    /// Refresh reactions for a slice of messages without requiring new message records.
+    /// This keeps reaction state in sync across devices even when only reactions changed.
+    private func refreshReactionsForCachedMessages(in roomId: String) async {
+        guard roomId == activeRoomId, !activeRoomMessages.isEmpty else { return }
+
+        let messageIdsToRefresh = Array(activeRoomMessages.suffix(120).map { $0.id })
+        let messageIdSet = Set(messageIdsToRefresh)
+        guard !messageIdSet.isEmpty else { return }
+
+        do {
+            let reactionsMap = try await ReactionService.shared.fetchReactions(for: messageIdsToRefresh)
+            var didChange = false
+
+            for index in activeRoomMessages.indices {
+                let messageId = activeRoomMessages[index].id
+                guard messageIdSet.contains(messageId) else { continue }
+
+                let refreshed = (reactionsMap[messageId] ?? []).sorted { $0.timestamp < $1.timestamp }
+                if activeRoomMessages[index].reactions != refreshed {
+                    activeRoomMessages[index].reactions = refreshed
+                    didChange = true
+                }
+            }
+
+            if didChange {
+                await persistence.saveMessages(activeRoomMessages, for: roomId)
+                print("🔄 ChatRepository: Refreshed cached reactions for room \(roomId)")
+            }
+        } catch {
+            print("⚠️ ChatRepository: Could not refresh cached reactions: \(error)")
+        }
+    }
+
 
     // MARK: - Room Management
     func fetchRooms() async {
@@ -249,9 +282,10 @@ class ChatRepository: ObservableObject {
             // Update fetch count
             incrementalFetchCount[roomId] = fetchCount + 1
 
-            // Skip if no new messages to process
-            guard !newMessages.isEmpty || cachedMessages.isEmpty else {
-                print("✅ ChatRepository: Messages up to date, no new messages from server")
+            // If there are no new messages, still refresh reactions for cached messages.
+            if newMessages.isEmpty && !cachedMessages.isEmpty {
+                await refreshReactionsForCachedMessages(in: roomId)
+                print("✅ ChatRepository: Messages up to date, refreshed reactions only")
                 return
             }
 

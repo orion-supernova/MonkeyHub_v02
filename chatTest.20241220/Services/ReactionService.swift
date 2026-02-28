@@ -112,19 +112,21 @@ class ReactionService {
             print("❌ ReactionService: User not logged in")
             throw ReactionError.userNotFound
         }
+
+        let normalizedEmoji = MessageReaction.normalizeEmoji(emoji)
         
-        print("➕ ReactionService: Adding reaction \(emoji) to message \(messageId)")
+        print("➕ ReactionService: Adding reaction \(normalizedEmoji) to message \(messageId)")
         
         // Check if user already reacted with this emoji
         let existingReactions = try await fetchReactions(for: messageId)
-        if existingReactions.contains(where: { $0.userId == userId && $0.emoji == emoji }) {
-            print("⚠️ ReactionService: User already reacted with \(emoji)")
+        if existingReactions.contains(where: { $0.userId == userId && MessageReaction.normalizeEmoji($0.emoji) == normalizedEmoji }) {
+            print("⚠️ ReactionService: User already reacted with \(normalizedEmoji)")
             return
         }
         
         // Create new reaction
         let reaction = MessageReaction(
-            emoji: emoji,
+            emoji: normalizedEmoji,
             userId: userId,
             messageId: messageId
         )
@@ -220,20 +222,22 @@ class ReactionService {
             print("❌ ReactionService: User not logged in")
             throw ReactionError.userNotFound
         }
+
+        let normalizedEmoji = MessageReaction.normalizeEmoji(emoji)
         
-        print("🔄 ReactionService: Toggling reaction \(emoji) on message \(messageId)")
+        print("🔄 ReactionService: Toggling reaction \(normalizedEmoji) on message \(messageId)")
         
         // Find existing reaction
         let existingReactions = try await fetchReactions(for: messageId)
         
-        if let existingReaction = existingReactions.first(where: { $0.userId == userId && $0.emoji == emoji }) {
+        if let existingReaction = existingReactions.first(where: { $0.userId == userId && MessageReaction.normalizeEmoji($0.emoji) == normalizedEmoji }) {
             // Remove reaction
             print("🔄 ReactionService: Found existing reaction, removing it")
             try await removeReaction(reactionId: existingReaction.id, from: messageId, in: roomId)
         } else {
             // Add reaction
             print("🔄 ReactionService: No existing reaction found, adding new one")
-            try await addReaction(emoji: emoji, to: messageId, in: roomId)
+            try await addReaction(emoji: normalizedEmoji, to: messageId, in: roomId)
         }
     }
 }

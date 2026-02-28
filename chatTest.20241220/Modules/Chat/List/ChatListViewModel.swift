@@ -41,22 +41,12 @@ class ChatListViewModel: ObservableObject {
     }
 
     func addRoomOptimistically(_ room: ChatRoom) {
-        // Update local list immediately for instant UI feedback
-        if !myRooms.contains(where: { $0.id == room.id }) {
-            withAnimation {
-                myRooms.insert(room, at: 0)
-            }
-        }
-        // Also update repository for persistence
+        // Single source of truth: repository publishes room changes back to this ViewModel.
         repository.addRoomOptimistically(room)
     }
 
     func removeRoomOptimistically(_ roomId: String) {
-        // Update local list immediately for instant UI feedback
-        withAnimation {
-            myRooms.removeAll { $0.id == roomId }
-        }
-        // Also update repository for persistence
+        // Single source of truth: repository publishes room changes back to this ViewModel.
         repository.removeRoomOptimistically(roomId)
     }
 

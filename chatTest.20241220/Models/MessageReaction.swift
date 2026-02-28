@@ -26,7 +26,7 @@ struct MessageReaction: Identifiable, Codable, Equatable {
     ) {
         self.id = id
         self.userId = userId
-        self.emoji = emoji
+        self.emoji = MessageReaction.normalizeEmoji(emoji)
         self.messageId = messageId
         self.timestamp = timestamp
     }
@@ -41,7 +41,7 @@ struct MessageReaction: Identifiable, Codable, Equatable {
         }
         
         self.id = id
-        self.emoji = emoji
+        self.emoji = MessageReaction.normalizeEmoji(emoji)
         self.userId = userId
         self.timestamp = timestamp
         
@@ -77,6 +77,18 @@ struct MessageReaction: Identifiable, Codable, Equatable {
     
     static func == (lhs: MessageReaction, rhs: MessageReaction) -> Bool {
         lhs.id == rhs.id
+    }
+
+    static func normalizeEmoji(_ value: String) -> String {
+        let strippedTextPresentation = value.replacingOccurrences(of: "\u{FE0E}", with: "")
+
+        // Unify common variants to emoji presentation for stable cross-device equality/display.
+        switch strippedTextPresentation {
+        case "❤":
+            return "❤️"
+        default:
+            return strippedTextPresentation
+        }
     }
 }
 

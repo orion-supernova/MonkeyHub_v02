@@ -134,6 +134,7 @@ struct MessageView: View {
                 .overlay(alignment: isCurrentUser ? .topTrailing : .topLeading) {
                     if isReactionPickerActive {
                         CompactReactionPicker(
+                            selectedEmojis: Set(message.reactions.filter { $0.userId == currentUserId }.map { $0.emoji }),
                             onEmojiSelected: { emoji in
                                 toggleReaction(emoji)
                                 onRequestReactionPicker()
@@ -206,6 +207,7 @@ struct MessageView: View {
 
 // MARK: - FIXED Compact Reaction Picker
 struct CompactReactionPicker: View {
+    var selectedEmojis: Set<String> = []
     let onEmojiSelected: (String) -> Void
     @State private var appeared = false
     @Environment(\.colorScheme) var colorScheme
@@ -214,25 +216,28 @@ struct CompactReactionPicker: View {
     var body: some View {
         HStack(spacing: 14) {
             ForEach(Array(Self.emojis.enumerated()), id: \.element) { index, emoji in
+                let isSelected = selectedEmojis.contains(emoji)
                 Button {
                     onEmojiSelected(emoji)
                 } label: {
                     Text(emoji)
                         .font(.system(size: 26))
-                        .scaleEffect(appeared ? 1.0 : 0.4)
+                        .scaleEffect(appeared ? (isSelected ? 1.15 : 1.0) : 0.4)
+                        .background(
+                            Circle()
+                                .fill(Color.blue.opacity(isSelected ? 0.25 : 0))
+                                .frame(width: 38, height: 38)
+                        )
                         .animation(.spring(response: 0.3, dampingFraction: 0.6).delay(Double(index) * 0.02), value: appeared)
+                        .animation(.easeInOut(duration: 0.15), value: isSelected)
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 16)
         .frame(height: 52)
-        // ADDED: A solid background behind the material so it doesn't look dark when dimmed
         .background(
-            ZStack {
-//                Capsule().fill(colorScheme == .dark ? Color(white: 0.2) : Color.white)
-                Capsule().fill(.ultraThinMaterial)
-            }
+            Capsule().fill(.ultraThinMaterial)
         )
         .clipShape(Capsule())
         .shadow(color: .black.opacity(0.2), radius: 15, y: 10)

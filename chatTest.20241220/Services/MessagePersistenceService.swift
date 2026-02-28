@@ -8,11 +8,15 @@ final class MessagePersistenceService {
     static let shared = MessagePersistenceService()
 
     private init() {}
+    private let fileManager = FileManager.default
+    private let maxCachedMessagesPerRoom = 120
+    private let maintenanceInterval = 8
+    private var writesSinceMaintenance = 0
 
     // MARK: - File Path Helpers
 
     private func getDocumentsDirectory() -> URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
 
     private func roomsFileURL() -> URL {
@@ -25,6 +29,10 @@ final class MessagePersistenceService {
 
     private func unreadCountsFileURL() -> URL {
         getDocumentsDirectory().appendingPathComponent("unread_counts.json")
+    }
+
+    private func assetsDirectoryURL() -> URL {
+        getDocumentsDirectory().appendingPathComponent("ChatAssets", isDirectory: true)
     }
 
     // MARK: - Room Persistence
@@ -55,9 +63,23 @@ final class MessagePersistenceService {
 
     func saveMessages(_ messages: [ChatMessage], for roomId: String) async {
         do {
-            let data = try JSONEncoder().encode(messages)
+            // Keep only the latest N messages per room to prevent unbounded growth.
+            let trimmedMessages: [ChatMessage]
+            if messages.count > maxCachedMessagesPerRoom {
+                trimmedMessages = Array(messages.suffix(maxCachedMessagesPerRoom))
+            } else {
+                trimmedMessages = messages
+            }
+
+            let data = try JSONEncoder().encode(trimmedMessages)
             try data.write(to: messagesFileURL(for: roomId))
-            print("💾 MessagePersistenceService: Saved \(messages.count) messages for room \(roomId)")
+            print("💾 MessagePersistenceService: Saved \(trimmedMessages.count) messages for room \(roomId)")
+
+            writesSinceMaintenance += 1
+            if writesSinceMaintenance >= maintenanceInterval {
+                writesSinceMaintenance = 0
+                await runStorageMaintenance(validRoomIds: discoverValidRoomIds())
+            }
         } catch {
             print("❌ MessagePersistenceService: Failed to save messages: \(error)")
         }
@@ -96,6 +118,125 @@ final class MessagePersistenceService {
         } catch {
             print("⚠️ MessagePersistenceService: No cached unread counts found")
             return [:]
+        }
+    }
+
+    // MARK: - Cleanup
+
+    func deleteMessageCache(for roomId: String) async {
+        do {
+            try fileManager.removeItem(at: messagesFileURL(for: roomId))
+            print("🧹 MessagePersistenceService: Deleted cached messages for room \(roomId)")
+        } catch {
+            // Ignore if file doesn't exist.
+        }
+    }
+
+    func runStorageMaintenance(validRoomIds: Set<String>) async {
+        removeStaleRoomMessageCaches(validRoomIds: validRoomIds)
+
+        let referencedAssetFileNames = collectReferencedAssetFileNames(validRoomIds: validRoomIds)
+        removeOrphanedAssets(keepingFileNames: referencedAssetFileNames)
+        removeLooseMediaFilesOutsideAssets(keepingFileNames: referencedAssetFileNames)
+    }
+
+    private func discoverValidRoomIds() -> Set<String> {
+        var validRoomIds = Set(loadRooms().map { $0.id })
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: getDocumentsDirectory(),
+            includingPropertiesForKeys: nil
+        ) else { return validRoomIds }
+
+        for file in contents {
+            let name = file.lastPathComponent
+            guard name.hasPrefix("cached_messages_"), name.hasSuffix(".json") else { continue }
+            let roomId = name
+                .replacingOccurrences(of: "cached_messages_", with: "")
+                .replacingOccurrences(of: ".json", with: "")
+            if !roomId.isEmpty {
+                validRoomIds.insert(roomId)
+            }
+        }
+        return validRoomIds
+    }
+
+    private func removeStaleRoomMessageCaches(validRoomIds: Set<String>) {
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: getDocumentsDirectory(),
+            includingPropertiesForKeys: nil
+        ) else { return }
+
+        for file in contents {
+            let name = file.lastPathComponent
+            guard name.hasPrefix("cached_messages_"), name.hasSuffix(".json") else { continue }
+
+            let roomId = name
+                .replacingOccurrences(of: "cached_messages_", with: "")
+                .replacingOccurrences(of: ".json", with: "")
+
+            guard !validRoomIds.contains(roomId) else { continue }
+            try? fileManager.removeItem(at: file)
+        }
+    }
+
+    private func collectReferencedAssetFileNames(validRoomIds: Set<String>) -> Set<String> {
+        var referenced = Set<String>()
+
+        let rooms = loadRooms()
+        for room in rooms where validRoomIds.contains(room.id) {
+            if let fileName = room.avatarURL?.lastPathComponent, !fileName.isEmpty {
+                referenced.insert(fileName)
+            }
+        }
+
+        for roomId in validRoomIds {
+            let messages = loadMessages(for: roomId)
+            for message in messages {
+                if let fileName = message.assetURL?.lastPathComponent, !fileName.isEmpty {
+                    referenced.insert(fileName)
+                }
+            }
+        }
+
+        return referenced
+    }
+
+    private func removeOrphanedAssets(keepingFileNames: Set<String>) {
+        let assetsDirectory = assetsDirectoryURL()
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: assetsDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        for file in files {
+            let fileName = file.lastPathComponent
+            guard !keepingFileNames.contains(fileName) else { continue }
+            try? fileManager.removeItem(at: file)
+        }
+    }
+
+    private func removeLooseMediaFilesOutsideAssets(keepingFileNames: Set<String>) {
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: getDocumentsDirectory(),
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        let mediaExtensions = Set(["m4a", "mp3", "wav", "aac", "mov", "mp4", "jpg", "jpeg", "png"])
+
+        for file in files {
+            let fileName = file.lastPathComponent
+            let fileExtension = file.pathExtension.lowercased()
+
+            guard mediaExtensions.contains(fileExtension) else { continue }
+            guard !keepingFileNames.contains(fileName) else { continue }
+
+            // Limit deletion to temp-style UUID media filenames created by this app.
+            let baseName = file.deletingPathExtension().lastPathComponent
+            guard UUID(uuidString: baseName) != nil else { continue }
+
+            try? fileManager.removeItem(at: file)
         }
     }
 }

@@ -87,7 +87,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         timestamp = try container.decode(Date.self, forKey: .timestamp)
         roomId = try container.decode(String.self, forKey: .roomId)
         status = try container.decode(MessageStatus.self, forKey: .status)
-        reactions = try container.decode([MessageReaction].self, forKey: .reactions)
+        reactions = try container.decodeIfPresent([MessageReaction].self, forKey: .reactions) ?? []
 
         // Re-base the URL: Get the filename and resolve it to the current sandbox path
         let fileName = try container.decodeIfPresent(String.self, forKey: .assetFileName)

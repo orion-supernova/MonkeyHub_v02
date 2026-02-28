@@ -753,11 +753,18 @@ class DataMigrationManager: ObservableObject {
         let messageCount = messageFiles.count
         print("✅ Found \(messageCount) message cache files")
 
-        // Calculate total size
+        // Calculate total size recursively (includes ChatAssets contents).
         var totalSize: UInt64 = 0
-        for fileUrl in contents {
-            if let size = try? fileUrl.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-                totalSize += UInt64(size)
+        if let enumerator = fileManager.enumerator(
+            at: documentsPath,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            for case let fileURL as URL in enumerator {
+                guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                      values.isRegularFile == true
+                else { continue }
+                totalSize += UInt64(values.fileSize ?? 0)
             }
         }
 
@@ -769,4 +776,3 @@ class DataMigrationManager: ObservableObject {
         return (roomCount, messageCount, sizeString)
     }
 }
-

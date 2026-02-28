@@ -17,23 +17,30 @@ class ReactionService {
     /// - Returns: Array of reactions
     func fetchReactions(for messageId: String) async throws -> [MessageReaction] {
         print("🔍 ReactionService: Fetching reactions for message \(messageId)")
-        
-        // Use string-based query for backward compatibility
+
         let predicate = NSPredicate(format: "%K == %@", MessageReaction.messageIdKey, messageId)
-        
         let query = CKQuery(recordType: MessageReaction.recordType, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: MessageReaction.timestampKey, ascending: true)]
-        
+
         do {
-            let (records, _) = try await cloudKit.database.records(matching: query)
-            let reactions = try records.compactMap { result in
-                let record = try result.1.get()
-                return try MessageReaction(from: record)
+            var allReactions: [MessageReaction] = []
+            var cursor: CKQueryOperation.Cursor?
+
+            // First page
+            let (records, firstCursor) = try await cloudKit.database.records(matching: query)
+            allReactions.append(contentsOf: decodeReactions(from: records))
+            cursor = firstCursor
+
+            // Follow pagination cursor
+            while let activeCursor = cursor {
+                let (moreRecords, nextCursor) = try await cloudKit.database.records(continuingMatchFrom: activeCursor)
+                allReactions.append(contentsOf: decodeReactions(from: moreRecords))
+                cursor = nextCursor
             }
-            print("✅ ReactionService: Found \(reactions.count) reactions for message \(messageId)")
-            return reactions
+
+            print("✅ ReactionService: Found \(allReactions.count) reactions for message \(messageId)")
+            return allReactions
         } catch let error as CKError where error.code == .unknownItem {
-            // Record type doesn't exist yet - this is expected on first use
             print("ℹ️ ReactionService: MessageReaction record type not found (expected on first use)")
             return []
         } catch {
@@ -41,39 +48,57 @@ class ReactionService {
             throw error
         }
     }
-    
+
     /// Fetch reactions for multiple messages at once
     /// - Parameter messageIds: Array of message IDs
     /// - Returns: Dictionary mapping messageId to reactions array
     func fetchReactions(for messageIds: [String]) async throws -> [String: [MessageReaction]] {
         guard !messageIds.isEmpty else { return [:] }
-        
+
         print("🔍 ReactionService: Fetching reactions for \(messageIds.count) messages")
-        
-        // Use string-based query for backward compatibility
+
         let predicate = NSPredicate(format: "%K IN %@", MessageReaction.messageIdKey, messageIds)
         let query = CKQuery(recordType: MessageReaction.recordType, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: MessageReaction.timestampKey, ascending: true)]
-        
+
         do {
-            let (records, _) = try await cloudKit.database.records(matching: query)
-            let reactions = try records.compactMap { result -> MessageReaction? in
-                let record = try result.1.get()
-                return try MessageReaction(from: record)
+            var allReactions: [MessageReaction] = []
+            var cursor: CKQueryOperation.Cursor?
+
+            // First page
+            let (records, firstCursor) = try await cloudKit.database.records(matching: query)
+            allReactions.append(contentsOf: decodeReactions(from: records))
+            cursor = firstCursor
+
+            // Follow pagination cursor
+            while let activeCursor = cursor {
+                let (moreRecords, nextCursor) = try await cloudKit.database.records(continuingMatchFrom: activeCursor)
+                allReactions.append(contentsOf: decodeReactions(from: moreRecords))
+                cursor = nextCursor
             }
-            
-            print("✅ ReactionService: Found \(reactions.count) total reactions")
-            
-            // Group by messageId
-            let grouped = Dictionary(grouping: reactions, by: { $0.messageId })
+
+            print("✅ ReactionService: Found \(allReactions.count) total reactions")
+
+            let grouped = Dictionary(grouping: allReactions, by: { $0.messageId })
             return grouped
         } catch let error as CKError where error.code == .unknownItem {
-            // Record type doesn't exist yet - this is expected on first use
             print("ℹ️ ReactionService: MessageReaction record type not found (expected on first use)")
             return [:]
         } catch {
             print("❌ ReactionService: Error fetching reactions: \(error)")
             throw error
+        }
+    }
+
+    /// Decode reaction records resiliently — one bad record won't kill the entire batch
+    private func decodeReactions(from records: [(CKRecord.ID, Result<CKRecord, Error>)]) -> [MessageReaction] {
+        records.compactMap { _, result in
+            guard let record = try? result.get(),
+                  let reaction = try? MessageReaction(from: record) else {
+                print("⚠️ ReactionService: Skipping undecodable reaction record")
+                return nil
+            }
+            return reaction
         }
     }
     

@@ -34,6 +34,10 @@ class ChatRepository: ObservableObject {
         
         // Initialize badge on start
         updateGlobalBadge()
+
+        Task {
+            await persistence.runStorageMaintenance(validRoomIds: Set(rooms.map { $0.id }))
+        }
     }
 
     /// Ensures unreadCounts dictionary only contains entries for rooms currently in the 'rooms' list.
@@ -62,6 +66,15 @@ class ChatRepository: ObservableObject {
             await persistence.saveUnreadCounts(unreadCounts)
         }
     }
+
+    private func saveRoomsAndRunMaintenance() async {
+        await persistence.saveRooms(rooms)
+        await persistence.runStorageMaintenance(validRoomIds: Set(rooms.map { $0.id }))
+    }
+
+    private func deleteLocalRoomCache(roomId: String) async {
+        await persistence.deleteMessageCache(for: roomId)
+    }
     
     // MARK: - Single Source of Truth for Messages
 
@@ -74,12 +87,17 @@ class ChatRepository: ObservableObject {
     private func upsertMessage(_ message: ChatMessage, in roomId: String, saveToDisk: Bool = true) {
         guard roomId == activeRoomId else { return }
 
-        // Check if message already exists
         if let existingIndex = activeRoomMessages.firstIndex(where: { $0.id == message.id }) {
-            // Update existing message (e.g., status change from pending -> sent)
-            activeRoomMessages[existingIndex] = message
+            // Preserve locally-synced reactions when the incoming message has none
+            // (ChatMessage(from: CKRecord) always sets reactions = []).
+            // Reaction adds/deletes are handled independently by handleIncomingReaction.
+            // Full reaction sync happens in fetchMessages/fetchOlderMessages.
+            var updated = message
+            if updated.reactions.isEmpty {
+                updated.reactions = activeRoomMessages[existingIndex].reactions
+            }
+            activeRoomMessages[existingIndex] = updated
         } else {
-            // Add new message
             activeRoomMessages.append(message)
         }
 
@@ -100,7 +118,11 @@ class ChatRepository: ObservableObject {
 
         for message in messages {
             if let existingIndex = activeRoomMessages.firstIndex(where: { $0.id == message.id }) {
-                activeRoomMessages[existingIndex] = message
+                var updated = message
+                if updated.reactions.isEmpty {
+                    updated.reactions = activeRoomMessages[existingIndex].reactions
+                }
+                activeRoomMessages[existingIndex] = updated
             } else {
                 activeRoomMessages.append(message)
             }
@@ -126,7 +148,7 @@ class ChatRepository: ObservableObject {
             updateGlobalBadge()
             
             Task {
-                await persistence.saveRooms(fetchedRooms)
+                await saveRoomsAndRunMaintenance()
             }
             print("✅ ChatRepository: Fetched \(fetchedRooms.count) rooms")
         } catch {
@@ -143,7 +165,7 @@ class ChatRepository: ObservableObject {
                 rooms.insert(room, at: 0)  // Add to top of list (newest first)
             }
             Task {
-                await persistence.saveRooms(rooms)
+                await saveRoomsAndRunMaintenance()
             }
             print("✅ ChatRepository: Optimistically added room '\(room.name)'")
         }
@@ -155,7 +177,8 @@ class ChatRepository: ObservableObject {
             rooms.removeAll { $0.id == roomId }
         }
         Task {
-            await persistence.saveRooms(rooms)
+            await saveRoomsAndRunMaintenance()
+            await deleteLocalRoomCache(roomId: roomId)
         }
         print("✅ ChatRepository: Optimistically removed room \(roomId)")
     }
@@ -415,7 +438,7 @@ class ChatRepository: ObservableObject {
             }
 
             Task {
-                await persistence.saveRooms(rooms)
+                await saveRoomsAndRunMaintenance()
             }
         } else {
             // New room? Fetch all rooms to discover it
@@ -432,7 +455,7 @@ class ChatRepository: ObservableObject {
                     
                     let record = try await cloudKit.database.record(for: recordID)
                     let fullMessage = try ChatMessage(from: record)
-                    
+
                     await MainActor.run {
                         withAnimation {
                             upsertMessage(fullMessage, in: roomId)
@@ -481,7 +504,7 @@ class ChatRepository: ObservableObject {
             }
 
             Task {
-                await persistence.saveRooms(rooms)
+                await saveRoomsAndRunMaintenance()
             }
         }
     }
@@ -533,7 +556,8 @@ class ChatRepository: ObservableObject {
         }
 
         // Persist and unsubscribe
-        await persistence.saveRooms(rooms)
+        await saveRoomsAndRunMaintenance()
+        await deleteLocalRoomCache(roomId: roomId)
         await NotificationSubscriptionManager.shared.unsubscribeFromRoom(roomId)
     }
 
@@ -552,7 +576,7 @@ class ChatRepository: ObservableObject {
                     }
                 }
                 // Persist
-                await persistence.saveRooms(rooms)
+                await saveRoomsAndRunMaintenance()
             } else {
                 // Room no longer exists - remove from list
                 print("⚠️ ChatRepository: Room \(roomId) no longer exists, removing from list")
@@ -566,7 +590,8 @@ class ChatRepository: ObservableObject {
                         userInfo: ["roomId": roomId]
                     )
                 }
-                await persistence.saveRooms(rooms)
+                await saveRoomsAndRunMaintenance()
+                await deleteLocalRoomCache(roomId: roomId)
             }
         } catch {
             print("⚠️ ChatRepository: Failed to refresh room \(roomId): \(error)")
@@ -634,7 +659,8 @@ class ChatRepository: ObservableObject {
 
         // Persist
         Task {
-            await persistence.saveRooms(rooms)
+            await saveRoomsAndRunMaintenance()
+            await deleteLocalRoomCache(roomId: roomId)
         }
 
         // If user is currently in this room, notify them
@@ -677,7 +703,8 @@ class ChatRepository: ObservableObject {
                     }
 
                     // Persist
-                    await persistence.saveRooms(rooms)
+                    await saveRoomsAndRunMaintenance()
+                    await deleteLocalRoomCache(roomId: roomId)
 
                     // If user is currently in this room, notify them
                     if activeRoomId == roomId {
@@ -705,7 +732,7 @@ class ChatRepository: ObservableObject {
                     }
 
                     // Persist
-                    await persistence.saveRooms(rooms)
+                    await saveRoomsAndRunMaintenance()
 
                     print("✅ ChatRepository: Updated room details for \(roomId)")
                 }
@@ -734,8 +761,8 @@ class ChatRepository: ObservableObject {
 
         print("📥 ChatRepository: Processing reaction notification for message \(messageId), type: \(notificationType.rawValue)")
 
-        // Find the message in active room
-        guard let messageIndex = activeRoomMessages.firstIndex(where: { $0.id == messageId }) else {
+        // Check if the message exists in active room before starting async work
+        guard activeRoomMessages.contains(where: { $0.id == messageId }) else {
             print("ℹ️ ChatRepository: Message \(messageId) not in active room, ignoring reaction notification")
             return
         }
@@ -747,14 +774,13 @@ class ChatRepository: ObservableObject {
                     let reactionId = recordID.recordName
                     print("🗑️ ChatRepository: Removing reaction \(reactionId) from message \(messageId)")
 
-                    await MainActor.run {
-                        withAnimation {
-                            activeRoomMessages[messageIndex].reactions.removeAll { $0.id == reactionId }
-                        }
-
-                        Task {
-                            await persistence.saveMessages(activeRoomMessages, for: activeRoomMessages[messageIndex].roomId)
-                        }
+                    // Re-find index after async boundary to avoid stale index
+                    guard let idx = activeRoomMessages.firstIndex(where: { $0.id == messageId }) else { return }
+                    withAnimation {
+                        activeRoomMessages[idx].reactions.removeAll { $0.id == reactionId }
+                    }
+                    Task {
+                        await persistence.saveMessages(activeRoomMessages, for: activeRoomMessages[idx].roomId)
                     }
                 } else {
                     // Reaction was added or updated - fetch the full reaction
@@ -763,20 +789,18 @@ class ChatRepository: ObservableObject {
                     let record = try await cloudKit.database.record(for: recordID)
                     let reaction = try MessageReaction(from: record)
 
-                    await MainActor.run {
-                        withAnimation {
-                            // Remove old reaction if it exists (for updates)
-                            activeRoomMessages[messageIndex].reactions.removeAll { $0.id == reaction.id }
-                            // Add new/updated reaction
-                            activeRoomMessages[messageIndex].reactions.append(reaction)
-
-                            // Sort reactions by timestamp
-                            activeRoomMessages[messageIndex].reactions.sort { $0.timestamp < $1.timestamp }
-                        }
-
-                        Task {
-                            await persistence.saveMessages(activeRoomMessages, for: activeRoomMessages[messageIndex].roomId)
-                        }
+                    // Re-find index after async boundary to avoid stale index
+                    guard let idx = activeRoomMessages.firstIndex(where: { $0.id == messageId }) else { return }
+                    withAnimation {
+                        // Remove old reaction if it exists (for updates)
+                        activeRoomMessages[idx].reactions.removeAll { $0.id == reaction.id }
+                        // Add new/updated reaction
+                        activeRoomMessages[idx].reactions.append(reaction)
+                        // Sort reactions by timestamp
+                        activeRoomMessages[idx].reactions.sort { $0.timestamp < $1.timestamp }
+                    }
+                    Task {
+                        await persistence.saveMessages(activeRoomMessages, for: activeRoomMessages[idx].roomId)
                     }
 
                     print("✅ ChatRepository: Updated reaction on message \(messageId)")

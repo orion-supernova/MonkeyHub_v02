@@ -19,7 +19,17 @@ struct MessagesListView: View {
 
     var body: some View {
         ZStack {
-            // 1. THE MAIN SCROLLVIEW
+            // 1. DIMMING LAYER — sits behind the scroll view,
+            // visible through the scroll view's clear background.
+            // This dims the background gradient WITHOUT covering the picker.
+            if activeReactionPickerMessageId != nil {
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+
+            // 2. THE MAIN SCROLLVIEW (always on top of dimming)
             UIKitScrollView(
                 content: messagesContent,
                 firstItemId: viewModel.messages.first?.id,
@@ -35,19 +45,7 @@ struct MessagesListView: View {
                 }
             )
             .background(Color.clear)
-            
-            // 2. DIMMING OVERLAY (Only visible when double-tap reaction picker is active)
-            if activeReactionPickerMessageId != nil {
-                Color.black.opacity(0.25)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        withAnimation(.smooth(duration: 0.2)) {
-                            activeReactionPickerMessageId = nil
-                        }
-                    }
-                    .transition(.opacity)
-                    .zIndex(500)
-            }
+            .zIndex(1)
         }
         .overlay(alignment: .bottomTrailing) {
             scrollDownButton
@@ -70,6 +68,12 @@ struct MessagesListView: View {
         }
     }
 
+    private func dismissPicker() {
+        withAnimation(.smooth(duration: 0.2)) {
+            activeReactionPickerMessageId = nil
+        }
+    }
+
     private var messagesContent: some View {
         LazyVStack(spacing: 8) {
             // Top Padding / Loading Indicator
@@ -80,10 +84,13 @@ struct MessagesListView: View {
                         ProgressView().controlSize(.small).padding(.bottom, 8)
                     }
                 }
+                .contentShape(Rectangle())
+                .onTapGesture { dismissPicker() }
 
             ForEach(viewModel.messages) { message in
                 let isActive = activeReactionPickerMessageId == message.id
-                
+                let pickerIsOpen = activeReactionPickerMessageId != nil
+
                 MessageRow(
                     message: message,
                     currentUserId: currentUserId,
@@ -98,9 +105,18 @@ struct MessagesListView: View {
                     },
                     imageZoomNamespace: imageZoomNamespace
                 )
-                // IMPORTANT: This zIndex hoists the entire row (bubble + picker)
-                // above the dimming layer (which is at zIndex 500)
+                // Active row draws above non-active rows
                 .zIndex(isActive ? 1000 : 1)
+                // Fade non-active rows uniformly (no visible per-row rectangles)
+                .opacity(pickerIsOpen && !isActive ? 0.4 : 1.0)
+                // Invisible tap catcher to dismiss picker when tapping other rows
+                .overlay {
+                    if pickerIsOpen && !isActive {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { dismissPicker() }
+                    }
+                }
             }
 
             if let typingText = viewModel.typingText {
@@ -111,6 +127,8 @@ struct MessagesListView: View {
 
             // Bottom buffer for floating input area
             Color.clear.frame(height: verticalSizeClass == .compact ? 60 : 80)
+                .contentShape(Rectangle())
+                .onTapGesture { dismissPicker() }
         }
     }
 

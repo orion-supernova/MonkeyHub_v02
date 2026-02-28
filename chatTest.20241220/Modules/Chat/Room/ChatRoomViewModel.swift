@@ -152,17 +152,8 @@ class ChatRoomViewModel: ObservableObject {
     
     // MARK: - Asset Sending
     private func saveTempImage(_ image: PlatformImage) -> URL? {
-        let fileManager = FileManager.default
-        let paths = fileManager.urls(for: .documentDirectory, in: .userDomainMask)
-        let assetsDir = paths[0].appendingPathComponent("ChatAssets", isDirectory: true)
-        
-        if !fileManager.fileExists(atPath: assetsDir.path) {
-            try? fileManager.createDirectory(at: assetsDir, withIntermediateDirectories: true)
-        }
-        
-        let fileName = UUID().uuidString + ".jpg"
-        let fileURL = assetsDir.appendingPathComponent(fileName)
-        
+        let fileURL = makeAssetFileURL(extension: "jpg")
+
         if let data = image.toData() {
             do {
                 try data.write(to: fileURL)
@@ -174,6 +165,64 @@ class ChatRoomViewModel: ObservableObject {
         }
         return nil
     }
+
+    private func copyAssetToLocalStorage(from sourceURL: URL) -> URL? {
+        let fileManager = FileManager.default
+        if isInChatAssets(sourceURL) {
+            return sourceURL
+        }
+
+        let fileExtension = sourceURL.pathExtension.isEmpty ? "bin" : sourceURL.pathExtension
+        let destinationURL = makeAssetFileURL(extension: fileExtension)
+
+        do {
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try? fileManager.removeItem(at: destinationURL)
+            }
+            try fileManager.copyItem(at: sourceURL, to: destinationURL)
+
+            // Remove known temp files after successful copy to avoid duplicate disk usage.
+            if isLooseTempMediaFileInDocuments(sourceURL) {
+                try? fileManager.removeItem(at: sourceURL)
+            }
+
+            return destinationURL
+        } catch {
+            print("Error copying asset to ChatAssets: \(error)")
+            return nil
+        }
+    }
+
+    private func makeAssetFileURL(extension fileExtension: String) -> URL {
+        let fileManager = FileManager.default
+        let paths = fileManager.urls(for: .documentDirectory, in: .userDomainMask)
+        let assetsDir = paths[0].appendingPathComponent("ChatAssets", isDirectory: true)
+
+        if !fileManager.fileExists(atPath: assetsDir.path) {
+            try? fileManager.createDirectory(at: assetsDir, withIntermediateDirectories: true)
+        }
+
+        let normalizedExtension = fileExtension.lowercased()
+        let fileName = UUID().uuidString + "." + normalizedExtension
+        return assetsDir.appendingPathComponent(fileName)
+    }
+
+    private func isInChatAssets(_ url: URL) -> Bool {
+        let fileManager = FileManager.default
+        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let assetsDir = documents.appendingPathComponent("ChatAssets", isDirectory: true).path
+        return url.path.hasPrefix(assetsDir + "/")
+    }
+
+    private func isLooseTempMediaFileInDocuments(_ url: URL) -> Bool {
+        let fileManager = FileManager.default
+        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let isDirectChild = url.deletingLastPathComponent().standardizedFileURL == documents.standardizedFileURL
+        guard isDirectChild else { return false }
+
+        let baseName = url.deletingPathExtension().lastPathComponent
+        return UUID(uuidString: baseName) != nil
+    }
     
     func sendImage(_ image: PlatformImage) async {
         guard let url = saveTempImage(image) else { return }
@@ -181,13 +230,14 @@ class ChatRoomViewModel: ObservableObject {
     }
 
     func sendImage(from url: URL) async {
+        let localURL = copyAssetToLocalStorage(from: url) ?? url
         let message = ChatMessage(
             senderId: userId,
             senderName: userName,
             content: "📷 Photo",  // This shows in notification
             type: .image,
             roomId: roomId,
-            assetURL: url
+            assetURL: localURL
         )
 
         // Repository will handle optimistic update (PENDING) -> CloudKit Upload -> Success (SENT)
@@ -195,26 +245,28 @@ class ChatRoomViewModel: ObservableObject {
     }
 
     func sendVideo(_ url: URL) async {
+        let localURL = copyAssetToLocalStorage(from: url) ?? url
         let message = ChatMessage(
             senderId: userId,
             senderName: userName,
             content: "🎥 Video",  // This shows in notification
             type: .video,
             roomId: roomId,
-            assetURL: url
+            assetURL: localURL
         )
 
         await repository.sendMessage(message)
     }
 
     func sendAudio(_ url: URL) async {
+        let localURL = copyAssetToLocalStorage(from: url) ?? url
         let message = ChatMessage(
             senderId: userId,
             senderName: userName,
             content: "🎵 Voice Message",  // This shows in notification
             type: .audio,
             roomId: roomId,
-            assetURL: url
+            assetURL: localURL
         )
 
         await repository.sendMessage(message)

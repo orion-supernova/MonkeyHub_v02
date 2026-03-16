@@ -3,7 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var cloudKit = CloudKitManager.shared
     @State private var showingSignOutAlert = false
     @State private var animateContent = false
     @State private var isShowingThemeSheet = false
@@ -17,7 +16,6 @@ struct SettingsView: View {
     @State private var selectedImage: PlatformImage?
     @State private var profileAvatarImage: PlatformImage?
     @StateObject private var navigationState = NavigationStateManager.shared
-    @StateObject private var migrationManager = DataMigrationManager.shared
     @State private var showingMigrationSheet = false
     @State private var showingEnvironmentAlert = false
     @State private var showingClearDataAlert = false
@@ -25,24 +23,24 @@ struct SettingsView: View {
     @State private var selectedExportFile: URL?
 
     private func signOut() async {
-        userDefaults.set(nil, forKey: userIdUserDefaultsKey)
-        cloudKit.isAuthenticated = false
+        ConvexAuthService.shared.signOut()
     }
 
     private func forceRelogin() async {
-        do {
-            try migrationManager.clearAllLocalData()
-            cloudKit.isAuthenticated = false
-            UserDefaults.standard.removeObject(forKey: "cloudKitEnvironment")
-            AlertManager.shared.showAlert(
-                title: "Success",
-                message: "All data cleared. You will be redirected to login."
-            )
-        } catch {
-            AlertManager.shared.showAlert(
-                title: "Error",
-                message: "Failed to clear data: \(error.localizedDescription)"
-            )
+        clearAllLocalData()
+        ConvexAuthService.shared.signOut()
+        AlertManager.shared.showAlert(
+            title: "Success",
+            message: "All data cleared. You will be redirected to login."
+        )
+    }
+
+    private func clearAllLocalData() {
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        guard let files = try? fm.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil) else { return }
+        for file in files where file.lastPathComponent.hasPrefix("cached_") {
+            try? fm.removeItem(at: file)
         }
     }
 
@@ -62,42 +60,6 @@ struct SettingsView: View {
     private var developerSection: some View {
         SettingsSection(title: "DEVELOPER TOOLS") {
             VStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "cloud.fill")
-                            .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                            .frame(width: 32)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("CloudKit Environment")
-                                .font(.headline)
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                            Text(cloudKit.currentEnvironment.displayName)
-                                .font(.subheadline)
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                        }
-                        Spacer()
-                        Button {
-                            showingEnvironmentAlert = true
-                        } label: {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(.footnote.bold())
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                        }
-                    }
-                }
-                .padding()
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(selectedTheme.colors(for: colorScheme).cardBackground)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .strokeBorder(
-                            selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.1),
-                            lineWidth: 1
-                        )
-                )
-
                 Button {
                     showingMigrationSheet = true
                 } label: {
@@ -163,27 +125,16 @@ struct SettingsView: View {
         isLoadingUser = true
         defer { isLoadingUser = false }
 
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+        guard !userId.isEmpty else { return }
+
         do {
-            currentUser = try await CloudKitManager.shared.fetchCurrentUser()
-            loadProfileAvatar()
+            currentUser = try await ConvexChatAPI.shared.fetchUser(userId: userId)
         } catch {
             AlertManager.shared.showAlert(
                 title: "Error",
                 message: "Failed to load user: \(error.localizedDescription)"
             )
-        }
-    }
-    
-    private func loadProfileAvatar() {
-        guard let avatarAsset = currentUser?.avatarAsset,
-              let fileURL = avatarAsset.fileURL else { 
-            profileAvatarImage = nil
-            return 
-        }
-        
-        if let data = try? Data(contentsOf: fileURL),
-           let image = PlatformImage.fromData(data) {
-            profileAvatarImage = image
         }
     }
 
@@ -237,7 +188,7 @@ struct SettingsView: View {
                         )
                         .frame(width: 100, height: 100)
                         .overlay {
-                            Text(currentUser?.name.prefix(1).uppercased() ?? "?")
+                            Text((currentUser?.displayInitial) ?? "?")
                                 .font(.title.bold())
                                 .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
                         }
@@ -349,19 +300,18 @@ struct SettingsView: View {
                         }
                     } else {
                         VStack(spacing: 8) {
-                            Text(currentUser?.name ?? "Unknown")
+                            Text(currentUser?.displayName ?? "Unknown")
                                 .font(.title2.bold())
 
-                            Text(
-                                currentUser?.username.isEmpty == true
-                                    ? "No username" : "@\(currentUser?.username ?? "")"
-                            )
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-
-                            Text(currentUser?.email ?? "No email")
-                                .font(.footnote)
+                            Text(currentUser.map { "@\($0.username)" } ?? "No username")
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
+
+                            if let email = currentUser?.email, !email.isEmpty {
+                                Text(email)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         Button {
@@ -486,40 +436,17 @@ struct SettingsView: View {
             ThemeSelectionSheet(isShowingSheet: $isShowingThemeSheet)
         }
         .sheet(isPresented: $showingMigrationSheet) {
-            DataMigrationSheet(
-                migrationManager: migrationManager,
-                selectedExportFile: $selectedExportFile
-            )
-            .interactiveDismissDisabled(true)
-        }
-        .alert("Switch Environment", isPresented: $showingEnvironmentAlert) {
-            Button("Development") {
-                cloudKit.setEnvironment(.development)
-            }
-            Button("Production") {
-                cloudKit.setEnvironment(.production)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Select the CloudKit environment you want to use. Current: \(cloudKit.currentEnvironment.displayName)")
+            DataMigrationSheet(selectedExportFile: $selectedExportFile)
+                .interactiveDismissDisabled(true)
         }
         .alert("Clear Local Data", isPresented: $showingClearDataAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Clear All", role: .destructive) {
-                Task {
-                    do {
-                        try migrationManager.clearAllLocalData()
-                        AlertManager.shared.showAlert(
-                            title: "Success",
-                            message: "All local data has been cleared. Please restart the app."
-                        )
-                    } catch {
-                        AlertManager.shared.showAlert(
-                            title: "Error",
-                            message: "Failed to clear data: \(error.localizedDescription)"
-                        )
-                    }
-                }
+                clearAllLocalData()
+                AlertManager.shared.showAlert(
+                    title: "Success",
+                    message: "All local data has been cleared. Please restart the app."
+                )
             }
         } message: {
             Text("This will delete all cached rooms, messages, and user data from your device. This action cannot be undone.")
@@ -532,7 +459,7 @@ struct SettingsView: View {
                 }
             }
         } message: {
-            Text("This will clear all local data and authentication state, forcing you to sign in again. Use this if you're experiencing issues switching between CloudKit environments.")
+            Text("This will clear all local data and authentication state, forcing you to sign in again.")
         }
         .task {
             await loadCurrentUser()
@@ -541,7 +468,7 @@ struct SettingsView: View {
     }
 
     private func startEditing() {
-        editingName = currentUser?.name ?? ""
+        editingName = currentUser?.displayName ?? ""
         editingUsername = currentUser?.username ?? ""
         editingEmail = currentUser?.email ?? ""
         isEditingProfile = true
@@ -549,83 +476,47 @@ struct SettingsView: View {
 
     private func saveProfileChanges() async {
         guard let existingUser = currentUser else { return }
-
-        let updatedUser = ChatUser(
-            from: existingUser,
-            name: editingName,
-            username: editingUsername,
-            email: editingEmail
-        )
+        isLoadingUser = true
 
         do {
-            try await CloudKitManager.shared.updateUser(updatedUser)
-
-            await MainActor.run {
-                isEditingProfile = false
-                currentUser = nil
-                profileAvatarImage = nil
-                isLoadingUser = true
-            }
-
-            try await Task.sleep(nanoseconds: 500_000_000)
-
-            let freshUser = try await CloudKitManager.shared.fetchCurrentUser()
-
-            await MainActor.run {
-                withAnimation {
-                    self.currentUser = freshUser
-                    self.isLoadingUser = false
-                    loadProfileAvatar()
-                }
-            }
-
-            AlertManager.shared.showAlert(
-                title: "Success",
-                message: "Profile updated successfully"
+            try await ConvexChatAPI.shared.updateUserProfile(
+                userId: existingUser.id,
+                name: editingName,
+                email: editingEmail.isEmpty ? nil : editingEmail,
+                bio: existingUser.bio
             )
+            isEditingProfile = false
+            currentUser = ChatUser(
+                id: existingUser.id,
+                name: editingName,
+                username: editingUsername,
+                email: editingEmail,
+                avatarStorageId: existingUser.avatarStorageId,
+                bio: existingUser.bio
+            )
+            AlertManager.shared.showAlert(title: "Success", message: "Profile updated successfully")
         } catch {
-            await MainActor.run {
-                isLoadingUser = false
-            }
-            AlertManager.shared.showAlert(
-                title: "Error",
-                message: "Failed to update profile: \(error.localizedDescription)"
-            )
+            AlertManager.shared.showAlert(title: "Error", message: "Failed to update profile: \(error.localizedDescription)")
         }
+        isLoadingUser = false
     }
 
     private func handleImageSelection() async {
-        guard let image = selectedImage, let user = currentUser else { return }
+        guard let image = selectedImage, let user = currentUser,
+              let data = image.toData() else { return }
+        isLoadingUser = true
 
         do {
-            isLoadingUser = true
-            try await CloudKitManager.shared.updateUserProfilePicture(user, image: image)
-
-            let freshUser = try await CloudKitManager.shared.fetchCurrentUser()
-
-            await MainActor.run {
-                withAnimation {
-                    self.currentUser = freshUser
-                    self.profileAvatarImage = image
-                    self.selectedImage = nil
-                    self.isLoadingUser = false
-                }
-            }
-
-            AlertManager.shared.showAlert(
-                title: "Success",
-                message: "Profile picture updated successfully"
-            )
+            let storageId = try await ConvexChatAPI.shared.uploadFile(data: data, mimeType: "image/jpeg")
+            try await ConvexChatAPI.shared.updateUserAvatar(userId: user.id, storageId: storageId)
+            profileAvatarImage = image
+            selectedImage = nil
+            AlertManager.shared.showAlert(title: "Success", message: "Profile picture updated successfully")
         } catch {
-            await MainActor.run {
-                self.selectedImage = nil
-                isLoadingUser = false
-            }
-            AlertManager.shared.showAlert(
-                title: "Error",
-                message: "Failed to update profile picture: \(error.localizedDescription)"
-            )
+            selectedImage = nil
+            AlertManager.shared.showAlert(title: "Error", message: "Failed to update profile picture: \(error.localizedDescription)")
         }
+        isLoadingUser = false
     }
 }
 
@@ -889,7 +780,6 @@ private struct ProfileTextField: View {
 
 // Data Migration Sheet
 struct DataMigrationSheet: View {
-    @ObservedObject var migrationManager: DataMigrationManager
     @Binding var selectedExportFile: URL?
     @Environment(\.dismiss) private var dismiss
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
@@ -905,22 +795,12 @@ struct DataMigrationSheet: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Data Migration")
                             .font(.title2.bold())
-                        Text("Export your cached data to a file, then import it to CloudKit in a different environment.")
+                        Text("Manage locally cached data export files.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
-
-                    let stats = migrationManager.getDiskUsageStatsSync()
-                    VStack(spacing: 16) {
-                        HStack(spacing: 16) {
-                            StatCard(title: "Rooms", value: "\(stats.rooms)", icon: "bubble.left.and.bubble.right.fill")
-                            StatCard(title: "Messages", value: "\(stats.messages)", icon: "message.fill")
-                        }
-                        StatCard(title: "Storage", value: stats.totalSize, icon: "internaldrive.fill")
-                    }
-                    .padding(.horizontal)
 
                     VStack(alignment: .leading, spacing: 16) {
                         Text("EXPORT DATA")
@@ -928,213 +808,79 @@ struct DataMigrationSheet: View {
                             .foregroundStyle(.secondary)
                             .padding(.horizontal)
 
-                        if migrationManager.isExporting {
-                            VStack(spacing: 12) {
-                                ProgressView(value: migrationManager.progress)
-                                    .progressViewStyle(.linear)
-                                Text(migrationManager.statusMessage)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                        Text("Data export is not available in this version.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
                             .padding()
                             .background(
                                 RoundedRectangle(cornerRadius: 16)
                                     .fill(selectedTheme.colors(for: colorScheme).cardBackground)
                             )
                             .padding(.horizontal)
-                        } else {
-                            Button {
-                                Task { @MainActor in
-                                    do {
-                                        let exportUrl = try await migrationManager.exportDataToDisk()
-                                        selectedExportFile = exportUrl
-
-                                        scanForExportFiles()
-
-                                        try? await Task.sleep(nanoseconds: 100_000_000) 
-
-                                        AlertManager.shared.showAlert(
-                                            title: "Export Complete",
-                                            message: "Data exported to: \(exportUrl.lastPathComponent)\n\nScroll down to see the Import section."
-                                        )
-                                    } catch {
-                                        AlertManager.shared.showAlert(
-                                            title: "Export Failed",
-                                            message: error.localizedDescription
-                                        )
-                                    }
-                                }
-                            } label: {
-                                HStack {
-                                    Image(systemName: "square.and.arrow.up")
-                                    Text("Export to File")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(selectedTheme.colors(for: colorScheme).accent)
-                                )
-                                .foregroundStyle(.white)
-                            }
-                            .padding(.horizontal)
-                        }
                     }
 
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("IMPORT TO CLOUDKIT")
-                            .font(.caption.bold())
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal)
-
-                        if migrationManager.isImporting {
-                            VStack(spacing: 12) {
-                                ProgressView(value: migrationManager.progress)
-                                    .progressViewStyle(.linear)
-                                Text(migrationManager.statusMessage)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding()
-                            .background(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(selectedTheme.colors(for: colorScheme).cardBackground)
-                            )
-                            .padding(.horizontal)
-                        } else if !availableExports.isEmpty {
-                            VStack(spacing: 12) {
-                                HStack {
-                                    Text("Select an export file to import:")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    Text("Swipe to delete")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary.opacity(0.7))
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal)
-
-                                List {
-                                    ForEach(availableExports, id: \.self) { exportFile in
-                                        Button {
-                                            selectedExportFile = exportFile
-                                        } label: {
-                                            HStack {
-                                                Image(systemName: "doc.fill")
-                                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                                                VStack(alignment: .leading, spacing: 4) {
-                                                    Text(exportFile.lastPathComponent)
-                                                        .font(.caption.bold())
-                                                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                                                    VStack(alignment: .leading, spacing: 2) {
-                                                        HStack(spacing: 6) {
-                                                            Text(formatFileDate(exportFile))
-                                                            Text("•")
-                                                            Text(formatFileSize(exportFile))
-                                                        }
-                                                        .font(.caption2)
-                                                        .foregroundStyle(.secondary)
-
-                                                        Text(formatExportBundleInfo(exportFile))
-                                                            .font(.caption2)
-                                                            .foregroundStyle(.secondary)
-                                                    }
-                                                }
-                                                Spacer()
-                                                if selectedExportFile == exportFile {
-                                                    Image(systemName: "checkmark.circle.fill")
-                                                        .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                                                }
-                                            }
-                                        }
-                                        .buttonStyle(.plain)
-                                        .listRowBackground(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(selectedExportFile == exportFile
-                                                    ? selectedTheme.colors(for: colorScheme).accent.opacity(0.1)
-                                                    : selectedTheme.colors(for: colorScheme).cardBackground)
-                                                .padding(.vertical, 4)
-                                        )
-                                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                            Button(role: .destructive) {
-                                                deleteExportFile(exportFile)
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
-                                            }
-                                        }
-                                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                            Button {
-                                                showingExportsBrowser = true
-                                            } label: {
-                                                Label("Browse", systemImage: "folder")
-                                            }
-                                        }
-                                    }
-                                }
-                                .frame(height: CGFloat(availableExports.count) * 80)
-                                .listStyle(.plain)
-                                .scrollDisabled(true)
-
-                                if let exportFile = selectedExportFile {
-                                    VStack(spacing: 12) {
-                                        HStack(spacing: 8) {
-                                            Image(systemName: "exclamationmark.triangle.fill")
-                                                .foregroundStyle(.orange)
-                                            Text("This will DELETE all existing data in CloudKit and replace it with the export file.")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        .padding()
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(.orange.opacity(0.1))
-                                        )
-
-                                        Button {
-                                            Task {
-                                                do {
-                                                    try await migrationManager.importDataToCloudKit(fromFile: exportFile)
-                                                    AlertManager.shared.showAlert(
-                                                        title: "Import Complete",
-                                                        message: "All data has been uploaded to CloudKit"
-                                                    )
-                                                } catch {
-                                                    AlertManager.shared.showAlert(
-                                                        title: "Import Failed",
-                                                        message: error.localizedDescription
-                                                    )
-                                                }
-                                            }
-                                        } label: {
-                                            HStack {
-                                                Image(systemName: "square.and.arrow.down")
-                                                Text("Import & Replace All CloudKit Data")
-                                            }
-                                            .frame(maxWidth: .infinity)
-                                            .padding()
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 16)
-                                                    .fill(selectedTheme.colors(for: colorScheme).accent)
-                                            )
-                                            .foregroundStyle(.white)
-                                        }
-                                    }
-                                    .padding(.horizontal)
-                                    .padding(.top, 8)
-                                }
-                            }
-                        } else {
-                            Text("Export data first, then import it to CloudKit")
-                                .font(.caption)
+                    if !availableExports.isEmpty {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("EXPORT FILES")
+                                .font(.caption.bold())
                                 .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(selectedTheme.colors(for: colorScheme).cardBackground)
-                                )
                                 .padding(.horizontal)
+
+                            List {
+                                ForEach(availableExports, id: \.self) { exportFile in
+                                    Button {
+                                        selectedExportFile = exportFile
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: "doc.fill")
+                                                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(exportFile.lastPathComponent)
+                                                    .font(.caption.bold())
+                                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                                                HStack(spacing: 6) {
+                                                    Text(formatFileDate(exportFile))
+                                                    Text("•")
+                                                    Text(formatFileSize(exportFile))
+                                                }
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                            }
+                                            Spacer()
+                                            if selectedExportFile == exportFile {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                                            }
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .listRowBackground(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(selectedExportFile == exportFile
+                                                ? selectedTheme.colors(for: colorScheme).accent.opacity(0.1)
+                                                : selectedTheme.colors(for: colorScheme).cardBackground)
+                                            .padding(.vertical, 4)
+                                    )
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                        Button(role: .destructive) {
+                                            deleteExportFile(exportFile)
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
+                                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                        Button {
+                                            showingExportsBrowser = true
+                                        } label: {
+                                            Label("Browse", systemImage: "folder")
+                                        }
+                                    }
+                                }
+                            }
+                            .frame(height: CGFloat(availableExports.count) * 80)
+                            .listStyle(.plain)
+                            .scrollDisabled(true)
                         }
                     }
                 }
@@ -1175,27 +921,19 @@ struct DataMigrationSheet: View {
             return
         }
 
-        let exports = contents
+        availableExports = contents
             .filter { $0.lastPathComponent.hasPrefix("migration_export_") && $0.pathExtension == "json" }
             .sorted { file1, file2 in
                 let date1 = (try? file1.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
                 let date2 = (try? file2.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
                 return date1 > date2
             }
-
-        availableExports = exports
-
-        if let selectedFile = selectedExportFile, exports.contains(selectedFile) {
-        } else if let mostRecent = exports.first {
-            selectedExportFile = mostRecent
-        }
     }
 
     private func formatFileDate(_ url: URL) -> String {
         guard let creationDate = try? url.resourceValues(forKeys: [.creationDateKey]).creationDate else {
             return "Unknown date"
         }
-
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
@@ -1203,80 +941,27 @@ struct DataMigrationSheet: View {
     }
 
     private func formatFileSize(_ url: URL) -> String {
-        do {
-            let values = try url.resourceValues(forKeys: [.fileSizeKey])
-            let bytes = Double(values.fileSize ?? 0)
-            if bytes <= 0 { return "0 B" }
-            let units = ["B", "KB", "MB", "GB", "TB"]
-            let idx = min(Int(log2(bytes) / 10.0), units.count - 1)
-            let size = bytes / pow(1024, Double(idx))
-            let formatter = NumberFormatter()
-            formatter.maximumFractionDigits = size < 10 ? 2 : 1
-            formatter.minimumFractionDigits = 0
-            let sizeString = formatter.string(from: NSNumber(value: size)) ?? String(format: "%.1f", size)
-            return "\(sizeString) \(units[idx])"
-        } catch {
-            return "—"
-        }
-    }
-
-    private func formatExportBundleInfo(_ jsonURL: URL) -> String {
-        let folderURL = jsonURL.deletingPathExtension()
-        let assetsURL = folderURL.appendingPathComponent("Assets", isDirectory: true)
-        let fm = FileManager.default
-        var folderExists = false
-        var totalBytes: Int64 = 0
-        var fileCount = 0
-
-        if fm.fileExists(atPath: folderURL.path) {
-            folderExists = true
-            if let files = try? fm.contentsOfDirectory(at: folderURL, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) {
-                for file in files {
-                    if let isDir = try? file.resourceValues(forKeys: [.isDirectoryKey]).isDirectory, isDir == true {
-                        if file.lastPathComponent == "Assets" {
-                            if let assets = try? fm.contentsOfDirectory(at: file, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]) {
-                                fileCount += assets.count
-                                for a in assets {
-                                    if let size = try? a.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-                                        totalBytes += Int64(size)
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        if let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-                            totalBytes += Int64(size)
-                            fileCount += 1
-                        }
-                    }
-                }
-            }
-        }
-
-        guard folderExists else { return "Bundle: not found" }
-        let fmt = ByteCountFormatter(); fmt.countStyle = .file
-        return "Bundle: \(fileCount) files, \(fmt.string(fromByteCount: totalBytes))"
+        guard let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              fileSize > 0 else { return "0 B" }
+        let bytes = Double(fileSize)
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        let idx = min(Int(log2(bytes) / 10.0), units.count - 1)
+        let size = bytes / pow(1024, Double(idx))
+        let formatter = NumberFormatter()
+        formatter.maximumFractionDigits = size < 10 ? 2 : 1
+        formatter.minimumFractionDigits = 0
+        let sizeString = formatter.string(from: NSNumber(value: size)) ?? String(format: "%.1f", size)
+        return "\(sizeString) \(units[idx])"
     }
 
     private func deleteExportFile(_ url: URL) {
         do {
             try FileManager.default.removeItem(at: url)
-
-            if selectedExportFile == url {
-                selectedExportFile = nil
-            }
-
+            if selectedExportFile == url { selectedExportFile = nil }
             scanForExportFiles()
-
-            AlertManager.shared.showAlert(
-                title: "Deleted",
-                message: "Export file deleted successfully"
-            )
+            AlertManager.shared.showAlert(title: "Deleted", message: "Export file deleted successfully")
         } catch {
-            AlertManager.shared.showAlert(
-                title: "Error",
-                message: "Failed to delete file: \(error.localizedDescription)"
-            )
+            AlertManager.shared.showAlert(title: "Error", message: "Failed to delete file: \(error.localizedDescription)")
         }
     }
 }

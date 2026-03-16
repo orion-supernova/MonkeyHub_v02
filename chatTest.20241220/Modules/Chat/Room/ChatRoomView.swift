@@ -1,4 +1,3 @@
-import CloudKit
 import SwiftUI
 
 struct ChatRoomView: View {
@@ -309,8 +308,8 @@ struct ChatRoomView: View {
         let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
 
         do {
-            // Fetch the latest room data from CloudKit
-            if let latestRoom = try await CloudKitManager.shared.fetchChatRoom(byId: room.id) {
+            // Fetch the latest room data from Convex
+            if let latestRoom = try await ConvexChatAPI.shared.fetchRoom(roomId: room.id) {
                 isUserMember = latestRoom.participants.contains(userId)
                 if !isUserMember {
                     print("⚠️ User is no longer a member of room: \(room.name)")

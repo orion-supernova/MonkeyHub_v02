@@ -4,26 +4,29 @@ import { v } from "convex/values";
 export const signup = mutation({
   args: {
     username: v.string(),
+    name: v.string(),
     passwordHash: v.string(),
     recoveryKeyHash: v.optional(v.string()),
+    email: v.optional(v.string()),
   },
-  handler: async (ctx, { username, passwordHash, recoveryKeyHash }) => {
+  handler: async (ctx, { username, name, passwordHash, recoveryKeyHash, email }) => {
     const existing = await ctx.db
       .query("users")
       .withIndex("by_username", (q) => q.eq("username", username))
       .first();
-    if (existing) {
-      throw new Error("USERNAME_TAKEN");
-    }
+    if (existing) throw new Error("USERNAME_TAKEN");
+
     const userId = await ctx.db.insert("users", {
       username,
+      name,
       passwordHash,
       recoveryKeyHash,
+      email,
       createdAt: Date.now(),
       status: "online",
       lastSeen: Date.now(),
     });
-    return { userId, username };
+    return { userId, username, name };
   },
 });
 
@@ -37,14 +40,11 @@ export const login = mutation({
       .query("users")
       .withIndex("by_username", (q) => q.eq("username", username))
       .first();
-    if (!user) {
-      throw new Error("USER_NOT_FOUND");
-    }
-    if (user.passwordHash !== passwordHash) {
-      throw new Error("WRONG_PASSWORD");
-    }
+    if (!user) throw new Error("USER_NOT_FOUND");
+    if (user.passwordHash !== passwordHash) throw new Error("WRONG_PASSWORD");
+
     await ctx.db.patch(user._id, { status: "online", lastSeen: Date.now() });
-    return { userId: user._id, username: user.username };
+    return { userId: user._id, username: user.username, name: user.name ?? user.username };
   },
 });
 
@@ -70,7 +70,11 @@ export const resetPasswordWithRecoveryKey = mutation({
     if (!user.recoveryKeyHash || user.recoveryKeyHash !== recoveryKeyHash) {
       throw new Error("INVALID_RECOVERY_KEY");
     }
-    await ctx.db.patch(user._id, { passwordHash: newPasswordHash, status: "online", lastSeen: Date.now() });
+    await ctx.db.patch(user._id, {
+      passwordHash: newPasswordHash,
+      status: "online",
+      lastSeen: Date.now(),
+    });
     return { userId: user._id, username: user.username };
   },
 });
@@ -93,17 +97,24 @@ export const deleteAccount = mutation({
         await ctx.db.patch(roomId, { memberCount: room.memberCount - 1 });
       }
 
-      // Check if room is now empty
       const remaining = await ctx.db
         .query("roomMembers")
         .withIndex("by_room", (q) => q.eq("roomId", roomId))
         .collect();
+
       if (remaining.length === 0) {
         const msgs = await ctx.db
           .query("messages")
           .withIndex("by_room", (q) => q.eq("roomId", roomId))
           .collect();
-        for (const msg of msgs) await ctx.db.delete(msg._id);
+        for (const msg of msgs) {
+          const rxns = await ctx.db
+            .query("reactions")
+            .withIndex("by_message", (q) => q.eq("messageId", msg._id))
+            .collect();
+          for (const r of rxns) await ctx.db.delete(r._id);
+          await ctx.db.delete(msg._id);
+        }
         await ctx.db.delete(roomId);
       }
     }
@@ -119,14 +130,28 @@ export const deleteAccount = mutation({
       .collect();
     for (const f of [...asUser, ...asFriend]) await ctx.db.delete(f._id);
 
-    // 3. Delete user's messages in surviving rooms
+    // 3. Delete user's messages (and their reactions) in surviving rooms
     const userMessages = await ctx.db
       .query("messages")
       .filter((q) => q.eq(q.field("userId"), userId))
       .collect();
-    for (const msg of userMessages) await ctx.db.delete(msg._id);
+    for (const msg of userMessages) {
+      const rxns = await ctx.db
+        .query("reactions")
+        .withIndex("by_message", (q) => q.eq("messageId", msg._id))
+        .collect();
+      for (const r of rxns) await ctx.db.delete(r._id);
+      await ctx.db.delete(msg._id);
+    }
 
-    // 4. Delete user record
+    // 4. Clear typing indicators
+    const typingEntries = await ctx.db
+      .query("typingIndicators")
+      .filter((q) => q.eq(q.field("userId"), userId))
+      .collect();
+    for (const t of typingEntries) await ctx.db.delete(t._id);
+
+    // 5. Delete user record
     await ctx.db.delete(userId);
   },
 });
@@ -144,3 +169,4 @@ export const updateStatus = mutation({
     await ctx.db.patch(userId, { status, lastSeen: Date.now() });
   },
 });
+

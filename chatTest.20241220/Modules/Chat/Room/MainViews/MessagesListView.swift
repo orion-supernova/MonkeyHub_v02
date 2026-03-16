@@ -11,7 +11,6 @@ struct MessagesListView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var showScrollToBottom = false
     @State private var scrollToBottom = false
-    @State private var lastMessageCount = 0
 
     private var currentUserId: String {
         UserDefaults.standard.string(forKey: "userId") ?? ""
@@ -50,22 +49,7 @@ struct MessagesListView: View {
         .overlay(alignment: .bottomTrailing) {
             scrollDownButton
         }
-        .onChange(of: viewModel.messages.count) { oldCount, newCount in
-            // Auto-scroll when new message is added (not when loading older messages)
-            if newCount > oldCount && newCount > lastMessageCount {
-                // Check if the newest message is from current user OR if we're already near bottom
-                if let lastMessage = viewModel.messages.last,
-                   lastMessage.senderId == currentUserId || !showScrollToBottom {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        scrollToBottom = true
-                    }
-                }
-            }
-            lastMessageCount = newCount
-        }
-        .onAppear {
-            lastMessageCount = viewModel.messages.count
-        }
+        .onAppear { }
     }
 
     private func dismissPicker() {

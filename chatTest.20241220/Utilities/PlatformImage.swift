@@ -9,7 +9,7 @@ public typealias PlatformImage = NSImage
 #endif
 
 extension PlatformImage {
-    /// Convert PlatformImage to Data for CloudKit storage
+    /// Convert PlatformImage to Data for Convex file storage
     func toData() -> Data? {
         #if canImport(UIKit)
         return self.jpegData(compressionQuality: 0.8)

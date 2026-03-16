@@ -9,9 +9,14 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as files from "../files.js";
 import type * as friends from "../friends.js";
 import type * as messages from "../messages.js";
+import type * as notifications from "../notifications.js";
+import type * as reactions from "../reactions.js";
 import type * as rooms from "../rooms.js";
+import type * as typing from "../typing.js";
+import type * as users from "../users.js";
 
 import type {
   ApiFromModules,
@@ -21,9 +26,14 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  files: typeof files;
   friends: typeof friends;
   messages: typeof messages;
+  notifications: typeof notifications;
+  reactions: typeof reactions;
   rooms: typeof rooms;
+  typing: typeof typing;
+  users: typeof users;
 }>;
 
 /**

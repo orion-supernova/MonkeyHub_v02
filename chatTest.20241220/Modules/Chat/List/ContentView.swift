@@ -5,12 +5,10 @@
 //  Created by muratcankoc on 20/12/2024.
 //
 
-import CloudKit
 import SwiftUI
 
 struct ContentView: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
-    @StateObject private var cloudKit = CloudKitManager.shared
     @StateObject private var viewModel = ChatListViewModel()
     @State private var isShowingNewRoomSheet = false
     @State private var newRoomName = ""
@@ -40,26 +38,28 @@ struct ContentView: View {
 
     private func createRoom(type: RoomType, messageLifetime: TimeInterval?) async {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-        let room = ChatRoom(
-            name: newRoomName,
-            createdBy: userId,
-            participants: [userId],
-            type: type,
-            messageLifetime: messageLifetime
-        )
-
         do {
-            try await cloudKit.createChatRoom(room)
-
-            // Add room optimistically and navigate to it
+            let roomId = try await ConvexChatAPI.shared.createRoom(
+                name: newRoomName,
+                userId: userId,
+                isPrivate: true,
+                type: type,
+                messageLifetime: messageLifetime
+            )
+            let room = ChatRoom(
+                id: roomId,
+                name: newRoomName,
+                createdBy: userId,
+                participants: [userId],
+                type: type,
+                messageLifetime: messageLifetime
+            )
             viewModel.addRoomOptimistically(room)
             isShowingNewRoomSheet = false
             newRoomName = ""
-
-            // Navigate to the new room after a brief delay (let sheet dismiss)
-            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+            try? await Task.sleep(nanoseconds: 300_000_000)
             navigationState.path.append(room)
-        } catch let error {
+        } catch {
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
@@ -77,29 +77,22 @@ struct ContentView: View {
     }
 
     private func leaveRoom(_ room: ChatRoom) async {
-        // Optimistically remove from UI immediately
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         viewModel.removeRoomOptimistically(room.id)
         do {
-            try await cloudKit.leaveRoom(room)
-            // Don't call loadData() immediately - CloudKit eventual consistency
-            // will return stale data and add the room back. Let the next
-            // natural refresh (pull-to-refresh, app foreground) sync the data.
-        } catch let error {
-            // Revert on error
+            try await ConvexChatAPI.shared.leaveRoom(roomId: room.id, userId: userId)
+        } catch {
             viewModel.addRoomOptimistically(room)
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
 
     private func deleteRoomCompletely(_ room: ChatRoom) async {
-        // Optimistically remove from UI immediately
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         viewModel.removeRoomOptimistically(room.id)
         do {
-            try await cloudKit.deleteRoomAndMessages(room)
-            // Don't call loadData() immediately - CloudKit eventual consistency
-            // will return stale data and add the room back.
-        } catch let error {
-            // Revert on error
+            try await ConvexChatAPI.shared.deleteRoom(roomId: room.id, userId: userId)
+        } catch {
             viewModel.addRoomOptimistically(room)
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
@@ -566,50 +559,8 @@ struct ContentView: View {
         }
     }
 
-    private func isUserExistOnDatabase() -> Bool {
-        // Get the user ID from UserDefaults
-        guard let userId = userDefaults.string(forKey: userIdUserDefaultsKey) else {
-            // If no user ID is stored in UserDefaults, return false
-            return false
-        }
-
-        // Reference to the CloudKit database
-        let database = cloudKit.database
-
-        // Create a predicate to search for the user by their ID
-        let predicate = NSPredicate(format: "id == %@", userId)
-        let query = CKQuery(recordType: "ChatUser", predicate: predicate)
-
-        // Perform the query asynchronously
-        let semaphore = DispatchSemaphore(value: 0)
-        var userExists = false
-
-        database.fetch(withQuery: query) { result in
-            switch result {
-            case .success(let matchResults):
-                let results = matchResults.matchResults
-                guard !results.isEmpty else {
-                    userExists = false
-                    semaphore.signal()
-                    return
-                }
-                userExists = true
-            case .failure(let error):
-                print(error.localizedDescription)
-                userExists = false
-            }
-            // Signal semaphore to continue execution
-            semaphore.signal()
-        }
-        // Wait for the async CloudKit query to finish
-        semaphore.wait()
-
-        return userExists
-    }
-
     private func signOut() async {
-        userDefaults.set(nil, forKey: userIdUserDefaultsKey)
-        cloudKit.isAuthenticated = false
+        ConvexAuthService.shared.signOut()
     }
 
     private func themeIcon(for theme: AppTheme) -> String {
@@ -628,37 +579,36 @@ struct ContentView: View {
     }
 
     private func joinRoom(_ room: ChatRoom) async {
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         do {
-            try await cloudKit.joinRoom(room)
+            try await ConvexChatAPI.shared.joinRoom(roomId: room.id, userId: userId)
             await loadData()
             isShowingJoinRoomSheet = false
-        } catch let error {
+        } catch {
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
 
     private func loadAvailableRooms() async {
         do {
-            availableRooms = try await cloudKit.fetchAvailableRooms()
-        } catch let error {
+            availableRooms = try await ConvexChatAPI.shared.fetchPublicRooms()
+        } catch {
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
 
     private func createPrivateRoom(with friend: ChatUser) async {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-        let room = ChatRoom(
-            name: "Chat with \(friend.name)",
-            createdBy: userId,
-            participants: [userId, friend.id],
-            type: .regular,
-            messageLifetime: nil
-        )
-
         do {
-            try await cloudKit.createChatRoom(room)
-            await loadData()
-        } catch let error {
+            let roomId = try await ConvexChatAPI.shared.getOrCreateDM(userId: userId, friendId: friend.id)
+            let room = ChatRoom(
+                id: roomId,
+                name: "Chat with \(friend.displayName)",
+                createdBy: userId,
+                participants: [userId, friend.id]
+            )
+            viewModel.addRoomOptimistically(room)
+        } catch {
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
@@ -809,30 +759,23 @@ struct EnhancedRoomCard: View {
             }
         }
 
-        // Fallback: fetch from CloudKit
-        Task {
-            await fetchAvatarFromCloud()
+        // Fallback: fetch from Convex storage if storageId available
+        if let storageId = room.avatarStorageId {
+            Task { await fetchAvatarFromConvex(storageId: storageId) }
         }
     }
 
-    private func fetchAvatarFromCloud() async {
+    private func fetchAvatarFromConvex(storageId: String) async {
         do {
-            let predicate = NSPredicate(format: "%K == %@", ChatRoom.idKey, room.id)
-            let query = CKQuery(recordType: ChatRoom.recordType, predicate: predicate)
-
-            let (records, _) = try await CloudKitManager.shared.database.records(matching: query, resultsLimit: 1)
-            guard let record = try records.first?.1.get() else { return }
-
-            if let asset = record[ChatRoom.avatarAssetKey] as? CKAsset,
-               let fileURL = asset.fileURL,
-               let data = try? Data(contentsOf: fileURL),
-               let image = PlatformImage.fromData(data) {
-                await MainActor.run {
-                    roomAvatarImage = image
+            if let urlString = try await ConvexChatAPI.shared.getFileURL(storageId: storageId),
+               let url = URL(string: urlString) {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let image = PlatformImage.fromData(data) {
+                    await MainActor.run { roomAvatarImage = image }
                 }
             }
         } catch {
-            // Silently fail - will show placeholder
+            // Silently fail — show placeholder
         }
     }
 }

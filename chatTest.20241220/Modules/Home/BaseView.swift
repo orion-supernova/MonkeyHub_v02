@@ -55,9 +55,12 @@ struct BaseView: View {
         }
         .animation(.spring(duration: 0.3), value: navigationState.currentScreen)
         .task {
-            // Subscribe to all rooms on app launch (once per session)
+            // Subscribe to the user's room list in real-time (once per session)
             if !hasSubscribed {
-                await NotificationSubscriptionManager.shared.forceResubscribeToAllRooms()
+                let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+                if !userId.isEmpty {
+                    ConvexSubscriptionManager.shared.subscribeToRooms(userId: userId)
+                }
                 hasSubscribed = true
             }
         }

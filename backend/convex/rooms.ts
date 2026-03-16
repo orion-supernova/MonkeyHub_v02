@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 
 export const create = mutation({
@@ -8,8 +8,10 @@ export const create = mutation({
     isPrivate: v.boolean(),
     userId: v.id("users"),
     passwordHash: v.optional(v.string()),
+    type: v.optional(v.string()),           // "regular" | "secret"
+    messageLifetime: v.optional(v.number()), // seconds
   },
-  handler: async (ctx, { name, description, isPrivate, userId, passwordHash }) => {
+  handler: async (ctx, { name, description, isPrivate, userId, passwordHash, type, messageLifetime }) => {
     const existing = await ctx.db
       .query("rooms")
       .withIndex("by_name", (q) => q.eq("name", name))
@@ -24,6 +26,8 @@ export const create = mutation({
       isPrivate,
       memberCount: 1,
       passwordHash: passwordHash && passwordHash.length > 0 ? passwordHash : undefined,
+      type: type ?? "regular",
+      messageLifetime,
     });
     await ctx.db.insert("roomMembers", {
       roomId,
@@ -36,7 +40,11 @@ export const create = mutation({
 });
 
 export const join = mutation({
-  args: { roomId: v.id("rooms"), userId: v.id("users"), passwordHash: v.optional(v.string()) },
+  args: {
+    roomId: v.id("rooms"),
+    userId: v.id("users"),
+    passwordHash: v.optional(v.string()),
+  },
   handler: async (ctx, { roomId, userId, passwordHash }) => {
     const room = await ctx.db.get(roomId);
     if (!room) throw new Error("ROOM_NOT_FOUND");
@@ -56,9 +64,46 @@ export const join = mutation({
       joinedAt: Date.now(),
       role: "member",
     });
-    if (room) {
-      await ctx.db.patch(roomId, { memberCount: room.memberCount + 1 });
+    await ctx.db.patch(roomId, { memberCount: room.memberCount + 1 });
+  },
+});
+
+export const leave = mutation({
+  args: { roomId: v.id("rooms"), userId: v.id("users") },
+  handler: async (ctx, { roomId, userId }) => {
+    const member = await ctx.db
+      .query("roomMembers")
+      .withIndex("by_room_user", (q) => q.eq("roomId", roomId).eq("userId", userId))
+      .first();
+    if (!member) return;
+
+    await ctx.db.delete(member._id);
+    const room = await ctx.db.get(roomId);
+    if (room && room.memberCount > 0) {
+      await ctx.db.patch(roomId, { memberCount: room.memberCount - 1 });
     }
+
+    // Auto-delete room if now empty
+    const remaining = await ctx.db
+      .query("roomMembers")
+      .withIndex("by_room", (q) => q.eq("roomId", roomId))
+      .collect();
+    if (remaining.length === 0) {
+      await _deleteRoomContents(ctx, roomId);
+      await ctx.db.delete(roomId);
+    }
+  },
+});
+
+export const deleteRoom = mutation({
+  args: { roomId: v.id("rooms"), userId: v.id("users") },
+  handler: async (ctx, { roomId, userId }) => {
+    const room = await ctx.db.get(roomId);
+    if (!room) throw new Error("ROOM_NOT_FOUND");
+    if (room.createdBy.toString() !== userId.toString()) throw new Error("NOT_OWNER");
+
+    await _deleteRoomContents(ctx, roomId);
+    await ctx.db.delete(roomId);
   },
 });
 
@@ -109,59 +154,17 @@ export const updateRoom = mutation({
   },
 });
 
-export const leave = mutation({
-  args: { roomId: v.id("rooms"), userId: v.id("users") },
-  handler: async (ctx, { roomId, userId }) => {
-    const member = await ctx.db
-      .query("roomMembers")
-      .withIndex("by_room_user", (q) => q.eq("roomId", roomId).eq("userId", userId))
-      .first();
-    if (!member) return;
-
-    await ctx.db.delete(member._id);
-    const room = await ctx.db.get(roomId);
-    if (room && room.memberCount > 0) {
-      await ctx.db.patch(roomId, { memberCount: room.memberCount - 1 });
-    }
-
-    // Auto-delete room if now empty
-    const remaining = await ctx.db
-      .query("roomMembers")
-      .withIndex("by_room", (q) => q.eq("roomId", roomId))
-      .collect();
-    if (remaining.length === 0) {
-      const msgs = await ctx.db
-        .query("messages")
-        .withIndex("by_room", (q) => q.eq("roomId", roomId))
-        .collect();
-      for (const msg of msgs) await ctx.db.delete(msg._id);
-      await ctx.db.delete(roomId);
-    }
+export const updateRoomAvatar = mutation({
+  args: {
+    roomId: v.id("rooms"),
+    userId: v.id("users"),
+    storageId: v.id("_storage"),
   },
-});
-
-export const deleteRoom = mutation({
-  args: { roomId: v.id("rooms"), userId: v.id("users") },
-  handler: async (ctx, { roomId, userId }) => {
+  handler: async (ctx, { roomId, userId, storageId }) => {
     const room = await ctx.db.get(roomId);
     if (!room) throw new Error("ROOM_NOT_FOUND");
     if (room.createdBy.toString() !== userId.toString()) throw new Error("NOT_OWNER");
-
-    // Delete all messages
-    const msgs = await ctx.db
-      .query("messages")
-      .withIndex("by_room", (q) => q.eq("roomId", roomId))
-      .collect();
-    for (const msg of msgs) await ctx.db.delete(msg._id);
-
-    // Delete all member records
-    const members = await ctx.db
-      .query("roomMembers")
-      .withIndex("by_room", (q) => q.eq("roomId", roomId))
-      .collect();
-    for (const m of members) await ctx.db.delete(m._id);
-
-    await ctx.db.delete(roomId);
+    await ctx.db.patch(roomId, { avatarStorageId: storageId });
   },
 });
 
@@ -181,10 +184,24 @@ export const listUserRooms = query({
       .query("roomMembers")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .collect();
+
     const rooms = await Promise.all(
-      memberships.map((m) => ctx.db.get(m.roomId))
+      memberships.map(async (m) => {
+        const room = await ctx.db.get(m.roomId);
+        if (!room) return null;
+        // Include participant IDs for the iOS app
+        const members = await ctx.db
+          .query("roomMembers")
+          .withIndex("by_room", (q) => q.eq("roomId", m.roomId))
+          .collect();
+        const participantIds = members.map((mem) => mem.userId.toString());
+        return { ...room, participantIds };
+      })
     );
-    return rooms.filter(Boolean);
+
+    return rooms
+      .filter(Boolean)
+      .sort((a, b) => (b!.lastMessageTime ?? b!.createdAt) - (a!.lastMessageTime ?? a!.createdAt));
   },
 });
 
@@ -198,27 +215,62 @@ export const getMembers = query({
     const users = await Promise.all(
       members.map(async (m) => {
         const user = await ctx.db.get(m.userId);
-        return user ? { ...user, role: m.role } : null;
+        if (!user) return null;
+        return {
+          _id: user._id,
+          username: user.username,
+          name: user.name,
+          email: user.email,
+          bio: user.bio,
+          avatarStorageId: user.avatarStorageId,
+          status: user.status,
+          deviceTokens: user.deviceTokens,
+          role: m.role,
+        };
       })
     );
     return users.filter(Boolean);
   },
 });
 
+// Internal query: fetch members with device tokens (used for push notifications)
+export const getMembersWithTokens = internalQuery({
+  args: { roomId: v.id("rooms"), excludeUserId: v.id("users") },
+  handler: async (ctx, { roomId, excludeUserId }) => {
+    const members = await ctx.db
+      .query("roomMembers")
+      .withIndex("by_room", (q) => q.eq("roomId", roomId))
+      .collect();
+    const users = await Promise.all(
+      members
+        .filter((m) => m.userId.toString() !== excludeUserId.toString())
+        .map((m) => ctx.db.get(m.userId))
+    );
+    return users
+      .filter(Boolean)
+      .map((u) => ({ userId: u!._id, deviceTokens: u!.deviceTokens ?? [] }));
+  },
+});
+
 export const getRoom = query({
   args: { roomId: v.id("rooms") },
   handler: async (ctx, { roomId }) => {
-    return await ctx.db.get(roomId);
+    const room = await ctx.db.get(roomId);
+    if (!room) return null;
+    const members = await ctx.db
+      .query("roomMembers")
+      .withIndex("by_room", (q) => q.eq("roomId", roomId))
+      .collect();
+    return { ...room, participantIds: members.map((m) => m.userId.toString()) };
   },
 });
 
 export const getOrCreateDM = mutation({
   args: { userId: v.id("users"), friendId: v.id("users") },
   handler: async (ctx, { userId, friendId }) => {
-    if (userId.toString() === friendId.toString()) {
-      throw new Error("CANNOT_DM_SELF");
-    }
+    if (userId.toString() === friendId.toString()) throw new Error("CANNOT_DM_SELF");
 
+    // Check for existing private room with both users
     const memberships = await ctx.db
       .query("roomMembers")
       .withIndex("by_user", (q) => q.eq("userId", userId))
@@ -231,9 +283,7 @@ export const getOrCreateDM = mutation({
         .query("roomMembers")
         .withIndex("by_room_user", (q) => q.eq("roomId", m.roomId).eq("userId", friendId))
         .first();
-      if (friendMembership) {
-        return m.roomId;
-      }
+      if (friendMembership) return m.roomId;
     }
 
     const ordered = [userId.toString(), friendId.toString()].sort();
@@ -243,31 +293,19 @@ export const getOrCreateDM = mutation({
       .query("rooms")
       .withIndex("by_name", (q) => q.eq("name", name))
       .first();
-    if (existingByName) {
-      return existingByName._id;
-    }
+    if (existingByName) return existingByName._id;
 
     const roomId = await ctx.db.insert("rooms", {
       name,
-      description: undefined,
       createdBy: userId,
       createdAt: Date.now(),
       isPrivate: true,
       memberCount: 2,
+      type: "regular",
     });
 
-    await ctx.db.insert("roomMembers", {
-      roomId,
-      userId,
-      joinedAt: Date.now(),
-      role: "owner",
-    });
-    await ctx.db.insert("roomMembers", {
-      roomId,
-      userId: friendId,
-      joinedAt: Date.now(),
-      role: "member",
-    });
+    await ctx.db.insert("roomMembers", { roomId, userId, joinedAt: Date.now(), role: "owner" });
+    await ctx.db.insert("roomMembers", { roomId, userId: friendId, joinedAt: Date.now(), role: "member" });
 
     return roomId;
   },
@@ -294,3 +332,38 @@ export const getMembership = query({
     return m ? { role: m.role } : null;
   },
 });
+
+// ─── Internal helpers ───────────────────────────────────────────────────────
+
+async function _deleteRoomContents(
+  ctx: { db: any },
+  roomId: string
+) {
+  // Delete all messages and their reactions
+  const msgs = await ctx.db
+    .query("messages")
+    .withIndex("by_room", (q: any) => q.eq("roomId", roomId))
+    .collect();
+  for (const msg of msgs) {
+    const reactions = await ctx.db
+      .query("reactions")
+      .withIndex("by_message", (q: any) => q.eq("messageId", msg._id))
+      .collect();
+    for (const r of reactions) await ctx.db.delete(r._id);
+    await ctx.db.delete(msg._id);
+  }
+
+  // Delete all typing indicators
+  const typing = await ctx.db
+    .query("typingIndicators")
+    .withIndex("by_room", (q: any) => q.eq("roomId", roomId))
+    .collect();
+  for (const t of typing) await ctx.db.delete(t._id);
+
+  // Delete all member records
+  const members = await ctx.db
+    .query("roomMembers")
+    .withIndex("by_room", (q: any) => q.eq("roomId", roomId))
+    .collect();
+  for (const m of members) await ctx.db.delete(m._id);
+}

@@ -245,7 +245,16 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
     }
 
     func updateContent(_ content: Content) {
+        let wasAtBottom = isAtBottom()
         hostingController.rootView = content
+        if wasAtBottom {
+            // Force layout immediately so contentSize is up-to-date, then snap to bottom
+            // without any async delay (avoids the one-frame flicker).
+            hostingController.view.setNeedsLayout()
+            hostingController.view.layoutIfNeeded()
+            scrollView.layoutIfNeeded()
+            scrollToBottom(animated: false)
+        }
     }
 
     func preservePositionDuringUpdate(content: Content) {

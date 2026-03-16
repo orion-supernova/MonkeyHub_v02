@@ -1,4 +1,3 @@
-import CloudKit
 import SwiftUI
 
 struct SearchView: View {
@@ -261,10 +260,9 @@ struct SearchView: View {
                             joinedRoomIds: viewModel.joinedRoomIds,
                             joinRoom: { room in
                                 Task {
-                                    try? await CloudKitManager.shared.joinRoom(room)
-                                    // Update room object to include current user as participant
-                                    var joinedRoom = room
                                     let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
+                                    try? await ConvexChatAPI.shared.joinRoom(roomId: room.id, userId: userId)
+                                    var joinedRoom = room
                                     if !joinedRoom.participants.contains(userId) {
                                         joinedRoom.participants.append(userId)
                                     }
@@ -286,12 +284,13 @@ struct SearchView: View {
                                 Task {
                                     let userId =
                                         UserDefaults.standard.string(forKey: "userId") ?? ""
+                                    let roomId = try? await ConvexChatAPI.shared.getOrCreateDM(userId: userId, friendId: user.id)
                                     let room = ChatRoom(
-                                        name: "Chat with \(user.name)",
+                                        id: roomId ?? UUID().uuidString,
+                                        name: "Chat with \(user.displayName)",
                                         createdBy: userId,
                                         participants: [userId, user.id]
                                     )
-                                    try? await CloudKitManager.shared.createChatRoom(room)
                                     dismiss()
                                     // Navigate to the newly created room
                                     NavigationStateManager.shared.navigateToRoom(room)

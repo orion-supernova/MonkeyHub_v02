@@ -1,5 +1,4 @@
 import Foundation
-import CloudKit
 
 /// Handles all disk persistence operations for messages and rooms
 /// Single Responsibility: Disk I/O only

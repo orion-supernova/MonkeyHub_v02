@@ -1,4 +1,3 @@
-import CloudKit
 import SwiftUI
 import Combine
 
@@ -8,311 +7,169 @@ final class RoomInfoViewModel: ObservableObject {
     @Published private(set) var members: [ChatUser] = []
     @Published private(set) var isLoading = false
     @Published private(set) var isUploadingAvatar = false
-    @Published private(set) var error: CloudKitError?
-    
-    private let cloudKit = CloudKitManager.shared
+    @Published private(set) var error: Error?
+
+    private let convexAPI = ConvexChatAPI.shared
     private var cancellables = Set<AnyCancellable>()
-    
+
     init(room: ChatRoom) {
         self.room = room
     }
-    
+
     func refreshRoom() async {
         isLoading = true
         error = nil
-        
         do {
-            let recordId = CKRecord.ID(recordName: room.id)
-            let record = try await cloudKit.database.record(for: recordId)
-            room = try ChatRoom(from: record)
-            isLoading = false
+            if let updated = try await convexAPI.fetchRoom(roomId: room.id) {
+                room = updated
+            }
         } catch {
-            self.error = error as? CloudKitError ?? .unknown(error)
-            isLoading = false
+            self.error = error
         }
+        isLoading = false
     }
-    
+
     func loadMembers() async {
         isLoading = true
         error = nil
-        
         do {
-            // Fetch current user first
-            let currentUser = try await cloudKit.fetchCurrentUser()
-            
-            // Fetch all other users
-            let allUsers = try await cloudKit.fetchUsers()
-            
-            // Combine current user with other members
-            var allMembers = allUsers.filter { user in
-                room.participants.contains(user.id)
-            }
-            
-            // Add current user if they're a participant and not already in the list
-            if room.participants.contains(currentUser.id),
-               !allMembers.contains(where: { $0.id == currentUser.id }) {
-                allMembers.append(currentUser)
-            }
-            
-            members = allMembers
-            isLoading = false
+            members = try await convexAPI.fetchRoomMembers(roomId: room.id)
         } catch {
-            self.error = error as? CloudKitError ?? .unknown(error)
-            isLoading = false
+            self.error = error
         }
+        isLoading = false
     }
-    
-    func updateRoomAvatar(_ image: PlatformImage) async {
-        print("🖼️ RoomInfoViewModel: updateRoomAvatar called")
-        print("🖼️ RoomInfoViewModel: Room ID: \(room.id)")
-        print("🖼️ RoomInfoViewModel: Room Name: \(room.name)")
-        isUploadingAvatar = true
-        error = nil
 
-        do {
-            print("🖼️ RoomInfoViewModel: Creating asset from image...")
-            let asset = try createAsset(from: image)
-            print("🖼️ RoomInfoViewModel: Asset created at: \(asset.fileURL?.path ?? "unknown")")
-
-            // Query by the "id" field, not recordID
-            print("🖼️ RoomInfoViewModel: Querying room by id field: \(room.id)")
-            let predicate = NSPredicate(format: "%K == %@", ChatRoom.idKey, room.id)
-            let query = CKQuery(recordType: ChatRoom.recordType, predicate: predicate)
-
-            let (records, _) = try await cloudKit.database.records(matching: query, resultsLimit: 1)
-            guard let record = try records.first?.1.get() else {
-                print("❌ RoomInfoViewModel: Room not found with id: \(room.id)")
-                throw CloudKitError.recordNotFound
-            }
-
-            print("✅ RoomInfoViewModel: Room found! Record ID: \(record.recordID.recordName)")
-
-            record[ChatRoom.avatarAssetKey] = asset
-
-            print("🖼️ RoomInfoViewModel: Saving record with avatar...")
-            _ = try await cloudKit.database.modifyRecords(saving: [record], deleting: [])
-            print("🖼️ RoomInfoViewModel: Avatar saved to CloudKit successfully")
-
-            // Refresh room to get updated avatarAsset
-            let (updatedRecords, _) = try await cloudKit.database.records(matching: query, resultsLimit: 1)
-            if let updatedRecord = try updatedRecords.first?.1.get() {
-                room = try ChatRoom(from: updatedRecord)
-                print("🖼️ RoomInfoViewModel: Room refreshed with new avatar")
-            }
-
-            // Send system message about avatar change
-            await sendAvatarChangeMessage()
-
-            isUploadingAvatar = false
-        } catch let error as CKError {
-            print("❌ RoomInfoViewModel: CloudKit error: \(error)")
-            self.error = .unknown(error)
-            isUploadingAvatar = false
-        } catch {
-            print("❌ RoomInfoViewModel: Failed to update avatar: \(error)")
-            self.error = error as? CloudKitError ?? .unknown(error)
-            isUploadingAvatar = false
-        }
-    }
-    
     func updateRoomName(_ newName: String) async {
         guard !newName.isEmpty, newName != room.name else { return }
-        
         isLoading = true
         error = nil
-        
         let oldName = room.name
-        
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         do {
-            let recordId = CKRecord.ID(recordName: room.id)
-            let record = try await cloudKit.database.record(for: recordId)
-            record[ChatRoom.nameKey] = newName
-            
-            _ = try await cloudKit.database.modifyRecords(saving: [record], deleting: [])
-            
-            // Refresh the room data
-            room = try ChatRoom(from: try await cloudKit.database.record(for: recordId))
-            
-            // Send system message about name change
-            await sendNameChangeMessage(oldName: oldName, newName: newName)
-            
-            isLoading = false
+            try await convexAPI.updateRoom(roomId: room.id, userId: userId, name: newName, description: room.description)
+            var updated = room
+            updated = ChatRoom(
+                id: room.id, name: newName, createdBy: room.createdBy,
+                createdAt: room.createdAt, lastMessage: room.lastMessage,
+                lastMessageDate: room.lastMessageDate, participants: room.participants,
+                description: room.description, isPrivate: room.isPrivate,
+                type: room.type, messageLifetime: room.messageLifetime,
+                avatarStorageId: room.avatarStorageId, avatarURL: room.avatarURL
+            )
+            room = updated
+            await sendSystemMessage("\(currentUserName()) changed the room name from \"\(oldName)\" to \"\(newName)\"")
         } catch {
-            self.error = error as? CloudKitError ?? .unknown(error)
-            isLoading = false
+            self.error = error
         }
+        isLoading = false
     }
-    
+
     func updateRoomDescription(_ newDescription: String) async {
-        let trimmedDescription = newDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmedDescription != (room.description ?? "") else { return }
-        
+        let trimmed = newDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != (room.description ?? "") else { return }
         isLoading = true
         error = nil
-        
-        let oldDescription = room.description
-        
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         do {
-            let recordId = CKRecord.ID(recordName: room.id)
-            let record = try await cloudKit.database.record(for: recordId)
-            
-            if trimmedDescription.isEmpty {
-                record[ChatRoom.descriptionKey] = nil
-            } else {
-                record[ChatRoom.descriptionKey] = trimmedDescription
-            }
-            
-            _ = try await cloudKit.database.modifyRecords(saving: [record], deleting: [])
-            
-            // Refresh the room data
-            room = try ChatRoom(from: try await cloudKit.database.record(for: recordId))
-            
-            // Send system message about description change
-            await sendDescriptionChangeMessage(oldDescription: oldDescription, newDescription: trimmedDescription)
-            
-            isLoading = false
+            try await convexAPI.updateRoom(roomId: room.id, userId: userId, name: room.name, description: trimmed.isEmpty ? nil : trimmed)
+            room = ChatRoom(
+                id: room.id, name: room.name, createdBy: room.createdBy,
+                createdAt: room.createdAt, lastMessage: room.lastMessage,
+                lastMessageDate: room.lastMessageDate, participants: room.participants,
+                description: trimmed.isEmpty ? nil : trimmed, isPrivate: room.isPrivate,
+                type: room.type, messageLifetime: room.messageLifetime,
+                avatarStorageId: room.avatarStorageId, avatarURL: room.avatarURL
+            )
+            await sendSystemMessage("\(currentUserName()) updated the room description")
         } catch {
-            self.error = error as? CloudKitError ?? .unknown(error)
-            isLoading = false
+            self.error = error
         }
+        isLoading = false
     }
-    
+
     func updateRoomPrivacy(_ isPrivate: Bool) async {
+        guard isPrivate != room.isPrivate else { return }
         isLoading = true
         error = nil
-        
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         do {
-            let recordId = CKRecord.ID(recordName: room.id)
-            let record = try await cloudKit.database.record(for: recordId)
-            record[ChatRoom.isPrivateKey] = isPrivate
-            
-            _ = try await cloudKit.database.modifyRecords(saving: [record], deleting: [])
-            
-            var updatedRoom = room
-            updatedRoom.isPrivate = isPrivate
-            room = updatedRoom
-            
-            // Send system message about privacy change
-            await sendPrivacyChangeMessage(isPrivate: isPrivate)
-            
-            isLoading = false
+            try await convexAPI.updateRoom(roomId: room.id, userId: userId, name: room.name, description: room.description, isPrivate: isPrivate)
+            room = ChatRoom(
+                id: room.id, name: room.name, createdBy: room.createdBy,
+                createdAt: room.createdAt, lastMessage: room.lastMessage,
+                lastMessageDate: room.lastMessageDate, participants: room.participants,
+                description: room.description, isPrivate: isPrivate,
+                type: room.type, messageLifetime: room.messageLifetime,
+                avatarStorageId: room.avatarStorageId, avatarURL: room.avatarURL
+            )
+            await sendSystemMessage("\(currentUserName()) made the room \(isPrivate ? "private" : "public")")
         } catch {
-            self.error = error as? CloudKitError ?? .unknown(error)
-            isLoading = false
+            self.error = error
         }
-    }
-    
-    private func sendAvatarChangeMessage() async {
-        let currentUserName = await fetchCurrentUserName()
-        let content = "\(currentUserName) updated the room avatar"
-        await sendSystemMessage(content)
+        isLoading = false
     }
 
-    private func sendNameChangeMessage(oldName: String, newName: String) async {
-        let currentUserName = await fetchCurrentUserName()
-        let content = "\(currentUserName) changed the room name from \"\(oldName)\" to \"\(newName)\""
-        await sendSystemMessage(content)
-    }
-
-    private func sendDescriptionChangeMessage(oldDescription: String?, newDescription: String) async {
-        let currentUserName = await fetchCurrentUserName()
-
-        let content: String
-        if let oldDesc = oldDescription, !oldDesc.isEmpty {
-            if newDescription.isEmpty {
-                content = "\(currentUserName) removed the room description"
-            } else {
-                content = "\(currentUserName) updated the room description"
-            }
-        } else {
-            content = "\(currentUserName) added a room description"
-        }
-
-        await sendSystemMessage(content)
-    }
-
-    private func sendPrivacyChangeMessage(isPrivate: Bool) async {
-        let currentUserName = await fetchCurrentUserName()
-        let content = isPrivate
-            ? "\(currentUserName) made this room private"
-            : "\(currentUserName) made this room public"
-        await sendSystemMessage(content)
-    }
-    
-    private func fetchCurrentUserName() async -> String {
+    func updateRoomAvatar(_ image: PlatformImage) async {
+        guard let data = image.toData() else { return }
+        isUploadingAvatar = true
+        error = nil
         do {
-            let user = try await cloudKit.fetchCurrentUser()
-            return user.name
+            let storageId = try await convexAPI.uploadFile(data: data, mimeType: "image/jpeg")
+            try await convexAPI.updateRoomAvatar(roomId: room.id, storageId: storageId)
+            room = ChatRoom(
+                id: room.id, name: room.name, createdBy: room.createdBy,
+                createdAt: room.createdAt, lastMessage: room.lastMessage,
+                lastMessageDate: room.lastMessageDate, participants: room.participants,
+                description: room.description, isPrivate: room.isPrivate,
+                type: room.type, messageLifetime: room.messageLifetime,
+                avatarStorageId: storageId, avatarURL: nil
+            )
+            await sendSystemMessage("\(currentUserName()) updated the room avatar")
         } catch {
-            return "Someone"
+            self.error = error
         }
+        isUploadingAvatar = false
     }
-    
-    private func sendSystemMessage(_ content: String) async {
-        let systemMessage = ChatMessage(
-            senderId: ChatMessage.systemSenderId,
-            senderName: ChatMessage.systemSenderName,
-            content: content,
-            type: .system,
-            roomId: room.id
-        )
 
-        try? await cloudKit.sendMessage(systemMessage)
-    }
-    
-    private func createAsset(from image: PlatformImage) throws -> CKAsset {
-        guard let data = image.toData() else {
-            throw CloudKitError.operationFailed
-        }
-        
-        let tempDirectory = FileManager.default.temporaryDirectory
-        let fileName = UUID().uuidString + ".jpg"
-        let fileURL = tempDirectory.appendingPathComponent(fileName)
-        
-        try data.write(to: fileURL)
-        
-        return CKAsset(fileURL: fileURL)
-    }
-    
     func removeMember(_ userId: String) async {
         isLoading = true
         error = nil
-
-        // Get the member name BEFORE removing (so we have it for the system message)
-        let removedMemberName = members.first(where: { $0.id == userId })?.name ?? "a member"
-
+        let removedName = members.first { $0.id == userId }?.displayName ?? "a member"
         do {
-            // IMPORTANT: Fetch the existing record from CloudKit first (required for proper update)
-            let recordID = CKRecord.ID(recordName: room.id)
-            let record = try await cloudKit.database.record(for: recordID)
-
-            // Update participants on the fetched record
-            var participants = record[ChatRoom.participantsKey] as? [String] ?? []
-            participants.removeAll { $0 == userId }
-            record[ChatRoom.participantsKey] = participants
-
-            // Save the updated record
-            _ = try await cloudKit.database.modifyRecords(saving: [record], deleting: [])
-
-            // Update local state
-            var updatedRoom = room
-            updatedRoom.participants = participants
-            room = updatedRoom
+            try await convexAPI.leaveRoom(roomId: room.id, userId: userId)
             members.removeAll { $0.id == userId }
-
-            // Send system message about member removal
-            await sendMemberRemovedMessage(removedMemberName: removedMemberName)
-
-            isLoading = false
+            var updatedParticipants = room.participants
+            updatedParticipants.removeAll { $0 == userId }
+            room = ChatRoom(
+                id: room.id, name: room.name, createdBy: room.createdBy,
+                createdAt: room.createdAt, lastMessage: room.lastMessage,
+                lastMessageDate: room.lastMessageDate, participants: updatedParticipants,
+                description: room.description, isPrivate: room.isPrivate,
+                type: room.type, messageLifetime: room.messageLifetime,
+                avatarStorageId: room.avatarStorageId, avatarURL: room.avatarURL
+            )
+            await sendSystemMessage("\(currentUserName()) removed \(removedName) from the room")
         } catch {
-            self.error = error as? CloudKitError ?? .unknown(error)
-            isLoading = false
+            self.error = error
         }
+        isLoading = false
     }
 
-    private func sendMemberRemovedMessage(removedMemberName: String) async {
-        let currentUserName = await fetchCurrentUserName()
-        let content = "\(currentUserName) removed \(removedMemberName) from the room"
-        await sendSystemMessage(content)
+    // MARK: - Private Helpers
+
+    private func currentUserName() -> String {
+        return userDefaults.string(forKey: "userName") ?? "Someone"
+    }
+
+    private func sendSystemMessage(_ content: String) async {
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+        _ = try? await convexAPI.sendMessage(
+            roomId: room.id,
+            userId: userId,
+            content: content,
+            type: .system,
+            senderName: ChatMessage.systemSenderName
+        )
     }
 }

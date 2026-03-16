@@ -1,5 +1,4 @@
 import SwiftUI
-import CloudKit
 
 struct RoomInfoView: View {
     @StateObject private var viewModel: RoomInfoViewModel
@@ -30,16 +29,74 @@ struct RoomInfoView: View {
     }
     
     var body: some View {
+        navigationStack
+            #if os(macOS)
+            .frame(minWidth: 820, minHeight: 680)
+            .frame(idealWidth: 900, idealHeight: 740)
+            #endif
+            .overlay {
+                if showFullscreenAvatar, let avatarImage = roomAvatarImage {
+                    ZoomableAvatarOverlay(
+                        image: avatarImage,
+                        namespace: avatarNamespace,
+                        isPresented: $showFullscreenAvatar
+                    )
+                }
+            }
+    }
+
+    private var navigationStack: some View {
+        stackWithSheets
+            .onChange(of: viewModel.room.avatarStorageId) { _ in loadRoomAvatar() }
+            .alert("Change Room Visibility", isPresented: $showVisibilityAlert) {
+                Button("Cancel", role: .cancel) {}
+                Button(pendingVisibilityValue ? "Make Private" : "Make Public") {
+                    Task { await viewModel.updateRoomPrivacy(pendingVisibilityValue) }
+                }
+            } message: {
+                Text(pendingVisibilityValue
+                    ? "This will make the room private. Only members can see and join this room."
+                    : "This will make the room public. Anyone can search and join this room.")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RoomWasDeleted"))) { notification in
+                if let roomId = notification.userInfo?["roomId"] as? String, roomId == viewModel.room.id {
+                    dismiss()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserRemovedFromRoom"))) { notification in
+                if let roomId = notification.userInfo?["roomId"] as? String, roomId == viewModel.room.id {
+                    dismiss()
+                }
+            }
+    }
+
+    private var stackWithSheets: some View {
+        baseNavigationStack
+            .onAppear { loadRoomAvatar() }
+            .task {
+                await viewModel.refreshRoom()
+                await viewModel.loadMembers()
+            }
+            .sheet(isPresented: $showImagePicker) { ImagePicker(image: $selectedImage) }
+            .onChange(of: selectedImage) { newImage in
+                if let image = newImage {
+                    Task {
+                        await viewModel.updateRoomAvatar(image)
+                        loadRoomAvatar()
+                        selectedImage = nil
+                    }
+                }
+            }
+    }
+
+    private var baseNavigationStack: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
                     avatarSection
                     roomInfoSection
                     membersSection
-
-                    if isCreator {
-                        actionsSection
-                    }
+                    if isCreator { actionsSection }
                 }
                 .padding()
             }
@@ -52,90 +109,25 @@ struct RoomInfoView: View {
             #if canImport(UIKit)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .toolbar {
-                ToolbarItem(placement: {
-                    #if canImport(UIKit)
-                    return .navigationBarTrailing
-                    #else
-                    return .automatic
-                    #endif
-                }()) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                    #if os(macOS)
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    #endif
-                }
-            }
-            .onAppear {
-                loadRoomAvatar()
-            }
-            .task {
-                await viewModel.refreshRoom()
-                await viewModel.loadMembers()
-            }
-            .sheet(isPresented: $showImagePicker) {
-                ImagePicker(image: $selectedImage)
-            }
-            .onChange(of: selectedImage) { newImage in
-                print("🖼️ RoomInfoView: selectedImage changed: \(newImage != nil)")
-                if let image = newImage {
-                    print("🖼️ RoomInfoView: Starting avatar upload...")
-                    Task {
-                        await viewModel.updateRoomAvatar(image)
-                        print("🖼️ RoomInfoView: Avatar upload completed, reloading...")
-                        // Reload avatar after upload completes
-                        loadRoomAvatar()
-                        selectedImage = nil
-                    }
-                }
-            }
-            .onChange(of: viewModel.room.avatarAsset) { _ in
-                // Reload avatar whenever the room's avatarAsset changes
-                loadRoomAvatar()
-            }
-            .alert("Change Room Visibility", isPresented: $showVisibilityAlert) {
-                Button("Cancel", role: .cancel) {}
-                Button(pendingVisibilityValue ? "Make Private" : "Make Public") {
-                    Task {
-                        await viewModel.updateRoomPrivacy(pendingVisibilityValue)
-                    }
-                }
-            } message: {
-                Text(pendingVisibilityValue
-                    ? "This will make the room private. Only members can see and join this room."
-                    : "This will make the room public. Anyone can search and join this room.")
-            }
-            // Listen for room deletion - dismiss if this room was deleted
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RoomWasDeleted"))) { notification in
-                if let roomId = notification.userInfo?["roomId"] as? String,
-                   roomId == viewModel.room.id {
-                    dismiss()
-                }
-            }
-            // Listen for user removal - dismiss if current user was removed
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserRemovedFromRoom"))) { notification in
-                if let roomId = notification.userInfo?["roomId"] as? String,
-                   roomId == viewModel.room.id {
-                    dismiss()
-                }
-            }
+            .toolbar { doneToolbarItem }
         }
-        #if os(macOS)
-        .frame(minWidth: 820, minHeight: 680)
-        .frame(idealWidth: 900, idealHeight: 740)
-        #endif
-        .overlay {
-            if showFullscreenAvatar, let avatarImage = roomAvatarImage {
-                ZoomableAvatarOverlay(
-                    image: avatarImage,
-                    namespace: avatarNamespace,
-                    isPresented: $showFullscreenAvatar
-                )
-            }
+    }
+
+    @ToolbarContentBuilder
+    private var doneToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: {
+            #if canImport(UIKit)
+            return .navigationBarTrailing
+            #else
+            return .automatic
+            #endif
+        }()) {
+            Button("Done") { dismiss() }
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                #if os(macOS)
+                .buttonStyle(.plain)
+                .focusable(false)
+                #endif
         }
     }
     
@@ -151,32 +143,25 @@ struct RoomInfoView: View {
             }
         }
 
-        // Fallback: fetch from CloudKit if local file not available
-        Task {
-            await fetchAvatarFromCloud()
+        // Fallback: fetch from Convex storage if available
+        if let storageId = viewModel.room.avatarStorageId {
+            Task {
+                await fetchAvatarFromConvex(storageId: storageId)
+            }
         }
     }
 
-    private func fetchAvatarFromCloud() async {
+    private func fetchAvatarFromConvex(storageId: String) async {
         do {
-            // Query by the "id" field, not recordID (they may differ)
-            let predicate = NSPredicate(format: "%K == %@", ChatRoom.idKey, viewModel.room.id)
-            let query = CKQuery(recordType: ChatRoom.recordType, predicate: predicate)
-
-            let (records, _) = try await CloudKitManager.shared.database.records(matching: query, resultsLimit: 1)
-            guard let record = try records.first?.1.get() else { return }
-
-            if let asset = record[ChatRoom.avatarAssetKey] as? CKAsset,
-               let fileURL = asset.fileURL,
-               let data = try? Data(contentsOf: fileURL),
-               let image = PlatformImage.fromData(data) {
-                await MainActor.run {
-                    roomAvatarImage = image
+            if let urlString = try await ConvexChatAPI.shared.getFileURL(storageId: storageId),
+               let url = URL(string: urlString) {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let image = PlatformImage.fromData(data) {
+                    await MainActor.run { roomAvatarImage = image }
                 }
             }
         } catch {
-            // Silently fail - will show placeholder
-            print("Failed to fetch room avatar from cloud: \(error)")
+            print("Failed to fetch room avatar from Convex: \(error)")
         }
     }
     
@@ -577,7 +562,8 @@ struct RoomInfoView: View {
     private func deleteRoom() async {
         isDeleting = true
         do {
-            try await CloudKitManager.shared.deleteRoomAndMessages(viewModel.room)
+            let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+            try await ConvexChatAPI.shared.deleteRoom(roomId: viewModel.room.id, userId: userId)
             // Remove from local list
             ChatRepository.shared.removeRoomOptimistically(viewModel.room.id)
             // Dismiss this view
@@ -624,7 +610,7 @@ struct MemberRowView: View {
                         )
                         .frame(width: 44, height: 44)
                         .overlay(
-                            Text(String(member.name.prefix(1)).uppercased())
+                            Text(member.displayInitial)
                                 .font(.headline)
                                 .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
                         )
@@ -636,7 +622,7 @@ struct MemberRowView: View {
             
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(member.name)
+                    Text(member.displayName)
                         .font(.body)
                         .fontWeight(.medium)
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
@@ -688,14 +674,14 @@ struct MemberRowView: View {
     }
     
     private func loadAvatar() {
-        guard let avatarAsset = member.avatarAsset,
-              let fileURL = avatarAsset.fileURL else {
-            return
-        }
-
-        if let data = try? Data(contentsOf: fileURL),
-           let image = PlatformImage.fromData(data) {
-            avatarImage = image
+        guard let storageId = member.avatarStorageId else { return }
+        Task {
+            if let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
+               let url = URL(string: urlString),
+               let (data, _) = try? await URLSession.shared.data(from: url),
+               let image = PlatformImage.fromData(data) {
+                await MainActor.run { avatarImage = image }
+            }
         }
     }
 }

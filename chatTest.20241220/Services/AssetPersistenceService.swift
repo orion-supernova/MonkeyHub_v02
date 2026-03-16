@@ -1,7 +1,6 @@
 import Foundation
-import CloudKit
 
-/// Responsible for moving CloudKit assets from temporary to permanent local storage.
+/// Handles local file-based persistence for media assets sent in chat.
 class AssetPersistenceService {
     static let shared = AssetPersistenceService()
     private let fileManager = FileManager.default
@@ -23,15 +22,15 @@ class AssetPersistenceService {
         return assetsDirectory.appendingPathComponent(filename)
     }
 
-    func persistAsset(_ asset: CKAsset) -> URL? {
-        guard let sourceURL = asset.fileURL else { return nil }
+    /// Copy a local file into the persistent ChatAssets directory.
+    func persistAsset(from sourceURL: URL) -> URL? {
         let fileName = sourceURL.lastPathComponent
         let destinationURL = assetsDirectory.appendingPathComponent(fileName)
-        
+
         if fileManager.fileExists(atPath: destinationURL.path) {
             return destinationURL
         }
-        
+
         do {
             try fileManager.copyItem(at: sourceURL, to: destinationURL)
             return destinationURL

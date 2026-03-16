@@ -82,10 +82,10 @@ struct MessageView: View {
             .padding(.bottom, message.reactions.isEmpty ? 6 : 22)
         }
         .sheet(isPresented: $showAllReactions) {
-            AllReactionsView(message: message, currentUserId: currentUserId) { reactionId in
+            AllReactionsView(message: message, currentUserId: currentUserId) { emoji in
                 Task {
                     try? await ReactionService.shared.removeReaction(
-                        reactionId: reactionId, from: message.id, in: message.roomId
+                        emoji: emoji, from: message.id, in: message.roomId
                     )
                 }
             }
@@ -305,7 +305,7 @@ struct AllReactionsView: View {
                             Text(reaction.userId == currentUserId ? "You" : (userNames[reaction.userId] ?? "User"))
                             Spacer()
                             if reaction.userId == currentUserId {
-                                Button(action: { onRemove(reaction.id) }) {
+                                Button(action: { onRemove(reaction.emoji) }) {
                                     Image(systemName: "xmark.circle.fill").foregroundColor(.secondary)
                                 }
                             }

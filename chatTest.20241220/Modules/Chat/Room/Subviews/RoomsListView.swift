@@ -1,5 +1,4 @@
 import SwiftUI
-import CloudKit
 
 struct RoomsListView: View {
     let rooms: [ChatRoom]
@@ -86,7 +85,7 @@ private struct RoomRow: View {
         .onAppear {
             loadAvatar()
         }
-        .onChange(of: room.avatarAsset) { _ in
+        .onChange(of: room.avatarStorageId) { _ in
             loadAvatar()
         }
     }
@@ -103,31 +102,23 @@ private struct RoomRow: View {
             }
         }
 
-        // Fallback: fetch from CloudKit if local file not available
-        Task {
-            await fetchAvatarFromCloud()
+        // Fallback: fetch from Convex storage if available
+        if let storageId = room.avatarStorageId {
+            Task { await fetchAvatarFromConvex(storageId: storageId) }
         }
     }
 
-    private func fetchAvatarFromCloud() async {
+    private func fetchAvatarFromConvex(storageId: String) async {
         do {
-            // Query by the "id" field, not recordID (they may differ)
-            let predicate = NSPredicate(format: "%K == %@", ChatRoom.idKey, room.id)
-            let query = CKQuery(recordType: ChatRoom.recordType, predicate: predicate)
-
-            let (records, _) = try await CloudKitManager.shared.database.records(matching: query, resultsLimit: 1)
-            guard let record = try records.first?.1.get() else { return }
-
-            if let asset = record[ChatRoom.avatarAssetKey] as? CKAsset,
-               let fileURL = asset.fileURL,
-               let data = try? Data(contentsOf: fileURL),
-               let image = PlatformImage.fromData(data) {
-                await MainActor.run {
-                    avatarImage = image
+            if let urlString = try await ConvexChatAPI.shared.getFileURL(storageId: storageId),
+               let url = URL(string: urlString) {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let image = PlatformImage.fromData(data) {
+                    await MainActor.run { avatarImage = image }
                 }
             }
         } catch {
-            // Silently fail - will show placeholder
+            // Silently fail — show placeholder
         }
     }
 

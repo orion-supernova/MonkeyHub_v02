@@ -8,16 +8,15 @@ import UIKit
 /// Following SOLID principles: Single Responsibility for OS-level badge updates.
 final class BadgeManager {
     static let shared = BadgeManager()
-    
+
+    private var currentCount = -1
     private init() {}
-    
-    /// Updates the application icon badge count
-    /// - Parameter count: The new badge count (0 clears it)
+
+    /// Updates the application icon badge count — no-op if count hasn't changed.
     func updateBadge(count: Int) {
         let finalCount = max(0, count)
-        
-        // On iOS 16 and later, we should use UNUserNotificationCenter
-        // Setting it to 0 clears the badge.
+        guard finalCount != currentCount else { return }
+        currentCount = finalCount
         UNUserNotificationCenter.current().setBadgeCount(finalCount) { error in
             if let error = error {
                 print("❌ BadgeManager: Failed to update badge count: \(error.localizedDescription)")

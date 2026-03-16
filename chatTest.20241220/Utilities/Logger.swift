@@ -6,7 +6,7 @@ struct Logger {
         let name: String
 
         static let app = Category(name: "🚀 App")
-        static let cloudKit = Category(name: "☁️ CloudKit")
+        static let convex = Category(name: "🔷 Convex")
         static let database = Category(name: "💾 Database")
         static let network = Category(name: "🌐 Network")
         static let auth = Category(name: "🔐 Authentication")

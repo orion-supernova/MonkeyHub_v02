@@ -79,7 +79,7 @@ struct UserRow: View {
                     )
                 )
 
-            Text(user.name.prefix(1).uppercased())
+            Text(user.displayInitial)
                 .font(.title3.bold())
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
         }
@@ -88,7 +88,7 @@ struct UserRow: View {
 
     private var userInfo: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(user.name)
+            Text(user.displayName)
                 .font(.headline)
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
 

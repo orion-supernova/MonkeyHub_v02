@@ -23,7 +23,6 @@ struct ContentView: View {
     @State private var availableRooms: [ChatRoom] = []
     @State private var isShowingSearchView = false
     @StateObject private var navigationState = NavigationStateManager.shared
-    @Namespace private var animationNamespace
 
     // MARK: - Keyboard Navigation (macOS)
     @State private var selectedRoomIndex: Int? = nil
@@ -373,7 +372,6 @@ struct ContentView: View {
                                                     EnhancedRoomCard(room: room, unreadCount: viewModel.unreadCounts[room.id] ?? 0, isSelected: selectedRoomIndex == index) {
                                                         initiateLeaveRoom(room)
                                                     }
-                                                    .matchedTransitionSource(id: room.id, in: animationNamespace)
                                                 }
                                                 .buttonStyle(.plain)
                                             }
@@ -414,9 +412,6 @@ struct ContentView: View {
                     .onAppear {
                         viewModel.clearUnread(for: room.id)
                     }
-                    #if os(iOS)
-                    .navigationTransition(.zoom(sourceID: room.id, in: animationNamespace))
-                    #endif
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenChatRoom"))) { notification in
                 // Handle room object passed directly (for newly joined rooms from search)
@@ -1382,4 +1377,3 @@ struct RoomTypeButton: View {
         .offset(y: animateContent ? 0 : 20)
     }
 }
-

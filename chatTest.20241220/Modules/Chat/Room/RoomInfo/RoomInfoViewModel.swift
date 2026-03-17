@@ -121,7 +121,8 @@ final class RoomInfoViewModel: ObservableObject {
                 catch { print("⚠️ Could not delete old room avatar \(oldStorageId): \(error)") }
             }
             let storageId = try await convexAPI.uploadFile(data: data, mimeType: "image/jpeg")
-            try await convexAPI.updateRoomAvatar(roomId: room.id, storageId: storageId)
+            let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+            try await convexAPI.updateRoomAvatar(roomId: room.id, userId: userId, storageId: storageId)
             room = ChatRoom(
                 id: room.id, name: room.name, createdBy: room.createdBy,
                 createdAt: room.createdAt, lastMessage: room.lastMessage,

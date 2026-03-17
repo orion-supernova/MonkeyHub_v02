@@ -58,9 +58,15 @@ final class ConvexSubscriptionManager: ObservableObject {
             .subscribe(to: "messages:list", with: ["roomId": roomId, "limit": Double(100)], yielding: [ConvexMessageDoc].self)
             .receive(on: RunLoop.main)
             .sink(
-                receiveCompletion: { _ in },
+                receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        AppLogger.shared.logError("messages:list subscription", error)
+                    }
+                },
                 receiveValue: { [weak self] docs in
                     let messages = docs.map { $0.toChatMessage() }
+                    let reactionCount = messages.reduce(0) { $0 + $1.reactions.count }
+                    AppLogger.shared.info("💬 messages update: \(messages.count) msgs, \(reactionCount) reactions in \(roomId)")
                     self?.repository.handleMessagesSubscriptionUpdate(messages, for: roomId)
                 }
             )

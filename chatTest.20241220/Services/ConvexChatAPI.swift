@@ -51,6 +51,7 @@ struct ConvexMessageDoc: Decodable {
     let edited: Bool?
     let username: String?
     let name: String?
+    let reactions: [ConvexReactionDoc]?
 
     func toChatMessage() -> ChatMessage {
         ChatMessage(
@@ -64,7 +65,7 @@ struct ConvexMessageDoc: Decodable {
             mediaStorageId: mediaStorageId,
             assetURL: nil,
             status: .sent,
-            reactions: []
+            reactions: (reactions ?? []).map { $0.toMessageReaction() }
         )
     }
 }
@@ -343,10 +344,11 @@ final class ConvexChatAPI {
         ])
     }
 
-    func updateRoomAvatar(roomId: String, storageId: String) async throws {
+    func updateRoomAvatar(roomId: String, userId: String, storageId: String) async throws {
         try await convex.mutationVoid("rooms:updateRoomAvatar", with: [
             "roomId": roomId,
-            "avatarStorageId": storageId
+            "userId": userId,
+            "storageId": storageId
         ])
     }
 

@@ -440,8 +440,16 @@ private struct ConvexImageView: View {
         Group {
             if let url = assetURL ?? resolvedURL {
                 CachedAsyncImage(url: url, imageZoomNamespace: imageZoomNamespace, onTap: { onTap(url) })
-            } else if storageId != nil {
-                ProgressView().frame(width: 200, height: 150)
+            } else {
+                ZStack {
+                    Color.gray.opacity(0.15)
+                    if storageId != nil {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "photo").foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 250, height: 200)
             }
         }
         .task { await resolve() }
@@ -466,11 +474,19 @@ private struct ConvexVideoView: View {
             if let url = assetURL ?? resolvedURL {
                 VideoPlayer(player: AVPlayer(url: url))
                     .frame(width: 250, height: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            } else if storageId != nil {
-                ProgressView().frame(width: 250, height: 180)
+            } else {
+                ZStack {
+                    Color.gray.opacity(0.15)
+                    if storageId != nil {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "video").foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 250, height: 180)
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .task { await resolve() }
     }
 
@@ -492,8 +508,16 @@ private struct ConvexAudioView: View {
         Group {
             if let url = assetURL ?? resolvedURL {
                 AudioPlayerView(url: url).padding(8)
-            } else if storageId != nil {
-                ProgressView().padding(8)
+            } else {
+                HStack(spacing: 8) {
+                    if storageId != nil {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "waveform").foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 200, height: 44)
+                .padding(8)
             }
         }
         .task { await resolve() }

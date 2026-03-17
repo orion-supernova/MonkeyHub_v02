@@ -129,8 +129,9 @@ export const updateRoom = mutation({
     userId: v.id("users"),
     name: v.string(),
     description: v.optional(v.string()),
+    isPrivate: v.optional(v.boolean()),
   },
-  handler: async (ctx, { roomId, userId, name, description }) => {
+  handler: async (ctx, { roomId, userId, name, description, isPrivate }) => {
     const room = await ctx.db.get(roomId);
     if (!room) throw new Error("ROOM_NOT_FOUND");
     if (room.createdBy.toString() !== userId.toString()) throw new Error("NOT_OWNER");
@@ -150,6 +151,7 @@ export const updateRoom = mutation({
     await ctx.db.patch(roomId, {
       name: trimmed,
       description: description && description.length > 0 ? description : undefined,
+      ...(isPrivate !== undefined ? { isPrivate } : {}),
     });
   },
 });

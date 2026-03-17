@@ -121,45 +121,74 @@ class ChatRoomViewModel: ObservableObject {
             AlertManager.shared.showAlert(title: "Error", message: "Could not read image data.")
             return
         }
+
+        // Show the image immediately before upload starts
+        let tempId = UUID().uuidString
+        repository.insertOptimistic(ChatMessage(
+            id: tempId, senderId: userId, senderName: userName,
+            content: "📷 Photo", type: .image, roomId: roomId,
+            mediaStorageId: nil, assetURL: localURL
+        ))
+
         do {
             let storageId = try await ConvexChatAPI.shared.uploadFile(data: data, mimeType: "image/jpeg")
+            // Replace temp optimistic with real one (same id → upsert overwrites it)
             let message = ChatMessage(
-                senderId: userId, senderName: userName,
-                content: "📷 Photo", type: .image,
-                roomId: roomId, mediaStorageId: storageId, assetURL: localURL
+                id: tempId, senderId: userId, senderName: userName,
+                content: "📷 Photo", type: .image, roomId: roomId,
+                mediaStorageId: storageId, assetURL: localURL
             )
             await repository.sendMessage(message)
         } catch {
+            repository.failOptimistic(id: tempId, in: roomId)
             AlertManager.shared.showAlert(title: "Error", message: "Failed to send image: \(AppLogger.shared.friendlyError(error))")
         }
     }
 
     func sendVideo(_ url: URL) async {
         let localURL = copyAssetToLocalStorage(from: url) ?? url
+
+        let tempId = UUID().uuidString
+        repository.insertOptimistic(ChatMessage(
+            id: tempId, senderId: userId, senderName: userName,
+            content: "🎥 Video", type: .video, roomId: roomId,
+            mediaStorageId: nil, assetURL: localURL
+        ))
+
         do {
             let storageId = try await ConvexChatAPI.shared.uploadFileFromURL(localURL, mimeType: "video/mp4")
             let message = ChatMessage(
-                senderId: userId, senderName: userName,
-                content: "🎥 Video", type: .video,
-                roomId: roomId, mediaStorageId: storageId, assetURL: localURL
+                id: tempId, senderId: userId, senderName: userName,
+                content: "🎥 Video", type: .video, roomId: roomId,
+                mediaStorageId: storageId, assetURL: localURL
             )
             await repository.sendMessage(message)
         } catch {
+            repository.failOptimistic(id: tempId, in: roomId)
             AlertManager.shared.showAlert(title: "Error", message: "Failed to send video: \(AppLogger.shared.friendlyError(error))")
         }
     }
 
     func sendAudio(_ url: URL) async {
         let localURL = copyAssetToLocalStorage(from: url) ?? url
+
+        let tempId = UUID().uuidString
+        repository.insertOptimistic(ChatMessage(
+            id: tempId, senderId: userId, senderName: userName,
+            content: "🎵 Voice Message", type: .audio, roomId: roomId,
+            mediaStorageId: nil, assetURL: localURL
+        ))
+
         do {
             let storageId = try await ConvexChatAPI.shared.uploadFileFromURL(localURL, mimeType: "audio/m4a")
             let message = ChatMessage(
-                senderId: userId, senderName: userName,
-                content: "🎵 Voice Message", type: .audio,
-                roomId: roomId, mediaStorageId: storageId, assetURL: localURL
+                id: tempId, senderId: userId, senderName: userName,
+                content: "🎵 Voice Message", type: .audio, roomId: roomId,
+                mediaStorageId: storageId, assetURL: localURL
             )
             await repository.sendMessage(message)
         } catch {
+            repository.failOptimistic(id: tempId, in: roomId)
             AlertManager.shared.showAlert(title: "Error", message: "Failed to send voice message: \(AppLogger.shared.friendlyError(error))")
         }
     }

@@ -19,13 +19,15 @@ class ReactionService {
         let normalizedEmoji = MessageReaction.normalizeEmoji(emoji)
         _ = try await convexAPI.addReaction(messageId: messageId, userId: userId, emoji: normalizedEmoji)
 
-        // Optimistic local update
-        if let idx = chatRepository.activeRoomMessages.firstIndex(where: { $0.id == messageId }) {
-            let alreadyExists = chatRepository.activeRoomMessages[idx].reactions
+        // Optimistic local update — must use full array replacement to trigger @Published
+        var messages = chatRepository.activeRoomMessages
+        if let idx = messages.firstIndex(where: { $0.id == messageId }) {
+            let alreadyExists = messages[idx].reactions
                 .contains { $0.userId == userId && $0.emoji == normalizedEmoji }
             if !alreadyExists {
                 let reaction = MessageReaction(emoji: normalizedEmoji, userId: userId, messageId: messageId)
-                chatRepository.activeRoomMessages[idx].reactions.append(reaction)
+                messages[idx].reactions.append(reaction)
+                chatRepository.activeRoomMessages = messages
             }
         }
     }
@@ -38,10 +40,11 @@ class ReactionService {
         let normalizedEmoji = MessageReaction.normalizeEmoji(emoji)
         try await convexAPI.removeReaction(messageId: messageId, userId: userId, emoji: normalizedEmoji)
 
-        // Optimistic local update
-        if let idx = chatRepository.activeRoomMessages.firstIndex(where: { $0.id == messageId }) {
-            chatRepository.activeRoomMessages[idx].reactions
-                .removeAll { $0.userId == userId && $0.emoji == normalizedEmoji }
+        // Optimistic local update — must use full array replacement to trigger @Published
+        var messages = chatRepository.activeRoomMessages
+        if let idx = messages.firstIndex(where: { $0.id == messageId }) {
+            messages[idx].reactions.removeAll { $0.userId == userId && $0.emoji == normalizedEmoji }
+            chatRepository.activeRoomMessages = messages
         }
     }
 

@@ -102,10 +102,15 @@ export const list = query({
     const enriched = await Promise.all(
       msgs.map(async (msg) => {
         const user = await ctx.db.get(msg.userId);
+        const reactions = await ctx.db
+          .query("reactions")
+          .withIndex("by_message", (q) => q.eq("messageId", msg._id))
+          .collect();
         return {
           ...msg,
           username: user?.username ?? "unknown",
           name: user?.name ?? user?.username ?? "unknown",
+          reactions,
         };
       })
     );
@@ -127,10 +132,15 @@ export const listSince = query({
     const enriched = await Promise.all(
       msgs.map(async (msg) => {
         const user = await ctx.db.get(msg.userId);
+        const reactions = await ctx.db
+          .query("reactions")
+          .withIndex("by_message", (q) => q.eq("messageId", msg._id))
+          .collect();
         return {
           ...msg,
           username: user?.username ?? "unknown",
           name: user?.name ?? user?.username ?? "unknown",
+          reactions,
         };
       })
     );
@@ -156,10 +166,15 @@ export const listBefore = query({
     const enriched = await Promise.all(
       msgs.map(async (msg) => {
         const user = await ctx.db.get(msg.userId);
+        const reactions = await ctx.db
+          .query("reactions")
+          .withIndex("by_message", (q) => q.eq("messageId", msg._id))
+          .collect();
         return {
           ...msg,
           username: user?.username ?? "unknown",
           name: user?.name ?? user?.username ?? "unknown",
+          reactions,
         };
       })
     );

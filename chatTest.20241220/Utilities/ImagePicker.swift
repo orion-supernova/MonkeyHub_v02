@@ -38,14 +38,10 @@ struct ImagePicker: UIViewControllerRepresentable {
             picker.dismiss(animated: true)
             guard let result = results.first else { return }
 
-            // Use PHAsset + PHImageManager so iCloud photos are downloaded automatically
-            if let assetId = result.assetIdentifier {
-                let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil)
-                guard let asset = fetchResult.firstObject else {
-                    showError("Photo not found in library.")
-                    return
-                }
-
+            // Prefer PHAsset + PHImageManager (supports iCloud download).
+            // Falls back to item provider if PHAsset is inaccessible (e.g. limited access).
+            if let assetId = result.assetIdentifier,
+               let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil).firstObject {
                 let options = PHImageRequestOptions()
                 options.deliveryMode = .highQualityFormat
                 options.isNetworkAccessAllowed = true   // download from iCloud if needed
@@ -53,28 +49,34 @@ struct ImagePicker: UIViewControllerRepresentable {
 
                 PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, info in
                     if let error = info?[PHImageErrorKey] as? Error {
-                        DispatchQueue.main.async { self.showError(error.localizedDescription) }
+                        // PHImageManager failed — fall back to item provider
+                        self.loadViaItemProvider(result.itemProvider)
+                        _ = error  // suppress unused warning
                         return
                     }
                     guard let data, let image = UIImage(data: data) else {
-                        DispatchQueue.main.async { self.showError("Could not read photo data.") }
+                        self.loadViaItemProvider(result.itemProvider)
                         return
                     }
                     DispatchQueue.main.async { self.parent.image = image }
                 }
             } else {
-                // Fallback: no asset identifier (e.g. shared album), use item provider
-                result.itemProvider.loadDataRepresentation(forTypeIdentifier: "public.image") { data, error in
-                    if let error {
-                        DispatchQueue.main.async { self.showError(error.localizedDescription) }
-                        return
-                    }
-                    guard let data, let image = UIImage(data: data) else {
-                        DispatchQueue.main.async { self.showError("Could not read photo data.") }
-                        return
-                    }
-                    DispatchQueue.main.async { self.parent.image = image }
+                // No assetIdentifier or PHAsset inaccessible (limited access, shared album, etc.)
+                loadViaItemProvider(result.itemProvider)
+            }
+        }
+
+        func loadViaItemProvider(_ provider: NSItemProvider) {
+            provider.loadDataRepresentation(forTypeIdentifier: "public.image") { data, error in
+                if let error {
+                    DispatchQueue.main.async { self.showError(error.localizedDescription) }
+                    return
                 }
+                guard let data, let image = UIImage(data: data) else {
+                    DispatchQueue.main.async { self.showError("Could not read photo data.") }
+                    return
+                }
+                DispatchQueue.main.async { self.parent.image = image }
             }
         }
 

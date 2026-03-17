@@ -35,24 +35,65 @@ class ChatRepository: ObservableObject {
         guard roomId == activeRoomId else { return }
 
         let serverIds = Set(serverMessages.map { $0.id })
-        // Match pending messages by senderId+content — when the server delivers it, drop the optimistic
-        let serverContentKeys = Set(serverMessages.map { "\($0.senderId)|\($0.content)" })
+        // For text messages: match by senderId+content
+        let serverTextKeys = Set(
+            serverMessages.filter { $0.mediaStorageId == nil }
+                .map { "\($0.senderId)|\($0.content)" }
+        )
+        // For media messages: match by storageId (more accurate — avoids "📷 Photo" key collisions)
+        let serverStorageIds = Set(serverMessages.compactMap { $0.mediaStorageId })
 
-        let unconfirmed = activeRoomMessages.filter {
-            guard $0.status == .pending || $0.status == .error else { return false }
-            guard !serverIds.contains($0.id) else { return false }
-            // If server already has this content from same sender, optimistic is confirmed — drop it
-            if $0.status == .pending && serverContentKeys.contains("\($0.senderId)|\($0.content)") {
-                return false
+        // Preserve local assetURLs from confirmed pending messages so sender
+        // keeps seeing their image after the server message replaces the optimistic.
+        var storageIdToAssetURL: [String: URL] = [:]
+
+        let unconfirmed = activeRoomMessages.filter { pending in
+            guard pending.status == .pending || pending.status == .error else { return false }
+            guard !serverIds.contains(pending.id) else { return false }
+            if pending.status == .pending {
+                if let storageId = pending.mediaStorageId {
+                    // Media: confirmed when server has same storageId
+                    if serverStorageIds.contains(storageId) {
+                        if let assetURL = pending.assetURL { storageIdToAssetURL[storageId] = assetURL }
+                        return false
+                    }
+                } else if serverTextKeys.contains("\(pending.senderId)|\(pending.content)") {
+                    // Text: confirmed when server has same sender+content
+                    return false
+                }
             }
             return true
         }
 
-        var merged = serverMessages
+        // Apply preserved assetURLs to the matching server messages
+        var merged: [ChatMessage] = serverMessages.map { msg in
+            guard let storageId = msg.mediaStorageId,
+                  let assetURL = storageIdToAssetURL[storageId],
+                  msg.assetURL == nil else { return msg }
+            var m = msg
+            m.assetURL = assetURL
+            return m
+        }
         merged.append(contentsOf: unconfirmed)
         merged.sort { $0.timestamp < $1.timestamp }
 
         activeRoomMessages = merged
+    }
+
+    // MARK: - Optimistic Helpers for Media Sending
+
+    /// Insert a pending message immediately (before upload completes) so the UI shows feedback.
+    func insertOptimistic(_ message: ChatMessage) {
+        var pending = message
+        pending.status = .pending
+        upsertMessage(pending, in: message.roomId)
+    }
+
+    /// Mark an optimistic message as failed (e.g. upload error).
+    func failOptimistic(id: String, in roomId: String) {
+        guard roomId == activeRoomId,
+              let idx = activeRoomMessages.firstIndex(where: { $0.id == id }) else { return }
+        activeRoomMessages[idx].status = .error
     }
 
     // MARK: - Unread / Badge Helpers

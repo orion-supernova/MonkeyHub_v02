@@ -81,6 +81,7 @@ struct MessagesListView: View {
                     isCurrentUser: message.senderId == currentUserId,
                     onImageTapped: onImageTapped,
                     onDelete: { Task { await viewModel.deleteMessage(message.id) } },
+                    onResend: { Task { await viewModel.sendMessage(message.content) } },
                     isReactionPickerActive: isActive,
                     onRequestReactionPicker: {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -143,10 +144,11 @@ struct MessageRow: View, Equatable {
     let isCurrentUser: Bool
     let onImageTapped: (URL) -> Void
     let onDelete: () -> Void
+    let onResend: () -> Void
     let isReactionPickerActive: Bool
     let onRequestReactionPicker: () -> Void
     let imageZoomNamespace: Namespace.ID
-    
+
     static func == (lhs: MessageRow, rhs: MessageRow) -> Bool {
         lhs.message.id == rhs.message.id &&
         lhs.message.status == rhs.message.status &&
@@ -163,6 +165,7 @@ struct MessageRow: View, Equatable {
             onDelete: onDelete,
             onRequestReactionPicker: onRequestReactionPicker,
             isReactionPickerActive: isReactionPickerActive,
+            onResend: onResend,
             imageZoomNamespace: imageZoomNamespace
         )
         .id(message.id)

@@ -17,6 +17,7 @@ struct MessageView: View {
     let onDelete: () -> Void
     let onRequestReactionPicker: () -> Void
     let isReactionPickerActive: Bool
+    var onResend: (() -> Void)? = nil
 
     let imageZoomNamespace: Namespace.ID
     @Environment(\.colorScheme) private var colorScheme
@@ -75,6 +76,25 @@ struct MessageView: View {
                             .zIndex(110)
                         }
                     }
+                }
+                
+                // Status indicator (pending/error) sits to the RIGHT of outgoing bubble
+                if isCurrentUser && message.type == .text {
+                    Group {
+                        if message.status == .pending {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else if message.status == .error {
+                            Button(action: { onResend?() }) {
+                                Image(systemName: "exclamationmark.circle.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.trailing, 6)
+                    .padding(.bottom, 10)
                 }
 
                 if !isCurrentUser { Spacer(minLength: 60) }
@@ -176,22 +196,72 @@ struct MessageView: View {
                 .font(.system(size: 16))
                 .foregroundColor(isCurrentUser ? .white : (colorScheme == .dark ? .white : .primary))
         case .image:
-            ConvexImageView(
-                assetURL: message.assetURL,
-                storageId: message.mediaStorageId,
-                imageZoomNamespace: imageZoomNamespace,
-                onTap: onImageTapped
-            )
+            ZStack {
+                ConvexImageView(
+                    assetURL: message.assetURL,
+                    storageId: message.mediaStorageId,
+                    imageZoomNamespace: imageZoomNamespace,
+                    onTap: onImageTapped
+                )
+                if message.status == .pending {
+                    Color.black.opacity(0.35)
+                        .frame(width: 250, height: 250)
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .controlSize(.regular)
+                        .tint(.white)
+                } else if message.status == .error {
+                    Color.black.opacity(0.35)
+                        .frame(width: 250, height: 250)
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundColor(.white)
+                }
+            }
         case .video:
-            ConvexVideoView(
-                assetURL: message.assetURL,
-                storageId: message.mediaStorageId
-            )
+            ZStack {
+                ConvexVideoView(
+                    assetURL: message.assetURL,
+                    storageId: message.mediaStorageId
+                )
+                if message.status == .pending {
+                    Color.black.opacity(0.35)
+                        .frame(width: 250, height: 180)
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .controlSize(.regular)
+                        .tint(.white)
+                } else if message.status == .error {
+                    Color.black.opacity(0.35)
+                        .frame(width: 250, height: 180)
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundColor(.white)
+                }
+            }
         case .audio:
-            ConvexAudioView(
-                assetURL: message.assetURL,
-                storageId: message.mediaStorageId
-            )
+            ZStack {
+                ConvexAudioView(
+                    assetURL: message.assetURL,
+                    storageId: message.mediaStorageId
+                )
+                if message.status == .pending {
+                    Color.black.opacity(0.35)
+                        .frame(width: 200, height: 44)
+                        .padding(8)
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .controlSize(.regular)
+                        .tint(.white)
+                } else if message.status == .error {
+                    Color.black.opacity(0.35)
+                        .frame(width: 200, height: 44)
+                        .padding(8)
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundColor(.white)
+                }
+            }
         default: EmptyView()
         }
     }

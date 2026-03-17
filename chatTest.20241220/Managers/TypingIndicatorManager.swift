@@ -25,9 +25,9 @@ final class TypingIndicatorManager: ObservableObject {
     private var isCurrentlyTyping: [String: Bool] = [:]
 
     // MARK: - Configuration
-    private let sendInterval: TimeInterval = 1.0
+    private let sendInterval: TimeInterval = 2.0      // heartbeat while typing
     private let throttleInterval: TimeInterval = 0.5
-    private let inactivityTimeout: TimeInterval = 3.0
+    private let inactivityTimeout: TimeInterval = 0.8  // safety net for mid-sentence pauses
 
     private init() {}
 

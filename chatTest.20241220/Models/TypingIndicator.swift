@@ -15,7 +15,7 @@ struct TypingIndicator: Identifiable, Equatable {
         self.userId = userId
         self.userName = userName
         self.timestamp = Date()
-        self.expiresAt = Date().addingTimeInterval(5)
+        self.expiresAt = Date().addingTimeInterval(6) // safety net: heartbeat is 2s, clear is 1.5s
     }
 
     var isExpired: Bool { Date() > expiresAt }

@@ -131,11 +131,8 @@ final class ConvexChatAPI {
     static let shared = ConvexChatAPI()
 
     private let convex = ConvexService.shared
-    private let client: ConvexMobile.ConvexClient
 
-    private init() {
-        client = convex.client
-    }
+    private init() {}
 
     // MARK: - Rooms
 
@@ -163,7 +160,7 @@ final class ConvexChatAPI {
         messageLifetime: TimeInterval? = nil,
         passwordHash: String? = nil
     ) async throws -> String {
-        let roomId: String = try await client.mutation("rooms:create", with: [
+        let roomId: String = try await convex.mutation("rooms:create", with: [
             "name": name,
             "userId": userId,
             "description": description,
@@ -176,7 +173,7 @@ final class ConvexChatAPI {
     }
 
     func joinRoom(roomId: String, userId: String, passwordHash: String? = nil) async throws {
-        try await client.mutation("rooms:join", with: [
+        try await convex.mutationVoid("rooms:join", with: [
             "roomId": roomId,
             "userId": userId,
             "passwordHash": passwordHash
@@ -184,15 +181,15 @@ final class ConvexChatAPI {
     }
 
     func leaveRoom(roomId: String, userId: String) async throws {
-        try await client.mutation("rooms:leave", with: ["roomId": roomId, "userId": userId])
+        try await convex.mutationVoid("rooms:leave", with: ["roomId": roomId, "userId": userId])
     }
 
     func deleteRoom(roomId: String, userId: String) async throws {
-        try await client.mutation("rooms:deleteRoom", with: ["roomId": roomId, "userId": userId])
+        try await convex.mutationVoid("rooms:deleteRoom", with: ["roomId": roomId, "userId": userId])
     }
 
     func updateRoom(roomId: String, userId: String, name: String, description: String?, isPrivate: Bool? = nil) async throws {
-        try await client.mutation("rooms:updateRoom", with: [
+        try await convex.mutationVoid("rooms:updateRoom", with: [
             "roomId": roomId,
             "userId": userId,
             "name": name,
@@ -207,7 +204,7 @@ final class ConvexChatAPI {
     }
 
     func getOrCreateDM(userId: String, friendId: String) async throws -> String {
-        let roomId: String = try await client.mutation("rooms:getOrCreateDM", with: [
+        let roomId: String = try await convex.mutation("rooms:getOrCreateDM", with: [
             "userId": userId,
             "friendId": friendId
         ])
@@ -259,12 +256,12 @@ final class ConvexChatAPI {
         if let mediaStorageId {
             args["mediaStorageId"] = mediaStorageId
         }
-        let messageId: String = try await client.mutation("messages:send", with: args)
+        let messageId: String = try await convex.mutation("messages:send", with: args)
         return messageId
     }
 
     func deleteMessage(messageId: String, userId: String) async throws {
-        try await client.mutation("messages:deleteMessage", with: [
+        try await convex.mutationVoid("messages:deleteMessage", with: [
             "messageId": messageId,
             "userId": userId
         ])
@@ -273,7 +270,7 @@ final class ConvexChatAPI {
     // MARK: - Reactions
 
     func addReaction(messageId: String, userId: String, emoji: String) async throws -> String {
-        let reactionId: String = try await client.mutation("reactions:addReaction", with: [
+        let reactionId: String = try await convex.mutation("reactions:addReaction", with: [
             "messageId": messageId,
             "userId": userId,
             "emoji": emoji
@@ -282,7 +279,7 @@ final class ConvexChatAPI {
     }
 
     func removeReaction(messageId: String, userId: String, emoji: String) async throws {
-        try await client.mutation("reactions:removeReaction", with: [
+        try await convex.mutationVoid("reactions:removeReaction", with: [
             "messageId": messageId,
             "userId": userId,
             "emoji": emoji
@@ -308,11 +305,11 @@ final class ConvexChatAPI {
     // MARK: - Typing Indicators
 
     func setTyping(roomId: String, userId: String) async throws {
-        try await client.mutation("typing:setTyping", with: ["roomId": roomId, "userId": userId])
+        try await convex.mutationVoid("typing:setTyping", with: ["roomId": roomId, "userId": userId])
     }
 
     func clearTyping(roomId: String, userId: String) async throws {
-        try await client.mutation("typing:clearTyping", with: ["roomId": roomId, "userId": userId])
+        try await convex.mutationVoid("typing:clearTyping", with: ["roomId": roomId, "userId": userId])
     }
 
     func fetchTypingUsers(roomId: String, currentUserId: String) async throws -> [TypingIndicator] {
@@ -331,7 +328,7 @@ final class ConvexChatAPI {
     }
 
     func updateUserProfile(userId: String, name: String, email: String?, bio: String?) async throws {
-        try await client.mutation("users:updateProfile", with: [
+        try await convex.mutationVoid("users:updateProfile", with: [
             "userId": userId,
             "name": name,
             "email": email,
@@ -340,14 +337,14 @@ final class ConvexChatAPI {
     }
 
     func updateUserAvatar(userId: String, storageId: String) async throws {
-        try await client.mutation("users:updateAvatar", with: [
+        try await convex.mutationVoid("users:updateAvatar", with: [
             "userId": userId,
             "avatarStorageId": storageId
         ])
     }
 
     func updateRoomAvatar(roomId: String, storageId: String) async throws {
-        try await client.mutation("rooms:updateRoomAvatar", with: [
+        try await convex.mutationVoid("rooms:updateRoomAvatar", with: [
             "roomId": roomId,
             "avatarStorageId": storageId
         ])
@@ -365,7 +362,7 @@ final class ConvexChatAPI {
 
     /// Returns a one-time upload URL. Client PUTs the file to this URL, then uses the storageId.
     func generateUploadURL() async throws -> String {
-        let url: String = try await client.mutation("files:generateUploadUrl")
+        let url: String = try await convex.mutation("files:generateUploadUrl")
         return url
     }
 
@@ -375,7 +372,7 @@ final class ConvexChatAPI {
     }
 
     func deleteFile(storageId: String) async throws {
-        try await client.mutation("files:deleteFile", with: ["storageId": storageId])
+        try await convex.mutationVoid("files:deleteFile", with: ["storageId": storageId])
     }
 
     /// Upload data to Convex file storage. Returns the storageId.

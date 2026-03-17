@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
-const TYPING_TTL_MS = 5000; // 5 seconds
+const TYPING_TTL_MS = 8000; // safety net — clearTyping fires after 1.5s inactivity, heartbeat every 2s
 
 export const setTyping = mutation({
   args: {

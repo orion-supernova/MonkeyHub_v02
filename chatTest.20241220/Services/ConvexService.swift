@@ -12,29 +12,63 @@ final class ConvexService {
     /// One-shot query: subscribes, takes first value, cancels.
     /// ConvexMobile only exposes reactive subscriptions for queries — this bridges to async/await.
     func queryOnce<T: Decodable>(_ name: String, with args: [String: ConvexEncodable?]? = nil) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
-            var cancellable: AnyCancellable?
-            var hasResumed = false
+        AppLogger.shared.logQuery(name, args: args?.compactMapValues { $0 as? any CustomStringConvertible }.mapValues { $0.description })
+        do {
+            let result: T = try await withCheckedThrowingContinuation { continuation in
+                var cancellable: AnyCancellable?
+                var hasResumed = false
 
-            cancellable = client
-                .subscribe(to: name, with: args, yielding: T.self)
-                .first()
-                .sink(
-                    receiveCompletion: { completion in
-                        if case .failure(let err) = completion, !hasResumed {
-                            hasResumed = true
-                            continuation.resume(throwing: err)
+                cancellable = client
+                    .subscribe(to: name, with: args, yielding: T.self)
+                    .first()
+                    .sink(
+                        receiveCompletion: { completion in
+                            if case .failure(let err) = completion, !hasResumed {
+                                hasResumed = true
+                                continuation.resume(throwing: err)
+                            }
+                            cancellable = nil
+                        },
+                        receiveValue: { value in
+                            if !hasResumed {
+                                hasResumed = true
+                                continuation.resume(returning: value)
+                            }
+                            cancellable = nil
                         }
-                        cancellable = nil
-                    },
-                    receiveValue: { value in
-                        if !hasResumed {
-                            hasResumed = true
-                            continuation.resume(returning: value)
-                        }
-                        cancellable = nil
-                    }
-                )
+                    )
+            }
+            AppLogger.shared.logQueryResult(name, result: "✓")
+            return result
+        } catch {
+            AppLogger.shared.logError(name, error)
+            throw error
+        }
+    }
+
+    /// Mutation wrapper with logging.
+    @discardableResult
+    func mutation<T: Decodable>(_ name: String, with args: [String: ConvexEncodable?]? = nil) async throws -> T {
+        AppLogger.shared.logMutation(name, args: args?.compactMapValues { $0 as? any CustomStringConvertible }.mapValues { $0.description })
+        do {
+            let result: T = try await client.mutation(name, with: args)
+            AppLogger.shared.logMutationResult(name, result: "✓")
+            return result
+        } catch {
+            AppLogger.shared.logError(name, error)
+            throw error
+        }
+    }
+
+    /// Void mutation wrapper with logging.
+    func mutationVoid(_ name: String, with args: [String: ConvexEncodable?]? = nil) async throws {
+        AppLogger.shared.logMutation(name, args: args?.compactMapValues { $0 as? any CustomStringConvertible }.mapValues { $0.description })
+        do {
+            try await client.mutation(name, with: args)
+            AppLogger.shared.logMutationResult(name, result: "✓")
+        } catch {
+            AppLogger.shared.logError(name, error)
+            throw error
         }
     }
 

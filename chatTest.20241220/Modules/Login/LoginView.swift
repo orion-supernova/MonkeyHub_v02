@@ -61,10 +61,20 @@ struct LoginView: View {
                     OceanSecureField(text: $password, placeholder: "Password", icon: "lock")
 
                     if let err = viewModel.errorMessage {
-                        Text(err)
-                            .font(.caption)
-                            .foregroundStyle(.red.opacity(0.9))
-                            .multilineTextAlignment(.center)
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundStyle(.red.opacity(0.9))
+                            Text(err)
+                                .font(.subheadline)
+                                .foregroundStyle(.red.opacity(0.9))
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.red.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
 
                     Button(action: {
@@ -133,7 +143,7 @@ private struct OceanTextField: View {
                 .frame(width: 20)
             TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(.white.opacity(0.5)))
                 .foregroundStyle(.white)
-                .autocapitalization(.none)
+                .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
         }
         .padding(14)

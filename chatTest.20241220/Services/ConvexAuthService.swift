@@ -11,7 +11,7 @@ final class ConvexAuthService: ObservableObject {
     @Published private(set) var isAuthenticated: Bool = false
     @Published private(set) var cachedUser: ChatUser?
 
-    private let client = ConvexService.shared.client
+    private let convex = ConvexService.shared
     private let keychainUserIdKey = "convex_userId"
 
     private init() {
@@ -34,7 +34,7 @@ final class ConvexAuthService: ObservableObject {
 
     func signUp(username: String, password: String, name: String, email: String?) async throws {
         let hash = sha256(password)
-        let response: AuthResponse = try await client.mutation("auth:signup", with: [
+        let response: AuthResponse = try await convex.mutation("auth:signup", with: [
             "username": username,
             "name": name,
             "passwordHash": hash,
@@ -45,7 +45,7 @@ final class ConvexAuthService: ObservableObject {
 
     func signIn(username: String, password: String) async throws {
         let hash = sha256(password)
-        let response: AuthResponse = try await client.mutation("auth:login", with: [
+        let response: AuthResponse = try await convex.mutation("auth:login", with: [
             "username": username,
             "passwordHash": hash
         ])
@@ -55,7 +55,7 @@ final class ConvexAuthService: ObservableObject {
     func signOut() {
         guard let userId = currentUserId else { return }
         Task {
-            try? await client.mutation("auth:logout", with: ["userId": userId])
+            try? await convex.mutationVoid("auth:logout", with: ["userId": userId])
         }
         KeychainService.delete(keychainUserIdKey)
         userDefaults.removeObject(forKey: userIdUserDefaultsKey)
@@ -67,7 +67,7 @@ final class ConvexAuthService: ObservableObject {
     func registerDeviceToken(_ token: String) {
         guard let userId = currentUserId else { return }
         Task {
-            try? await client.mutation("users:registerDeviceToken", with: [
+            try? await convex.mutationVoid("users:registerDeviceToken", with: [
                 "userId": userId,
                 "token": token
             ])

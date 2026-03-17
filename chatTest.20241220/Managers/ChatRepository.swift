@@ -13,6 +13,7 @@ class ChatRepository: ObservableObject {
     @Published var rooms: [ChatRoom] = []
     @Published var activeRoomMessages: [ChatMessage] = []
     @Published var unreadCounts: [String: Int] = [:]
+    @Published var roomListTyping: [String: [String]] = [:]  // roomId → [typer names]
 
     // MARK: - Dependencies
     private let convexAPI = ConvexChatAPI.shared
@@ -24,9 +25,37 @@ class ChatRepository: ObservableObject {
 
     /// Called when Convex room list subscription delivers updated rooms.
     func handleRoomsUpdate(_ updatedRooms: [ChatRoom]) {
+        if !rooms.isEmpty {
+            // Rooms that disappeared were deleted or user was removed — notify open views.
+            let removedIds = Set(rooms.map { $0.id }).subtracting(updatedRooms.map { $0.id })
+            for roomId in removedIds {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("RoomWasDeleted"),
+                    object: nil,
+                    userInfo: ["roomId": roomId]
+                )
+            }
+
+            // Increment unread counts for rooms that received a new message
+            // while the user is not in that room (Convex subscription-driven).
+            let previousById = Dictionary(uniqueKeysWithValues: rooms.map { ($0.id, $0) })
+            for updated in updatedRooms {
+                guard updated.id != activeRoomId,
+                      let previous = previousById[updated.id],
+                      let newTime = updated.lastMessageDate,
+                      let oldTime = previous.lastMessageDate,
+                      newTime > oldTime else { continue }
+                unreadCounts[updated.id, default: 0] += 1
+            }
+        }
         withAnimation { rooms = updatedRooms }
         reconcileUnreadCounts()
         updateGlobalBadge()
+    }
+
+    /// Called when the typing-for-user subscription delivers updated data.
+    func handleRoomListTypingUpdate(_ typingMap: [String: [String]]) {
+        roomListTyping = typingMap
     }
 
     /// Called when Convex messages subscription delivers updated message list.
@@ -149,12 +178,19 @@ class ChatRepository: ObservableObject {
     func setActiveRoom(_ roomId: String?) {
         activeRoomId = roomId
         if let roomId {
-            markRoomAsRead(roomId: roomId)
-            activeRoomMessages = []
             ConvexSubscriptionManager.shared.subscribeToRoom(roomId)
+            // Defer @Published mutations — setActiveRoom is called from ChatRoomViewModel.init
+            // which runs during @StateObject creation (a view update). Publishing synchronously
+            // here would trigger "Publishing from within view updates" warnings.
+            Task { [weak self] in
+                self?.markRoomAsRead(roomId: roomId)
+                self?.activeRoomMessages = []
+            }
         } else {
             ConvexSubscriptionManager.shared.unsubscribeFromCurrentRoom()
-            activeRoomMessages = []
+            Task { [weak self] in
+                self?.activeRoomMessages = []
+            }
         }
     }
 

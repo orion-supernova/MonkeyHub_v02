@@ -16,6 +16,7 @@ final class ConvexSubscriptionManager: ObservableObject {
 
     // Cancellables keyed by subscription name
     private var roomsSubscription: AnyCancellable?
+    private var roomListTypingSubscription: AnyCancellable?
     private var messagesSubscription: AnyCancellable?
     private var typingSubscription: AnyCancellable?
 
@@ -31,6 +32,7 @@ final class ConvexSubscriptionManager: ObservableObject {
     func subscribeToRooms(userId: String) {
         activeUserId = userId
         roomsSubscription?.cancel()
+        roomListTypingSubscription?.cancel()
 
         roomsSubscription = client
             .subscribe(to: "rooms:listUserRooms", with: ["userId": userId], yielding: [ConvexRoomDoc].self)
@@ -40,6 +42,16 @@ final class ConvexSubscriptionManager: ObservableObject {
                 receiveValue: { [weak self] docs in
                     let rooms = docs.map { $0.toChatRoom() }
                     self?.repository.handleRoomsUpdate(rooms)
+                }
+            )
+
+        roomListTypingSubscription = client
+            .subscribe(to: "typing:getTypingForUser", with: ["userId": userId], yielding: [String: [String]].self)
+            .receive(on: RunLoop.main)
+            .sink(
+                receiveCompletion: { _ in },
+                receiveValue: { [weak self] typingMap in
+                    self?.repository.handleRoomListTypingUpdate(typingMap)
                 }
             )
     }
@@ -104,6 +116,8 @@ final class ConvexSubscriptionManager: ObservableObject {
     func clearAll() {
         roomsSubscription?.cancel()
         roomsSubscription = nil
+        roomListTypingSubscription?.cancel()
+        roomListTypingSubscription = nil
         unsubscribeFromCurrentRoom()
         activeUserId = nil
     }

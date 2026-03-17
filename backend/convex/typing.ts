@@ -40,6 +40,46 @@ export const clearTyping = mutation({
   },
 });
 
+/// Returns { roomId: [typerName, …] } for all rooms the user belongs to.
+/// A single subscription gives live typing state for the whole room list.
+export const getTypingForUser = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    const now = Date.now();
+    const memberships = await ctx.db
+      .query("roomMembers")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+
+    const result: Record<string, string[]> = {};
+    for (const m of memberships) {
+      const indicators = await ctx.db
+        .query("typingIndicators")
+        .withIndex("by_room", (q) => q.eq("roomId", m.roomId))
+        .collect();
+
+      const active = indicators.filter(
+        (t) =>
+          t.userId.toString() !== userId.toString() &&
+          now - t.updatedAt < TYPING_TTL_MS
+      );
+
+      if (active.length > 0) {
+        const names = (
+          await Promise.all(
+            active.map(async (t) => {
+              const user = await ctx.db.get(t.userId);
+              return user?.name ?? user?.username ?? null;
+            })
+          )
+        ).filter(Boolean) as string[];
+        result[m.roomId.toString()] = names;
+      }
+    }
+    return result;
+  },
+});
+
 export const getTypingUsers = query({
   args: { roomId: v.id("rooms"), currentUserId: v.id("users") },
   handler: async (ctx, { roomId, currentUserId }) => {

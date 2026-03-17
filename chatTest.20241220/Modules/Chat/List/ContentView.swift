@@ -16,7 +16,6 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
-    @Environment(\.scenePhase) private var scenePhase
     @State private var isShowingJoinRoomSheet = false
     @State private var availableRooms: [ChatRoom] = []
     @State private var isShowingSearchView = false
@@ -362,7 +361,12 @@ struct ContentView: View {
                                         LazyVGrid(columns: gridColumns, spacing: 16) {
                                             ForEach(Array(viewModel.myRooms.enumerated()), id: \.element.id) { index, room in
                                                 NavigationLink(value: room) {
-                                                    EnhancedRoomCard(room: room, unreadCount: viewModel.unreadCounts[room.id] ?? 0, isSelected: selectedRoomIndex == index) {
+                                                    EnhancedRoomCard(
+                                                        room: room,
+                                                        unreadCount: viewModel.unreadCounts[room.id] ?? 0,
+                                                        typingText: viewModel.typingText(for: room.id),
+                                                        isSelected: selectedRoomIndex == index
+                                                    ) {
                                                         initiateLeaveRoom(room)
                                                     }
                                                 }
@@ -490,29 +494,6 @@ struct ContentView: View {
         .refreshable {
             await loadData()
         }
-        .onChange(of: scenePhase) { newPhase in
-            if newPhase == .active {
-                // Refresh room list when app comes to foreground
-                // This handles: removed from rooms, added to new rooms
-                Task {
-                    await loadData()
-                }
-            }
-        }
-        // Listen for real-time room deletion notifications
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RoomWasDeleted"))) { notification in
-            if let roomId = notification.userInfo?["roomId"] as? String {
-                print("📥 ContentView: Room \(roomId) was deleted, updating UI")
-                viewModel.removeRoomOptimistically(roomId)
-            }
-        }
-        // Listen for real-time removal from room notifications
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserRemovedFromRoom"))) { notification in
-            if let roomId = notification.userInfo?["roomId"] as? String {
-                print("📥 ContentView: User removed from room \(roomId), updating UI")
-                viewModel.removeRoomOptimistically(roomId)
-            }
-        }
         .alert("Sign Out", isPresented: $showingSignOutAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Sign Out", role: .destructive) {
@@ -617,17 +598,18 @@ struct ContentView: View {
 struct EnhancedRoomCard: View {
     let room: ChatRoom
     let unreadCount: Int
+    let typingText: String?
     var isSelected: Bool = false
     let action: () -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
     @State private var roomAvatarImage: PlatformImage?
+    @State private var isLoadingAvatar = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Header with room avatar and leave button
+            // Header: avatar + badges + leave button
             HStack {
-                // Room avatar
                 Group {
                     if let avatarImage = roomAvatarImage {
                         Image(platformImage: avatarImage)
@@ -638,31 +620,40 @@ struct EnhancedRoomCard: View {
                     } else {
                         ZStack {
                             Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: selectedTheme.colors(for: colorScheme).primary,
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-
-                            Text(room.name.prefix(1).uppercased())
-                                .font(.headline.bold())
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                                .fill(LinearGradient(
+                                    colors: selectedTheme.colors(for: colorScheme).primary,
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ))
+                            if isLoadingAvatar {
+                                ProgressView()
+                                    .tint(.white)
+                                    .scaleEffect(0.7)
+                            } else {
+                                Text(room.name.prefix(1).uppercased())
+                                    .font(.headline.bold())
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                            }
                         }
                         .frame(width: 40, height: 40)
                     }
                 }
-                .shadow(
-                    color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.2),
-                    radius: 4, y: 2)
-                .onAppear {
-                    loadRoomAvatar()
+                .shadow(color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.2), radius: 4, y: 2)
+                .task(id: room.avatarStorageId) {
+                    roomAvatarImage = nil
+                    guard let storageId = room.avatarStorageId else { isLoadingAvatar = false; return }
+                    isLoadingAvatar = true
+                    if let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
+                       let url = URL(string: urlString),
+                       let (data, _) = try? await URLSession.shared.data(from: url),
+                       let image = PlatformImage.fromData(data) {
+                        roomAvatarImage = image
+                    }
+                    isLoadingAvatar = false
                 }
 
                 Spacer()
 
-                // Header right side (Badges + Action)
                 HStack(spacing: 8) {
                     if unreadCount > 0 {
                         Text("\(unreadCount)")
@@ -673,8 +664,6 @@ struct EnhancedRoomCard: View {
                             .background(Color.red)
                             .clipShape(Capsule())
                     }
-
-                    // Leave button
                     Button(action: action) {
                         Image(systemName: "door.left.hand.open")
                             .font(.system(size: 14, weight: .bold))
@@ -690,35 +679,42 @@ struct EnhancedRoomCard: View {
                 }
             }
 
-            // Room info
+            // Room name + last message / typing indicator
             VStack(alignment: .leading, spacing: 4) {
                 Text(room.name)
                     .font(.headline)
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
                     .lineLimit(1)
 
-                Group {
-                    if let lastMessage = room.lastMessage {
-                        Text(lastMessage)
-                    } else {
-                        Text("No messages yet")
-                            .italic()
-                            .opacity(0.6)
+                if let typing = typingText {
+                    HStack(spacing: 4) {
+                        Image(systemName: "ellipsis.bubble")
+                            .imageScale(.small)
+                        Text(typing)
                     }
+                    .font(.caption)
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                    .lineLimit(1)
+                } else if let lastMessage = room.lastMessage {
+                    Text(lastMessage)
+                        .font(.caption)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                        .lineLimit(1)
+                } else {
+                    Text("No messages yet")
+                        .font(.caption)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.6))
+                        .italic()
+                        .lineLimit(1)
                 }
-                .font(.caption)
-                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                .lineLimit(1)
             }
-            
-            // Footer (Participants) - No Spacer above it
+
+            // Footer: member count + room type badge
             HStack(spacing: 4) {
                 Image(systemName: "person.2.fill")
                     .imageScale(.small)
                 Text("\(room.participants.count)")
-                
                 Spacer()
-                
                 if room.type == .secret {
                     Image(systemName: "lock.shield.fill")
                         .font(.caption2)
@@ -732,9 +728,7 @@ struct EnhancedRoomCard: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(selectedTheme.colors(for: colorScheme).cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(
-            color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.1), radius: 8, y: 4
-        )
+        .shadow(color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.1), radius: 8, y: 4)
         .overlay(
             RoundedRectangle(cornerRadius: 20)
                 .strokeBorder(
@@ -745,38 +739,6 @@ struct EnhancedRoomCard: View {
         )
         .scaleEffect(isSelected ? 1.03 : 1.0)
         .animation(.easeInOut(duration: 0.15), value: isSelected)
-    }
-    
-    private func loadRoomAvatar() {
-        // Try persisted avatarURL first (resolving filename to current session's path)
-        if let avatarURL = room.avatarURL {
-            let filename = avatarURL.lastPathComponent
-            if let resolvedURL = AssetPersistenceService.shared.getURL(for: filename),
-               let data = try? Data(contentsOf: resolvedURL),
-               let image = PlatformImage.fromData(data) {
-                roomAvatarImage = image
-                return
-            }
-        }
-
-        // Fallback: fetch from Convex storage if storageId available
-        if let storageId = room.avatarStorageId {
-            Task { await fetchAvatarFromConvex(storageId: storageId) }
-        }
-    }
-
-    private func fetchAvatarFromConvex(storageId: String) async {
-        do {
-            if let urlString = try await ConvexChatAPI.shared.getFileURL(storageId: storageId),
-               let url = URL(string: urlString) {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                if let image = PlatformImage.fromData(data) {
-                    await MainActor.run { roomAvatarImage = image }
-                }
-            }
-        } catch {
-            // Silently fail — show placeholder
-        }
     }
 }
 

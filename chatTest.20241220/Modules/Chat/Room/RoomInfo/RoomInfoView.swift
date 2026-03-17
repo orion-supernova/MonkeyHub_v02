@@ -8,6 +8,7 @@ struct RoomInfoView: View {
     @State private var showImagePicker = false
     @State private var selectedImage: PlatformImage?
     @State private var roomAvatarImage: PlatformImage?
+    @State private var isLoadingRoomAvatar = false
     @State private var showVisibilityAlert = false
     @State private var pendingVisibilityValue: Bool = false
     @State private var isEditingName = false
@@ -49,7 +50,6 @@ struct RoomInfoView: View {
 
     private var navigationStack: some View {
         stackWithSheets
-            .onChange(of: viewModel.room.avatarStorageId) { _ in loadRoomAvatar() }
             .alert("Change Room Visibility", isPresented: $showVisibilityAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button(pendingVisibilityValue ? "Make Public" : "Make Private") {
@@ -74,17 +74,25 @@ struct RoomInfoView: View {
 
     private var stackWithSheets: some View {
         baseNavigationStack
-            .onAppear {
-                viewModel.startSubscriptions()
-                loadRoomAvatar()
-            }
+            .onAppear { viewModel.startSubscriptions() }
             .onDisappear { viewModel.stopSubscriptions() }
+            .task(id: viewModel.room.avatarStorageId) {
+                roomAvatarImage = nil
+                guard let storageId = viewModel.room.avatarStorageId else { isLoadingRoomAvatar = false; return }
+                isLoadingRoomAvatar = true
+                if let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
+                   let url = URL(string: urlString),
+                   let (data, _) = try? await URLSession.shared.data(from: url),
+                   let image = PlatformImage.fromData(data) {
+                    roomAvatarImage = image
+                }
+                isLoadingRoomAvatar = false
+            }
             .sheet(isPresented: $showImagePicker) { ImagePicker(image: $selectedImage) }
             .onChange(of: selectedImage) { newImage in
                 if let image = newImage {
                     Task {
                         await viewModel.updateRoomAvatar(image)
-                        loadRoomAvatar()
                         selectedImage = nil
                     }
                 }
@@ -133,40 +141,6 @@ struct RoomInfoView: View {
         }
     }
     
-    private func loadRoomAvatar() {
-        // Try persisted avatarURL first (resolving filename to current session's path)
-        if let avatarURL = viewModel.room.avatarURL {
-            let filename = avatarURL.lastPathComponent
-            if let resolvedURL = AssetPersistenceService.shared.getURL(for: filename),
-               let data = try? Data(contentsOf: resolvedURL),
-               let image = PlatformImage.fromData(data) {
-                roomAvatarImage = image
-                return
-            }
-        }
-
-        // Fallback: fetch from Convex storage if available
-        if let storageId = viewModel.room.avatarStorageId {
-            Task {
-                await fetchAvatarFromConvex(storageId: storageId)
-            }
-        }
-    }
-
-    private func fetchAvatarFromConvex(storageId: String) async {
-        do {
-            if let urlString = try await ConvexChatAPI.shared.getFileURL(storageId: storageId),
-               let url = URL(string: urlString) {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                if let image = PlatformImage.fromData(data) {
-                    await MainActor.run { roomAvatarImage = image }
-                }
-            }
-        } catch {
-            print("Failed to fetch room avatar from Convex: \(error)")
-        }
-    }
-    
     private var avatarSection: some View {
         VStack(spacing: 12) {
             ZStack {
@@ -194,11 +168,17 @@ struct RoomInfoView: View {
                                 )
                             )
                             .frame(width: 120, height: 120)
-                            .overlay(
-                                Text(String(viewModel.room.name.prefix(2)).uppercased())
-                                    .font(.system(size: 48, weight: .bold))
-                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-                            )
+                            .overlay {
+                                if isLoadingRoomAvatar {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(1.5)
+                                } else {
+                                    Text(String(viewModel.room.name.prefix(2)).uppercased())
+                                        .font(.system(size: 48, weight: .bold))
+                                        .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                                }
+                            }
                     }
                 }
 

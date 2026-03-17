@@ -134,7 +134,11 @@ export const updateRoom = mutation({
   handler: async (ctx, { roomId, userId, name, description, isPrivate }) => {
     const room = await ctx.db.get(roomId);
     if (!room) throw new Error("ROOM_NOT_FOUND");
-    if (room.createdBy.toString() !== userId.toString()) throw new Error("NOT_OWNER");
+    const membership = await ctx.db
+      .query("roomMembers")
+      .withIndex("by_room_user", (q) => q.eq("roomId", roomId).eq("userId", userId))
+      .first();
+    if (!membership) throw new Error("NOT_AUTHORIZED"); // any member can update
 
     const trimmed = name.trim();
     if (!trimmed) throw new Error("ROOM_NAME_REQUIRED");
@@ -165,7 +169,11 @@ export const updateRoomAvatar = mutation({
   handler: async (ctx, { roomId, userId, storageId }) => {
     const room = await ctx.db.get(roomId);
     if (!room) throw new Error("ROOM_NOT_FOUND");
-    if (room.createdBy.toString() !== userId.toString()) throw new Error("NOT_OWNER");
+    const membership = await ctx.db
+      .query("roomMembers")
+      .withIndex("by_room_user", (q) => q.eq("roomId", roomId).eq("userId", userId))
+      .first();
+    if (!membership) throw new Error("NOT_AUTHORIZED"); // any member can update avatar
     await ctx.db.patch(roomId, { avatarStorageId: storageId });
   },
 });

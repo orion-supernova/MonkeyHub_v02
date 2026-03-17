@@ -65,7 +65,7 @@ final class RoomInfoViewModel: ObservableObject {
             try await convexAPI.updateRoom(roomId: room.id, userId: userId, name: newName, description: room.description)
             await sendSystemMessage("\(currentUserName()) changed the room name from \"\(oldName)\" to \"\(newName)\"")
         } catch {
-            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+            AlertManager.shared.showAlert(title: "Error", message: friendlyErrorMessage(error))
         }
         isLoading = false
     }
@@ -79,7 +79,7 @@ final class RoomInfoViewModel: ObservableObject {
             try await convexAPI.updateRoom(roomId: room.id, userId: userId, name: room.name, description: trimmed.isEmpty ? nil : trimmed)
             await sendSystemMessage("\(currentUserName()) updated the room description")
         } catch {
-            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+            AlertManager.shared.showAlert(title: "Error", message: friendlyErrorMessage(error))
         }
         isLoading = false
     }
@@ -92,7 +92,7 @@ final class RoomInfoViewModel: ObservableObject {
             try await convexAPI.updateRoom(roomId: room.id, userId: userId, name: room.name, description: room.description, isPrivate: isPrivate)
             await sendSystemMessage("\(currentUserName()) made the room \(isPrivate ? "private" : "public")")
         } catch {
-            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+            AlertManager.shared.showAlert(title: "Error", message: friendlyErrorMessage(error))
         }
         isLoading = false
     }
@@ -110,7 +110,7 @@ final class RoomInfoViewModel: ObservableObject {
             try await convexAPI.updateRoomAvatar(roomId: room.id, userId: userId, storageId: storageId)
             await sendSystemMessage("\(currentUserName()) updated the room avatar")
         } catch {
-            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+            AlertManager.shared.showAlert(title: "Error", message: friendlyErrorMessage(error))
         }
         isUploadingAvatar = false
     }
@@ -122,7 +122,7 @@ final class RoomInfoViewModel: ObservableObject {
             try await convexAPI.leaveRoom(roomId: room.id, userId: userId)
             await sendSystemMessage("\(currentUserName()) removed \(removedName) from the room")
         } catch {
-            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+            AlertManager.shared.showAlert(title: "Error", message: friendlyErrorMessage(error))
         }
         isLoading = false
     }

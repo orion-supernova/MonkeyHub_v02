@@ -150,7 +150,7 @@ class ChatRepository: ObservableObject {
             reconcileUnreadCounts()
             updateGlobalBadge()
         } catch {
-            print("❌ ChatRepository: Failed to fetch rooms: \(error)")
+            AppLogger.shared.logError("ChatRepository.fetchRooms", error)
         }
     }
 
@@ -214,7 +214,7 @@ class ChatRepository: ObservableObject {
                 upsertMessages(messages, in: roomId)
             }
         } catch {
-            print("❌ ChatRepository: Failed to fetch messages: \(error)")
+            AppLogger.shared.logError("ChatRepository.fetchMessages", error)
         }
     }
 
@@ -228,7 +228,7 @@ class ChatRepository: ObservableObject {
             upsertMessages(older, in: roomId)
             return older.count
         } catch {
-            print("❌ ChatRepository: Failed to fetch older messages: \(error)")
+            AppLogger.shared.logError("ChatRepository.fetchOlderMessages", error)
             return 0
         }
     }
@@ -254,7 +254,7 @@ class ChatRepository: ObservableObject {
             // drop it atomically when the server confirms the same content.
             updateLocalRoom(for: message)
         } catch {
-            print("❌ ChatRepository: Failed to send message: \(error)")
+            AppLogger.shared.logError("ChatRepository.sendMessage", error)
             var errorMessage = message
             errorMessage.status = .error
             upsertMessage(errorMessage, in: message.roomId)
@@ -270,7 +270,7 @@ class ChatRepository: ObservableObject {
         do {
             try await convexAPI.deleteMessage(messageId: messageId, userId: userId)
         } catch {
-            print("❌ ChatRepository: Failed to delete message: \(error)")
+            AppLogger.shared.logError("ChatRepository.deleteMessage", error)
             if roomId == activeRoomId { await fetchMessages(for: roomId) }
         }
     }

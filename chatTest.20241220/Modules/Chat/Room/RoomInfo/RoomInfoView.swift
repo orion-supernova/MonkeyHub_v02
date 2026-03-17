@@ -26,6 +26,8 @@ struct RoomInfoView: View {
         viewModel.room.createdBy == currentUserId
     }
 
+    private var isMember: Bool { true } // always true — you can only open this view if you're in the room
+
     init(room: ChatRoom) {
         self._viewModel = StateObject(wrappedValue: RoomInfoViewModel(room: room))
         self.currentUserId = UserDefaults.standard.string(forKey: "userId") ?? ""
@@ -193,8 +195,8 @@ struct RoomInfoView: View {
                         .scaleEffect(1.5)
                 }
 
-                // Camera button - tappable to change image (creator only)
-                if !viewModel.isUploadingAvatar && isCreator {
+                // Camera button - tappable to change image (any member)
+                if !viewModel.isUploadingAvatar && isMember {
                     VStack {
                         Spacer()
                         HStack {
@@ -293,7 +295,7 @@ struct RoomInfoView: View {
                         .fontWeight(.bold)
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
 
-                    if isCreator {
+                    if isMember {
                         Button {
                             editedName = viewModel.room.name
                             isEditingName = true
@@ -330,7 +332,7 @@ struct RoomInfoView: View {
                     
                     Spacer()
                     
-                    if !isEditingDescription && isCreator {
+                    if !isEditingDescription && isMember {
                         Button {
                             editedDescription = viewModel.room.description ?? ""
                             isEditingDescription = true
@@ -424,7 +426,7 @@ struct RoomInfoView: View {
                         .font(.subheadline)
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
 
-                    if isCreator {
+                    if isMember {
                         Button {
                             pendingVisibilityValue = !viewModel.room.isPrivate
                             showVisibilityAlert = true
@@ -560,7 +562,7 @@ struct RoomInfoView: View {
             NavigationStateManager.shared.path.removeLast(NavigationStateManager.shared.path.count)
         } catch {
             isDeleting = false
-            AlertManager.shared.showAlert(title: "Error", message: "Failed to delete room: \(error.localizedDescription)")
+            AlertManager.shared.showAlert(title: "Error", message: friendlyErrorMessage(error, fallback: "Failed to delete room. Please try again."))
         }
     }
 }

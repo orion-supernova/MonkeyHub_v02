@@ -193,6 +193,21 @@ struct ChatRoomView: View {
             isNavActive = true
         }
         #endif
+        .task(id: liveRoom.avatarStorageId) {
+            roomAvatarImage = nil
+            if let storageId = liveRoom.avatarStorageId {
+                // Load from Convex storage (real-time: re-runs when storageId changes)
+                if let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
+                   let url = URL(string: urlString),
+                   let (data, _) = try? await URLSession.shared.data(from: url),
+                   let image = PlatformImage.fromData(data) {
+                    roomAvatarImage = image
+                }
+            } else {
+                // Fallback: try persisted avatarURL from local disk
+                loadRoomAvatar()
+            }
+        }
         .task {
             // Check if user is still a member of this room
             await checkMembership()
@@ -202,7 +217,6 @@ struct ChatRoomView: View {
         .onAppear {
             navigationState.currentScreen = .chatRoom
             navigationState.currentRoomId = room.id
-            loadRoomAvatar()
         }
         .onDisappear {
             navigationState.currentScreen = .home
@@ -391,51 +405,50 @@ struct RoomTitleView: View {
     }
 
     var body: some View {
-        HStack(spacing: avatarImage != nil ? 10 : 0) {
-            // Avatar - only shown if image exists
+        HStack(spacing: 8) {
+            // Avatar circle — only rendered when a real image exists
             if let avatar = avatarImage {
                 Image(platformImage: avatar)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 32, height: 32)
+                    .frame(width: 34, height: 34)
                     .clipShape(Circle())
-                    .overlay(
-                        Circle()
-                            .strokeBorder(.white.opacity(0.2), lineWidth: 1)
-                    )
+                    // Thin background-coloured border gives the layered "sticker on top" look
+                    .overlay(Circle().strokeBorder(.background, lineWidth: 2))
+                    .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
             }
 
+            // Room name
             Text(title)
                 .font(.headline)
-                .multilineTextAlignment(.center)
                 .lineLimit(isExpanded ? nil : 1)
-        }
-        .padding(.leading, avatarImage != nil ? 6 : 20)
-        .padding(.trailing, 20)
-        .padding(.vertical, isExpanded ? 8 : 0)
-        .frame(minHeight: 44)
-        .frame(height: isExpanded ? nil : 44)
-        .background(
-            GeometryReader { geo in
-                Color.clear
-                    .onAppear { containerWidth = geo.size.width }
-                    .onChange(of: geo.size.width) { _, newValue in containerWidth = newValue }
-            }
-        )
-        .background(
-            Text(title)
-                .font(.headline)
-                .fixedSize()
-                .padding(.horizontal, 20)
-                .hidden()
-                .overlay(
-                    GeometryReader { proxy in
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                .background(
+                    GeometryReader { geo in
                         Color.clear
-                            .onAppear { textLayoutWidth = proxy.size.width }
-                            .onChange(of: proxy.size.width) { _, newValue in textLayoutWidth = newValue }
+                            .onAppear { containerWidth = geo.size.width }
+                            .onChange(of: geo.size.width) { _, newValue in containerWidth = newValue }
                     }
                 )
-        )
+                .background(
+                    Text(title)
+                        .font(.headline)
+                        .fixedSize()
+                        .hidden()
+                        .overlay(
+                            GeometryReader { proxy in
+                                Color.clear
+                                    .onAppear { textLayoutWidth = proxy.size.width }
+                                    .onChange(of: proxy.size.width) { _, newValue in textLayoutWidth = newValue }
+                            }
+                        )
+                )
+        }
+        .padding(.leading, avatarImage != nil ? 6 : 16)
+        .padding(.trailing, 16)
+        .padding(.vertical, isExpanded ? 8 : 4)
+        .frame(minHeight: 44)
+        .frame(height: isExpanded ? nil : 44)
         .modifier(LiquidGlassModifier(cornerRadius: 22))
         .overlay(
             RoundedRectangle(cornerRadius: 22)

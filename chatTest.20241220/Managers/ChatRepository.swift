@@ -98,6 +98,13 @@ class ChatRepository: ObservableObject {
         updateGlobalBadge()
     }
 
+    /// Clears the active room only if it still matches the expected roomId.
+    /// Safe to call from deinit Tasks where a new room may already be active.
+    func clearIfActive(_ roomId: String) {
+        guard activeRoomId == roomId else { return }
+        setActiveRoom(nil)
+    }
+
     func setActiveRoom(_ roomId: String?) {
         activeRoomId = roomId
         if let roomId {

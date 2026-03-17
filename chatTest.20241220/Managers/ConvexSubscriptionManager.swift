@@ -75,8 +75,13 @@ final class ConvexSubscriptionManager: ObservableObject {
             )
             .receive(on: RunLoop.main)
             .sink(
-                receiveCompletion: { _ in },
+                receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        AppLogger.shared.logError("typing:getTypingUsers", error)
+                    }
+                },
                 receiveValue: { users in
+                    AppLogger.shared.info("⌨️ typing update: \(users.count) user(s) typing in \(roomId)")
                     TypingIndicatorManager.shared.handleConvexUpdate(users, for: roomId)
                 }
             )

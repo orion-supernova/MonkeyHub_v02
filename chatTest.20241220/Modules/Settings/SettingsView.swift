@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var isImagePickerPresented = false
     @State private var selectedImage: PlatformImage?
     @State private var profileAvatarImage: PlatformImage?
+    @State private var isLoadingAvatar = false
     @StateObject private var navigationState = NavigationStateManager.shared
     @State private var showingMigrationSheet = false
     @State private var showingEnvironmentAlert = false
@@ -138,20 +139,39 @@ struct SettingsView: View {
         }
     }
 
+    private func loadAvatarIfNeeded() async {
+        guard profileAvatarImage == nil,
+              let storageId = currentUser?.avatarStorageId else { return }
+        isLoadingAvatar = true
+        defer { isLoadingAvatar = false }
+        do {
+            guard let urlString = try await ConvexChatAPI.shared.getFileURL(storageId: storageId),
+                  let url = URL(string: urlString),
+                  let (data, _) = try? await URLSession.shared.data(from: url),
+                  let image = UIImage(data: data) else { return }
+            profileAvatarImage = image
+        } catch {
+            print("⚠️ SettingsView: could not load avatar: \(error)")
+        }
+    }
+
     private var profileSection: some View {
         VStack(spacing: 24) {
             ZStack {
-                if let selectedImage = selectedImage {
-                    Image(platformImage: selectedImage)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 100, height: 100)
-                        .clipShape(Circle())
-                        .shadow(
-                            color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
-                            radius: 10,
-                            y: 5
+                if isLoadingAvatar {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: selectedTheme.colors(for: colorScheme).primary,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
+                        .frame(width: 100, height: 100)
+                        .overlay {
+                            ProgressView()
+                                .tint(selectedTheme.colors(for: colorScheme).text)
+                        }
                 } else if let profileAvatarImage = profileAvatarImage {
                     Image(platformImage: profileAvatarImage)
                         .resizable()
@@ -463,6 +483,7 @@ struct SettingsView: View {
         }
         .task {
             await loadCurrentUser()
+            await loadAvatarIfNeeded()
         }
         .withAlertManager()
     }
@@ -502,21 +523,34 @@ struct SettingsView: View {
     }
 
     private func handleImageSelection() async {
-        guard let image = selectedImage, let user = currentUser,
-              let data = image.toData() else { return }
-        isLoadingUser = true
+        guard let image = selectedImage, let user = currentUser else { return }
+        guard let data = image.toData() else {
+            AlertManager.shared.showAlert(title: "Error", message: "Could not convert image to JPEG data")
+            selectedImage = nil
+            return
+        }
+        selectedImage = nil
+        isLoadingAvatar = true
+        defer { isLoadingAvatar = false }
 
         do {
+            // Delete old avatar from storage before uploading the new one
+            if let oldStorageId = user.avatarStorageId {
+                do { try await ConvexChatAPI.shared.deleteFile(storageId: oldStorageId) }
+                catch { print("⚠️ Could not delete old avatar \(oldStorageId): \(error)") }
+            }
             let storageId = try await ConvexChatAPI.shared.uploadFile(data: data, mimeType: "image/jpeg")
             try await ConvexChatAPI.shared.updateUserAvatar(userId: user.id, storageId: storageId)
+            // Update in-memory user so the next replacement knows the current storageId
+            currentUser = ChatUser(
+                id: user.id, name: user.name, username: user.username,
+                email: user.email, avatarStorageId: storageId, bio: user.bio
+            )
             profileAvatarImage = image
-            selectedImage = nil
             AlertManager.shared.showAlert(title: "Success", message: "Profile picture updated successfully")
         } catch {
-            selectedImage = nil
             AlertManager.shared.showAlert(title: "Error", message: "Failed to update profile picture: \(error.localizedDescription)")
         }
-        isLoadingUser = false
     }
 }
 

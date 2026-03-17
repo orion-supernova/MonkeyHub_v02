@@ -176,22 +176,22 @@ struct MessageView: View {
                 .font(.system(size: 16))
                 .foregroundColor(isCurrentUser ? .white : (colorScheme == .dark ? .white : .primary))
         case .image:
-            if let url = message.assetURL {
-                CachedAsyncImage(
-                    url: url,
-                    imageZoomNamespace: imageZoomNamespace,
-                    onTap: { onImageTapped(url) }
-                )
-            }
+            ConvexImageView(
+                assetURL: message.assetURL,
+                storageId: message.mediaStorageId,
+                imageZoomNamespace: imageZoomNamespace,
+                onTap: onImageTapped
+            )
         case .video:
-            if let url = message.assetURL {
-                VideoPlayer(player: AVPlayer(url: url))
-                    .frame(width: 250, height: 250)
-            }
+            ConvexVideoView(
+                assetURL: message.assetURL,
+                storageId: message.mediaStorageId
+            )
         case .audio:
-            if let url = message.assetURL {
-                AudioPlayerView(url: url).padding(8)
-            }
+            ConvexAudioView(
+                assetURL: message.assetURL,
+                storageId: message.mediaStorageId
+            )
         default: EmptyView()
         }
     }
@@ -422,5 +422,87 @@ struct CachedAsyncImage: View {
                 displayImage = await ImageLoaderManager.shared.loadAndPrepare(url: url)
             }
         }
+    }
+}
+
+// MARK: - Convex Media Views
+// These resolve mediaStorageId → URL when no local assetURL is available (e.g. messages from other users).
+
+private struct ConvexImageView: View {
+    let assetURL: URL?
+    let storageId: String?
+    let imageZoomNamespace: Namespace.ID
+    let onTap: (URL) -> Void
+
+    @State private var resolvedURL: URL?
+
+    var body: some View {
+        Group {
+            if let url = assetURL ?? resolvedURL {
+                CachedAsyncImage(url: url, imageZoomNamespace: imageZoomNamespace, onTap: { onTap(url) })
+            } else if storageId != nil {
+                ProgressView().frame(width: 200, height: 150)
+            }
+        }
+        .task { await resolve() }
+    }
+
+    private func resolve() async {
+        guard assetURL == nil, let storageId, resolvedURL == nil else { return }
+        guard let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
+              let url = URL(string: urlString) else { return }
+        resolvedURL = url
+    }
+}
+
+private struct ConvexVideoView: View {
+    let assetURL: URL?
+    let storageId: String?
+
+    @State private var resolvedURL: URL?
+
+    var body: some View {
+        Group {
+            if let url = assetURL ?? resolvedURL {
+                VideoPlayer(player: AVPlayer(url: url))
+                    .frame(width: 250, height: 180)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else if storageId != nil {
+                ProgressView().frame(width: 250, height: 180)
+            }
+        }
+        .task { await resolve() }
+    }
+
+    private func resolve() async {
+        guard assetURL == nil, let storageId, resolvedURL == nil else { return }
+        guard let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
+              let url = URL(string: urlString) else { return }
+        resolvedURL = url
+    }
+}
+
+private struct ConvexAudioView: View {
+    let assetURL: URL?
+    let storageId: String?
+
+    @State private var resolvedURL: URL?
+
+    var body: some View {
+        Group {
+            if let url = assetURL ?? resolvedURL {
+                AudioPlayerView(url: url).padding(8)
+            } else if storageId != nil {
+                ProgressView().padding(8)
+            }
+        }
+        .task { await resolve() }
+    }
+
+    private func resolve() async {
+        guard assetURL == nil, let storageId, resolvedURL == nil else { return }
+        guard let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
+              let url = URL(string: urlString) else { return }
+        resolvedURL = url
     }
 }

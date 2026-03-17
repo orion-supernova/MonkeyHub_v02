@@ -339,7 +339,7 @@ final class ConvexChatAPI {
     func updateUserAvatar(userId: String, storageId: String) async throws {
         try await convex.mutationVoid("users:updateAvatar", with: [
             "userId": userId,
-            "avatarStorageId": storageId
+            "storageId": storageId
         ])
     }
 
@@ -375,29 +375,77 @@ final class ConvexChatAPI {
         try await convex.mutationVoid("files:deleteFile", with: ["storageId": storageId])
     }
 
+    /// Upload a file from disk to Convex storage without loading it fully into memory.
+    /// Preferred for video and audio. Returns the storageId.
+    func uploadFileFromURL(_ fileURL: URL, mimeType: String) async throws -> String {
+        let uploadURL = try await generateUploadURL()
+        AppLogger.shared.info("⬆️ uploadFile(url): \(fileURL.lastPathComponent) mime=\(mimeType)")
+
+        guard let url = URL(string: uploadURL) else {
+            throw ConvexError.serverError("Invalid upload URL: \(uploadURL)")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
+
+        let (responseData, response) = try await URLSession.shared.upload(for: request, fromFile: fileURL)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let responseBody = String(data: responseData, encoding: .utf8) ?? "<binary>"
+        AppLogger.shared.info("⬆️ uploadFile(url): status=\(statusCode)")
+
+        guard statusCode == 200 else {
+            let message = statusCode >= 500
+                ? "Server is temporarily unavailable (HTTP \(statusCode)). Please try again later."
+                : "Upload failed (HTTP \(statusCode))."
+            throw ConvexError.serverError(message)
+        }
+
+        struct UploadResponse: Decodable { let storageId: String }
+        do {
+            let result = try JSONDecoder().decode(UploadResponse.self, from: responseData)
+            AppLogger.shared.info("⬆️ uploadFile(url): storageId=\(result.storageId)")
+            return result.storageId
+        } catch {
+            throw ConvexError.serverError("Upload response decode failed: \(responseBody)")
+        }
+    }
+
     /// Upload data to Convex file storage. Returns the storageId.
     func uploadFile(data: Data, mimeType: String) async throws -> String {
         // 1. Get upload URL
         let uploadURL = try await generateUploadURL()
+        AppLogger.shared.info("⬆️ uploadFile: url=\(uploadURL) size=\(data.count)b mime=\(mimeType)")
 
-        // 2. Extract storageId from the URL (it's the last path component)
         guard let url = URL(string: uploadURL) else {
-            throw ConvexError.serverError("Invalid upload URL")
+            throw ConvexError.serverError("Invalid upload URL: \(uploadURL)")
         }
 
-        // 3. PUT the file data
+        // 2. PUT the file data directly to Convex storage
         var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
+        request.httpMethod = "POST"
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
 
         let (responseData, response) = try await URLSession.shared.upload(for: request, from: data)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw ConvexError.serverError("Upload failed")
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let responseBody = String(data: responseData, encoding: .utf8) ?? "<binary>"
+        AppLogger.shared.info("⬆️ uploadFile: status=\(statusCode) body=\(responseBody)")
+
+        guard statusCode == 200 else {
+            let message = statusCode >= 500
+                ? "Server is temporarily unavailable (HTTP \(statusCode)). Please try again later."
+                : "Upload failed (HTTP \(statusCode))."
+            throw ConvexError.serverError(message)
         }
 
-        // Convex storage response contains the storageId
+        // Convex storage responds with {"storageId": "..."}
         struct UploadResponse: Decodable { let storageId: String }
-        let result = try JSONDecoder().decode(UploadResponse.self, from: responseData)
-        return result.storageId
+        do {
+            let result = try JSONDecoder().decode(UploadResponse.self, from: responseData)
+            AppLogger.shared.info("⬆️ uploadFile: storageId=\(result.storageId)")
+            return result.storageId
+        } catch {
+            throw ConvexError.serverError("Upload response decode failed: \(responseBody)")
+        }
     }
 }

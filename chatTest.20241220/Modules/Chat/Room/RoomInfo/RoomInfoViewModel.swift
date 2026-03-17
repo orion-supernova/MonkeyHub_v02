@@ -115,6 +115,11 @@ final class RoomInfoViewModel: ObservableObject {
         isUploadingAvatar = true
         error = nil
         do {
+            // Delete old room avatar from storage before uploading the new one
+            if let oldStorageId = room.avatarStorageId {
+                do { try await convexAPI.deleteFile(storageId: oldStorageId) }
+                catch { print("⚠️ Could not delete old room avatar \(oldStorageId): \(error)") }
+            }
             let storageId = try await convexAPI.uploadFile(data: data, mimeType: "image/jpeg")
             try await convexAPI.updateRoomAvatar(roomId: room.id, storageId: storageId)
             room = ChatRoom(

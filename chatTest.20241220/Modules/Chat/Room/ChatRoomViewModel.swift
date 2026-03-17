@@ -29,8 +29,8 @@ class ChatRoomViewModel: ObservableObject {
         self.userName = userDefaults.string(forKey: userNameUserDefaultsKey) ?? "User"
 
         setupBindings()
-        repository.setActiveRoom(roomId)
         typingManager.setActiveRoom(roomId)
+        repository.setActiveRoom(roomId)
     }
 
     deinit {
@@ -38,8 +38,8 @@ class ChatRoomViewModel: ObservableObject {
         let roomId = self.roomId
         Task { @MainActor in
             TypingIndicatorManager.shared.stopTyping(in: roomId)
-            TypingIndicatorManager.shared.setActiveRoom(nil)
-            ChatRepository.shared.setActiveRoom(nil)
+            TypingIndicatorManager.shared.clearIfActive(roomId)
+            ChatRepository.shared.clearIfActive(roomId)
         }
     }
 
@@ -117,41 +117,51 @@ class ChatRoomViewModel: ObservableObject {
 
     func sendImage(from url: URL) async {
         let localURL = copyAssetToLocalStorage(from: url) ?? url
-        let message = ChatMessage(
-            senderId: userId,
-            senderName: userName,
-            content: "📷 Photo",
-            type: .image,
-            roomId: roomId,
-            assetURL: localURL
-        )
-        await repository.sendMessage(message)
+        guard let data = try? Data(contentsOf: localURL) else {
+            AlertManager.shared.showAlert(title: "Error", message: "Could not read image data.")
+            return
+        }
+        do {
+            let storageId = try await ConvexChatAPI.shared.uploadFile(data: data, mimeType: "image/jpeg")
+            let message = ChatMessage(
+                senderId: userId, senderName: userName,
+                content: "📷 Photo", type: .image,
+                roomId: roomId, mediaStorageId: storageId, assetURL: localURL
+            )
+            await repository.sendMessage(message)
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: "Failed to send image: \(AppLogger.shared.friendlyError(error))")
+        }
     }
 
     func sendVideo(_ url: URL) async {
         let localURL = copyAssetToLocalStorage(from: url) ?? url
-        let message = ChatMessage(
-            senderId: userId,
-            senderName: userName,
-            content: "🎥 Video",
-            type: .video,
-            roomId: roomId,
-            assetURL: localURL
-        )
-        await repository.sendMessage(message)
+        do {
+            let storageId = try await ConvexChatAPI.shared.uploadFileFromURL(localURL, mimeType: "video/mp4")
+            let message = ChatMessage(
+                senderId: userId, senderName: userName,
+                content: "🎥 Video", type: .video,
+                roomId: roomId, mediaStorageId: storageId, assetURL: localURL
+            )
+            await repository.sendMessage(message)
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: "Failed to send video: \(AppLogger.shared.friendlyError(error))")
+        }
     }
 
     func sendAudio(_ url: URL) async {
         let localURL = copyAssetToLocalStorage(from: url) ?? url
-        let message = ChatMessage(
-            senderId: userId,
-            senderName: userName,
-            content: "🎵 Voice Message",
-            type: .audio,
-            roomId: roomId,
-            assetURL: localURL
-        )
-        await repository.sendMessage(message)
+        do {
+            let storageId = try await ConvexChatAPI.shared.uploadFileFromURL(localURL, mimeType: "audio/m4a")
+            let message = ChatMessage(
+                senderId: userId, senderName: userName,
+                content: "🎵 Voice Message", type: .audio,
+                roomId: roomId, mediaStorageId: storageId, assetURL: localURL
+            )
+            await repository.sendMessage(message)
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: "Failed to send voice message: \(AppLogger.shared.friendlyError(error))")
+        }
     }
 
     func deleteMessage(_ messageId: String) async {

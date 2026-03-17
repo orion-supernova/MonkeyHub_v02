@@ -36,7 +36,10 @@ final class TypingIndicatorManager: ObservableObject {
     /// Called by ConvexSubscriptionManager when the typing subscription delivers an update.
     /// The list contains ONLY other users who are currently typing (Convex excludes self server-side).
     func handleConvexUpdate(_ users: [ConvexTypingUser], for roomId: String) {
-        guard roomId == activeRoomId else { return }
+        guard roomId == activeRoomId else {
+            AppLogger.shared.info("⌨️ handleConvexUpdate: ignored (activeRoomId=\(activeRoomId ?? "nil"), roomId=\(roomId))")
+            return
+        }
 
         let currentUserId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
 
@@ -110,6 +113,13 @@ final class TypingIndicatorManager: ObservableObject {
         typingUsers[roomId]?.removeAll { $0.userId == currentUserId }
 
         Task { await clearTypingFromConvex(for: roomId) }
+    }
+
+    /// Clears the active room only if it matches the expected roomId.
+    /// Safe to call from deinit Tasks where a new room may already be active.
+    func clearIfActive(_ roomId: String) {
+        guard activeRoomId == roomId else { return }
+        setActiveRoom(nil)
     }
 
     func setActiveRoom(_ roomId: String?) {

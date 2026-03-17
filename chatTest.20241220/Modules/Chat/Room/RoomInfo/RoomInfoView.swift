@@ -52,7 +52,7 @@ struct RoomInfoView: View {
         stackWithSheets
             .alert("Change Room Visibility", isPresented: $showVisibilityAlert) {
                 Button("Cancel", role: .cancel) {}
-                Button(pendingVisibilityValue ? "Make Public" : "Make Private") {
+                Button(pendingVisibilityValue ? "Make Private" : "Make Public") {
                     Task { await viewModel.updateRoomPrivacy(pendingVisibilityValue) }
                 }
             } message: {

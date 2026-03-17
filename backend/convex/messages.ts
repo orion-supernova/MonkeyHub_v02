@@ -86,6 +86,11 @@ export const deleteMessage = mutation({
       .collect();
     for (const r of reactions) await ctx.db.delete(r._id);
 
+    // Delete associated file from storage if present
+    if (msg.mediaStorageId) {
+      await ctx.storage.delete(msg.mediaStorageId);
+    }
+
     await ctx.db.delete(messageId);
   },
 });

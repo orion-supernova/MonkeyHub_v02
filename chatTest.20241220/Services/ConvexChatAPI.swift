@@ -54,10 +54,11 @@ struct ConvexMessageDoc: Decodable {
     let reactions: [ConvexReactionDoc]?
 
     func toChatMessage() -> ChatMessage {
-        ChatMessage(
+        let isSystem = type == "system"
+        return ChatMessage(
             id: _id,
-            senderId: userId,
-            senderName: senderName ?? name ?? username ?? "Unknown",
+            senderId: isSystem ? ChatMessage.systemSenderId : userId,
+            senderName: isSystem ? ChatMessage.systemSenderName : (senderName ?? name ?? username ?? "Unknown"),
             content: content,
             type: MessageType(rawValue: type ?? "text") ?? .text,
             timestamp: Date(timeIntervalSince1970: createdAt / 1000),
@@ -190,13 +191,15 @@ final class ConvexChatAPI {
     }
 
     func updateRoom(roomId: String, userId: String, name: String, description: String?, isPrivate: Bool? = nil) async throws {
-        try await convex.mutationVoid("rooms:updateRoom", with: [
+        // Only include optional fields when non-nil — Convex rejects explicit null for v.optional(...)
+        var args: [String: ConvexEncodable?] = [
             "roomId": roomId,
             "userId": userId,
             "name": name,
-            "description": description,
-            "isPrivate": isPrivate
-        ])
+        ]
+        if let description { args["description"] = description }
+        if let isPrivate   { args["isPrivate"] = isPrivate }
+        try await convex.mutationVoid("rooms:updateRoom", with: args)
     }
 
     func fetchRoomMembers(roomId: String) async throws -> [ChatUser] {

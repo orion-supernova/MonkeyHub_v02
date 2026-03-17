@@ -20,12 +20,14 @@ struct RoomInfoView: View {
     @Namespace private var avatarNamespace
 
     private let currentUserId: String
-    private let isCreator: Bool
-    
+
+    private var isCreator: Bool {
+        viewModel.room.createdBy == currentUserId
+    }
+
     init(room: ChatRoom) {
         self._viewModel = StateObject(wrappedValue: RoomInfoViewModel(room: room))
         self.currentUserId = UserDefaults.standard.string(forKey: "userId") ?? ""
-        self.isCreator = room.createdBy == currentUserId
     }
     
     var body: some View {
@@ -50,7 +52,7 @@ struct RoomInfoView: View {
             .onChange(of: viewModel.room.avatarStorageId) { _ in loadRoomAvatar() }
             .alert("Change Room Visibility", isPresented: $showVisibilityAlert) {
                 Button("Cancel", role: .cancel) {}
-                Button(pendingVisibilityValue ? "Make Private" : "Make Public") {
+                Button(pendingVisibilityValue ? "Make Public" : "Make Private") {
                     Task { await viewModel.updateRoomPrivacy(pendingVisibilityValue) }
                 }
             } message: {
@@ -72,11 +74,11 @@ struct RoomInfoView: View {
 
     private var stackWithSheets: some View {
         baseNavigationStack
-            .onAppear { loadRoomAvatar() }
-            .task {
-                await viewModel.refreshRoom()
-                await viewModel.loadMembers()
+            .onAppear {
+                viewModel.startSubscriptions()
+                loadRoomAvatar()
             }
+            .onDisappear { viewModel.stopSubscriptions() }
             .sheet(isPresented: $showImagePicker) { ImagePicker(image: $selectedImage) }
             .onChange(of: selectedImage) { newImage in
                 if let image = newImage {
@@ -101,8 +103,8 @@ struct RoomInfoView: View {
                 .padding()
             }
             .refreshable {
-                await viewModel.refreshRoom()
-                await viewModel.loadMembers()
+                viewModel.stopSubscriptions()
+                viewModel.startSubscriptions()
             }
             .background(selectedTheme.colors(for: colorScheme).background)
             .navigationTitle("Room Info")
@@ -211,8 +213,8 @@ struct RoomInfoView: View {
                         .scaleEffect(1.5)
                 }
 
-                // Camera button - tappable to change image
-                if !viewModel.isUploadingAvatar {
+                // Camera button - tappable to change image (creator only)
+                if !viewModel.isUploadingAvatar && isCreator {
                     VStack {
                         Spacer()
                         HStack {
@@ -310,19 +312,21 @@ struct RoomInfoView: View {
                         .font(.title2)
                         .fontWeight(.bold)
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                    
-                    Button {
-                        editedName = viewModel.room.name
-                        isEditingName = true
-                    } label: {
-                        Image(systemName: "pencil.circle.fill")
-                            .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+
+                    if isCreator {
+                        Button {
+                            editedName = viewModel.room.name
+                            isEditingName = true
+                        } label: {
+                            Image(systemName: "pencil.circle.fill")
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                        }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        #endif
+                        .contentShape(Circle())
                     }
-                    #if os(macOS)
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    #endif
-                    .contentShape(Circle())
                 }
             }
             
@@ -346,7 +350,7 @@ struct RoomInfoView: View {
                     
                     Spacer()
                     
-                    if !isEditingDescription {
+                    if !isEditingDescription && isCreator {
                         Button {
                             editedDescription = viewModel.room.description ?? ""
                             isEditingDescription = true
@@ -430,34 +434,36 @@ struct RoomInfoView: View {
             .cornerRadius(12)
             
             HStack {
-                Label("Visibility", systemImage: (viewModel.room.isPrivate ?? true) ? "lock.fill" : "globe")
+                Label("Visibility", systemImage: viewModel.room.isPrivate ? "lock.fill" : "globe")
                     .font(.subheadline)
                 
                 Spacer()
                 
                 HStack(spacing: 8) {
-                    Text((viewModel.room.isPrivate ?? true) ? "Private" : "Public")
+                    Text(viewModel.room.isPrivate ? "Private" : "Public")
                         .font(.subheadline)
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                    
-                    Button {
-                        pendingVisibilityValue = !(viewModel.room.isPrivate ?? true)
-                        showVisibilityAlert = true
-                    } label: {
-                        Text((viewModel.room.isPrivate ?? true) ? "Make Public" : "Make Private")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(selectedTheme.colors(for: colorScheme).accent.opacity(0.1))
-                            .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                            .cornerRadius(8)
+
+                    if isCreator {
+                        Button {
+                            pendingVisibilityValue = !viewModel.room.isPrivate
+                            showVisibilityAlert = true
+                        } label: {
+                            Text(viewModel.room.isPrivate ? "Make Public" : "Make Private")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(selectedTheme.colors(for: colorScheme).accent.opacity(0.1))
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                                .cornerRadius(8)
+                        }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        #endif
+                        .contentShape(RoundedRectangle(cornerRadius: 8))
                     }
-                    #if os(macOS)
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    #endif
-                    .contentShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
             .padding()
@@ -616,8 +622,15 @@ struct MemberRowView: View {
                         )
                 }
             }
-            .onAppear {
-                loadAvatar()
+            .task(id: member.avatarStorageId) {
+                avatarImage = nil
+                guard let storageId = member.avatarStorageId else { return }
+                if let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
+                   let url = URL(string: urlString),
+                   let (data, _) = try? await URLSession.shared.data(from: url),
+                   let image = PlatformImage.fromData(data) {
+                    avatarImage = image
+                }
             }
             
             VStack(alignment: .leading, spacing: 3) {
@@ -673,17 +686,6 @@ struct MemberRowView: View {
         .padding()
     }
     
-    private func loadAvatar() {
-        guard let storageId = member.avatarStorageId else { return }
-        Task {
-            if let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
-               let url = URL(string: urlString),
-               let (data, _) = try? await URLSession.shared.data(from: url),
-               let image = PlatformImage.fromData(data) {
-                await MainActor.run { avatarImage = image }
-            }
-        }
-    }
 }
 
 // MARK: - Zoomable Avatar Overlay

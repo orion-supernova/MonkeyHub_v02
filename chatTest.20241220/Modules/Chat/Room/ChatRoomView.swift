@@ -3,6 +3,7 @@ import SwiftUI
 struct ChatRoomView: View {
     @Environment(\.dismiss) private var dismiss
     let room: ChatRoom
+    @ObservedObject private var repository = ChatRepository.shared
     @StateObject private var viewModel: ChatRoomViewModel
     @State private var messageText = ""
     @State private var showImagePicker = false
@@ -26,6 +27,11 @@ struct ChatRoomView: View {
     // Keyboard navigation (macOS) — nil means text field cursor mode
     @State private var navIndex: Int? = nil
     @FocusState private var isNavActive: Bool
+
+    /// Live room data from the repository subscription — falls back to the initial room.
+    private var liveRoom: ChatRoom {
+        repository.rooms.first { $0.id == room.id } ?? room
+    }
 
     init(room: ChatRoom) {
         self.room = room
@@ -84,7 +90,7 @@ struct ChatRoomView: View {
 
                     Spacer()
 
-                    RoomTitleView(title: room.name, avatarImage: roomAvatarImage, showFocusRing: navIndex == 1)
+                    RoomTitleView(title: liveRoom.name, avatarImage: roomAvatarImage, showFocusRing: navIndex == 1)
 
                     Spacer()
 
@@ -236,7 +242,7 @@ struct ChatRoomView: View {
         }
         #if os(iOS)
         .fullScreenCover(isPresented: $showRoomInfo) {
-            RoomInfoView(room: room)
+            RoomInfoView(room: liveRoom)
         }
         .navigationDestination(for: URL.self) { url in
             FullscreenImageView(url: url)
@@ -244,7 +250,7 @@ struct ChatRoomView: View {
         }
         #else
         .sheet(isPresented: $showRoomInfo) {
-            RoomInfoView(room: room)
+            RoomInfoView(room: liveRoom)
         }
         .navigationDestination(for: URL.self) { url in
             FullscreenImageView(url: url)

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		5475227C2F68ADE2004E36E9 /* ConvexMobile in Frameworks */ = {isa = PBXBuildFile; productRef = 5475227B2F68ADE2004E36E9 /* ConvexMobile */; };
+		5475228D2F69F7F9004E36E9 /* OneSignalFramework in Frameworks */ = {isa = PBXBuildFile; productRef = 5475228C2F69F7F9004E36E9 /* OneSignalFramework */; };
 		54C387942F1265C900D8DA86 /* CloudKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 54C387922F1265C300D8DA86 /* CloudKit.framework */; };
 /* End PBXBuildFile section */
 
@@ -30,6 +31,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				54C387942F1265C900D8DA86 /* CloudKit.framework in Frameworks */,
+				5475228D2F69F7F9004E36E9 /* OneSignalFramework in Frameworks */,
 				5475227C2F68ADE2004E36E9 /* ConvexMobile in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -83,6 +85,7 @@
 			name = chatTest.20241220;
 			packageProductDependencies = (
 				5475227B2F68ADE2004E36E9 /* ConvexMobile */,
+				5475228C2F69F7F9004E36E9 /* OneSignalFramework */,
 			);
 			productName = chatTest.20241220;
 			productReference = 54EC1C3D2D15774800D57A53 /* chatTest.20241220.app */;
@@ -114,6 +117,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				5475227A2F68ADE2004E36E9 /* XCRemoteSwiftPackageReference "convex-swift" */,
+				5475228B2F69F7F9004E36E9 /* XCRemoteSwiftPackageReference "OneSignal-iOS-SDK" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 54EC1C3E2D15774800D57A53 /* Products */;
@@ -287,7 +291,9 @@
 				INFOPLIST_FILE = "chatTest-20241220-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = MonkeyHub;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Please allow access to be able to send images.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "This app requires access to your camera.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app requires access to your microphone.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app requires access to your photo library.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -341,7 +347,9 @@
 				INFOPLIST_FILE = "chatTest-20241220-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = MonkeyHub;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Please allow access to be able to send images.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "This app requires access to your camera.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app requires access to your microphone.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app requires access to your photo library.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -400,6 +408,14 @@
 				minimumVersion = 0.8.1;
 			};
 		};
+		5475228B2F69F7F9004E36E9 /* XCRemoteSwiftPackageReference "OneSignal-iOS-SDK" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/OneSignal/OneSignal-iOS-SDK.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.5.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -407,6 +423,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5475227A2F68ADE2004E36E9 /* XCRemoteSwiftPackageReference "convex-swift" */;
 			productName = ConvexMobile;
+		};
+		5475228C2F69F7F9004E36E9 /* OneSignalFramework */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5475228B2F69F7F9004E36E9 /* XCRemoteSwiftPackageReference "OneSignal-iOS-SDK" */;
+			productName = OneSignalFramework;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

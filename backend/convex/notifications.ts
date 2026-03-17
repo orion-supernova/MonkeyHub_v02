@@ -3,11 +3,8 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
 // Required Convex environment variables (set in Convex dashboard):
-//   APNS_KEY_ID        — 10-character key ID from Apple Developer
-//   APNS_TEAM_ID       — 10-character Team ID from Apple Developer
-//   APNS_PRIVATE_KEY   — p8 private key content (PEM, without BEGIN/END lines, single line)
-//   APNS_BUNDLE_ID     — e.g. "com.yourcompany.MonkeyHub"
-//   APNS_ENVIRONMENT   — "production" | "sandbox" (default: "sandbox")
+//   ONESIGNAL_APP_ID   — your OneSignal App ID
+//   ONESIGNAL_API_KEY  — your OneSignal REST API key (from OneSignal dashboard → Settings → Keys & IDs)
 
 export const sendMessagePush = internalAction({
   args: {
@@ -19,36 +16,23 @@ export const sendMessagePush = internalAction({
     type: v.string(),
   },
   handler: async (ctx, { roomId, senderId, senderName, content, type }) => {
-    const keyId = process.env.APNS_KEY_ID;
-    const teamId = process.env.APNS_TEAM_ID;
-    const privateKeyBase64 = process.env.APNS_PRIVATE_KEY;
-    const bundleId = process.env.APNS_BUNDLE_ID;
-    const environment = process.env.APNS_ENVIRONMENT ?? "sandbox";
+    const appId = process.env.ONESIGNAL_APP_ID;
+    const apiKey = process.env.ONESIGNAL_API_KEY;
 
-    if (!keyId || !teamId || !privateKeyBase64 || !bundleId) {
+    if (!appId || !apiKey) {
       // Push not configured — skip silently
       return;
     }
 
-    // Fetch all room members except the sender
-    const members: Array<{ deviceTokens: string[] }> = await ctx.runQuery(
-      internal.rooms.getMembersWithTokens,
+    // Fetch all room members except the sender (we only need their user IDs now)
+    const members: Array<{ userId: string }> = await ctx.runQuery(
+      internal.rooms.getMemberIds,
       { roomId, excludeUserId: senderId }
     );
 
-    const tokens: string[] = [];
-    for (const member of members) {
-      for (const token of member.deviceTokens ?? []) {
-        tokens.push(token);
-      }
-    }
-    if (tokens.length === 0) return;
+    if (members.length === 0) return;
 
-    const jwt = await buildApnsJwt(teamId, keyId, privateKeyBase64);
-    const host =
-      environment === "production"
-        ? "https://api.push.apple.com"
-        : "https://api.sandbox.push.apple.com";
+    const externalUserIds = members.map((m) => m.userId.toString());
 
     const body =
       type === "text"
@@ -61,97 +45,38 @@ export const sendMessagePush = internalAction({
         ? "🎵 Audio"
         : "New message";
 
-    const payload = JSON.stringify({
-      aps: {
-        alert: { title: senderName, body },
-        sound: "default",
-        badge: 1,
-        "content-available": 1,
-        "mutable-content": 1,
-        category: "CHAT_MESSAGE",
+    const payload = {
+      app_id: appId,
+      include_external_user_ids: externalUserIds,
+      headings: { en: senderName },
+      contents: { en: body },
+      data: {
+        roomId: roomId.toString(),
+        senderId: senderId.toString(),
+        senderName,
+        content: body,
+        type,
       },
-      roomId,
-      senderName,
-      type,
+      ios_badgeType: "Increase",
+      ios_badgeCount: 1,
+      // Attach the notification category so iOS renders the quick-reply action
+      ios_category: "CHAT_MESSAGE",
+    };
+
+    const response = await fetch("https://onesignal.com/api/v1/notifications", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
     });
 
-    const results = await Promise.allSettled(
-      tokens.map((token) =>
-        fetch(`${host}/3/device/${token}`, {
-          method: "POST",
-          headers: {
-            authorization: `bearer ${jwt}`,
-            "apns-topic": bundleId,
-            "apns-push-type": "alert",
-            "content-type": "application/json",
-          },
-          body: payload,
-        })
-      )
-    );
-
-    // Log failures (don't throw — push failures are non-fatal)
-    for (const result of results) {
-      if (result.status === "rejected") {
-        console.error("APNs push failed:", result.reason);
-      }
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(
+        `OneSignal push failed (${response.status}): ${errorText}`
+      );
     }
   },
 });
-
-// Build a signed JWT for APNs authentication (ES256)
-async function buildApnsJwt(
-  teamId: string,
-  keyId: string,
-  privateKeyBase64: string
-): Promise<string> {
-  const issuedAt = Math.floor(Date.now() / 1000);
-
-  const header = base64url(JSON.stringify({ alg: "ES256", kid: keyId }));
-  const claims = base64url(JSON.stringify({ iss: teamId, iat: issuedAt }));
-  const signingInput = `${header}.${claims}`;
-
-  // Import the private key (PKCS8 PEM → CryptoKey)
-  const pemBody = privateKeyBase64
-    .replace(/-----BEGIN PRIVATE KEY-----/g, "")
-    .replace(/-----END PRIVATE KEY-----/g, "")
-    .replace(/\s+/g, "");
-
-  const keyBuffer = base64ToArrayBuffer(pemBody);
-  const cryptoKey = await crypto.subtle.importKey(
-    "pkcs8",
-    keyBuffer,
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"]
-  );
-
-  const encoder = new TextEncoder();
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    cryptoKey,
-    encoder.encode(signingInput)
-  );
-
-  return `${signingInput}.${base64url(signature)}`;
-}
-
-function base64url(input: string | ArrayBuffer): string {
-  let str: string;
-  if (typeof input === "string") {
-    str = btoa(input);
-  } else {
-    const bytes = new Uint8Array(input);
-    str = btoa(String.fromCharCode(...bytes));
-  }
-  return str.replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-}
-
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
-}

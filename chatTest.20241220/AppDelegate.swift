@@ -2,8 +2,10 @@
 //  AppDelegate.swift
 //  chatTest.20241220
 //
-//  Created by muratcankoc on 19/04/2025.
-//
+//  Wires OneSignal initialization and routes foreground / background
+//  notifications through NotificationRouter.
+//  Real-time data arrives via the Convex WebSocket — push is used only for
+//  background badge updates and deep-link navigation.
 
 #if canImport(UIKit)
 import UIKit
@@ -16,57 +18,39 @@ typealias BaseAppDelegate = UIApplicationDelegate
 protocol BaseAppDelegate {}
 #endif
 
-/// AppDelegate: Register for notifications and route them to ChatRepository.
-/// Real-time data arrives via Convex WebSocket — push is used only for background
-/// badge updates and deep-link navigation.
 class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
 
     private let router = NotificationRouter.shared
 
     #if canImport(UIKit)
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        registerForPushNotifications()
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
         registerNotificationCategories()
+        // OneSignal handles APNs registration and permission requests.
+        // PushNotificationManager.initialize is responsible for all setup.
+        PushNotificationManager.shared.initialize(launchOptions: launchOptions)
         return true
     }
+    #endif
 
-    func registerForPushNotifications() {
-        UNUserNotificationCenter.current().delegate = self
+    // MARK: - Background Remote Notifications
+    // OneSignal intercepts didRegisterForRemoteNotificationsWithDeviceToken and
+    // didFailToRegisterForRemoteNotificationsWithError automatically. We only
+    // need the background fetch handler to forward payloads to ChatRepository.
 
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            print("✅ Notification permission granted: \(granted)")
-            guard granted else {
-                print("⚠️ User denied notification permissions")
-                return
-            }
-            DispatchQueue.main.async {
-                UIApplication.shared.registerForRemoteNotifications()
-            }
-        }
-    }
-
-    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-        print("✅ Device Token: \(token)")
-
-        UserDefaults.standard.set(token, forKey: "deviceToken")
-
-        // Register token with Convex so backend can send APNs pushes
+    #if canImport(UIKit)
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
         Task { @MainActor in
-            await ConvexAuthService.shared.registerDeviceToken(token)
+            ChatRepository.shared.handleIncomingPush(userInfo)
         }
-    }
-
-    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("❌ Failed to register for notifications: \(error.localizedDescription)")
-    }
-    #else
-    func registerForPushNotifications() {
-        UNUserNotificationCenter.current().delegate = self
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            print("✅ macOS notification permission granted: \(granted)")
-        }
-        registerNotificationCategories()
+        completionHandler(.newData)
     }
     #endif
 
@@ -87,10 +71,9 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
             options: [.customDismissAction]
         )
         UNUserNotificationCenter.current().setNotificationCategories([messageCategory])
-        print("✅ Registered notification category with Reply action")
     }
 
-    // MARK: - UNUserNotificationCenterDelegate
+    // MARK: - UNUserNotificationCenterDelegate (foreground delivery)
 
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -105,15 +88,14 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
 
         if router.shouldSuppressUI(for: userInfo) {
             completionHandler([])
-            print("🔕 Notification UI suppressed — user in active chatroom")
         } else if router.isSystemMessage(userInfo) {
             completionHandler([])
-            print("🔕 System message — silent notification")
         } else {
             completionHandler([.banner, .sound, .badge])
-            print("🔔 Notification presented in foreground")
         }
     }
+
+    // MARK: - UNUserNotificationCenterDelegate (user tapped notification)
 
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -142,22 +124,6 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
 
         completionHandler()
     }
-
-    // MARK: - Background Notifications
-
-    #if canImport(UIKit)
-    func application(
-        _ application: UIApplication,
-        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
-        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
-    ) {
-        print("📲 Received remote notification in background")
-        Task { @MainActor in
-            router.route(userInfo)
-        }
-        completionHandler(.newData)
-    }
-    #endif
 
     // MARK: - Notification Action Handlers
 

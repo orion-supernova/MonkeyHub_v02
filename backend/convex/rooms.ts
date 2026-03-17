@@ -226,7 +226,6 @@ export const getMembers = query({
           bio: user.bio,
           avatarStorageId: user.avatarStorageId,
           status: user.status,
-          deviceTokens: user.deviceTokens,
           role: m.role,
         };
       })
@@ -235,22 +234,18 @@ export const getMembers = query({
   },
 });
 
-// Internal query: fetch members with device tokens (used for push notifications)
-export const getMembersWithTokens = internalQuery({
+// Internal query: fetch member user IDs for push notifications via OneSignal.
+// OneSignal targets users by external user ID — no device tokens needed here.
+export const getMemberIds = internalQuery({
   args: { roomId: v.id("rooms"), excludeUserId: v.id("users") },
   handler: async (ctx, { roomId, excludeUserId }) => {
     const members = await ctx.db
       .query("roomMembers")
       .withIndex("by_room", (q) => q.eq("roomId", roomId))
       .collect();
-    const users = await Promise.all(
-      members
-        .filter((m) => m.userId.toString() !== excludeUserId.toString())
-        .map((m) => ctx.db.get(m.userId))
-    );
-    return users
-      .filter(Boolean)
-      .map((u) => ({ userId: u!._id, deviceTokens: u!.deviceTokens ?? [] }));
+    return members
+      .filter((m) => m.userId.toString() !== excludeUserId.toString())
+      .map((m) => ({ userId: m.userId }));
   },
 });
 

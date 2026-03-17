@@ -14,7 +14,6 @@ export const getProfile = query({
       bio: user.bio,
       avatarStorageId: user.avatarStorageId,
       status: user.status,
-      deviceTokens: user.deviceTokens,
     };
   },
 });
@@ -46,34 +45,6 @@ export const updateAvatar = mutation({
     const user = await ctx.db.get(userId);
     if (!user) throw new Error("USER_NOT_FOUND");
     await ctx.db.patch(userId, { avatarStorageId: storageId });
-  },
-});
-
-export const registerDeviceToken = mutation({
-  args: {
-    userId: v.id("users"),
-    token: v.string(),
-  },
-  handler: async (ctx, { userId, token }) => {
-    const user = await ctx.db.get(userId);
-    if (!user) throw new Error("USER_NOT_FOUND");
-    const existing = user.deviceTokens ?? [];
-    if (!existing.includes(token)) {
-      await ctx.db.patch(userId, { deviceTokens: [...existing, token] });
-    }
-  },
-});
-
-export const removeDeviceToken = mutation({
-  args: {
-    userId: v.id("users"),
-    token: v.string(),
-  },
-  handler: async (ctx, { userId, token }) => {
-    const user = await ctx.db.get(userId);
-    if (!user) return;
-    const updated = (user.deviceTokens ?? []).filter((t) => t !== token);
-    await ctx.db.patch(userId, { deviceTokens: updated });
   },
 });
 

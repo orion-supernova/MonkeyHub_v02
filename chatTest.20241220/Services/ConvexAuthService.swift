@@ -21,6 +21,12 @@ final class ConvexAuthService: ObservableObject {
             isAuthenticated = true
             // Load cached user profile in background
             Task { await loadCachedUserProfile(userId: storedId) }
+            // Re-associate this device with the logged-in user in OneSignal.
+            // Deferred to next run-loop tick so ConvexAuthService.shared is fully
+            // initialised before PushNotificationManager accesses currentUserId.
+            Task { @MainActor in
+                PushNotificationManager.shared.setExternalUserId(storedId)
+            }
         }
     }
 
@@ -57,21 +63,13 @@ final class ConvexAuthService: ObservableObject {
         Task {
             try? await convex.mutationVoid("auth:logout", with: ["userId": userId])
         }
+        // Disassociate this device from the user in OneSignal before clearing credentials.
+        PushNotificationManager.shared.logout()
         KeychainService.delete(keychainUserIdKey)
         userDefaults.removeObject(forKey: userIdUserDefaultsKey)
         userDefaults.removeObject(forKey: "userName")
         isAuthenticated = false
         cachedUser = nil
-    }
-
-    func registerDeviceToken(_ token: String) {
-        guard let userId = currentUserId else { return }
-        Task {
-            try? await convex.mutationVoid("users:registerDeviceToken", with: [
-                "userId": userId,
-                "token": token
-            ])
-        }
     }
 
     // MARK: - Helpers
@@ -87,10 +85,9 @@ final class ConvexAuthService: ObservableObject {
         isAuthenticated = true
         await loadCachedUserProfile(userId: response.userId)
 
-        // Sync device token if one exists
-        if let token = userDefaults.string(forKey: "deviceToken") {
-            registerDeviceToken(token)
-        }
+        // Associate this device with the newly authenticated user in OneSignal.
+        // OneSignal.initialize was already called at app launch — this just links the user.
+        PushNotificationManager.shared.setExternalUserId(response.userId)
     }
 
     private func loadCachedUserProfile(userId: String) async {

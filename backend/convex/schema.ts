@@ -13,7 +13,7 @@ export default defineSchema({
     bio: v.optional(v.string()),
     email: v.optional(v.string()),
     avatarStorageId: v.optional(v.id("_storage")),
-    deviceTokens: v.optional(v.array(v.string())),
+    deviceTokens: v.optional(v.array(v.string())), // legacy field — OneSignal manages tokens now
   }).index("by_username", ["username"]),
 
   friendships: defineTable({

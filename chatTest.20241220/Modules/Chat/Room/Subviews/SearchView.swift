@@ -86,11 +86,6 @@ struct SearchView: View {
                     .textFieldStyle(.plain)
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
                     .submitLabel(.search)
-                    .onSubmit {
-                        Task {
-                            await viewModel.search()
-                        }
-                    }
 
                     if !viewModel.searchText.isEmpty {
                         Button {

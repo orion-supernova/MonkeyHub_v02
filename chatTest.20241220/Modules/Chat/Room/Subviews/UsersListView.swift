@@ -48,6 +48,8 @@ struct UserRow: View {
     let selectUser: (ChatUser) async -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
+    @State private var avatarImage: PlatformImage?
+    @State private var isLoadingAvatar = false
 
     var body: some View {
         Button {
@@ -66,24 +68,50 @@ struct UserRow: View {
             .overlay(cardBorder)
         }
         .buttonStyle(.plain)
+        .task(id: user.avatarStorageId) {
+            avatarImage = nil
+            guard let storageId = user.avatarStorageId else { return }
+            isLoadingAvatar = true
+            if let image = await ConvexFileCacheService.shared.image(for: storageId) {
+                avatarImage = image
+            }
+            isLoadingAvatar = false
+        }
     }
 
     private var userAvatar: some View {
         ZStack {
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: selectedTheme.colors(for: colorScheme).primary,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+            if let image = avatarImage {
+                Image(platformImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 44, height: 44)
+                    .clipShape(Circle())
+            } else {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: selectedTheme.colors(for: colorScheme).primary,
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
-                )
-
-            Text(user.displayInitial)
-                .font(.title3.bold())
-                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                    .frame(width: 44, height: 44)
+                    .overlay {
+                        if isLoadingAvatar {
+                            ProgressView()
+                                .tint(selectedTheme.colors(for: colorScheme).text)
+                                .scaleEffect(0.8)
+                        } else {
+                            Text(user.displayInitial)
+                                .font(.title3.bold())
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                        }
+                    }
+            }
         }
         .frame(width: 44, height: 44)
+        .shadow(color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.2), radius: 4, y: 2)
     }
 
     private var userInfo: some View {

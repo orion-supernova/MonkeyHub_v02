@@ -72,7 +72,6 @@ final class ConvexFileCacheService {
     private init() {
         let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
         cacheDirectory = documentsDirectory
-            .appendingPathComponent("ChatAssets", isDirectory: true)
             .appendingPathComponent("ConvexCache", isDirectory: true)
         manifestURL = cacheDirectory.appendingPathComponent("manifest.json")
 
@@ -110,10 +109,18 @@ final class ConvexFileCacheService {
             return image
         }
 
-        if let localURL = cachedLocalFileURL(for: storageId),
-           let image = await Self.loadImage(from: localURL) {
-            imageCache.setObject(CachedPlatformImage(image: image), forKey: storageId as NSString)
-            return image
+        if let localURL = cachedLocalFileURL(for: storageId) {
+            if let image = await Self.loadImage(from: localURL) {
+                imageCache.setObject(CachedPlatformImage(image: image), forKey: storageId as NSString)
+                return image
+            } else {
+                // Poisoned cache: file exists but is not a valid image.
+                // Remove it and try to download again.
+                print("⚠️ ConvexFileCacheService: Cached file for \(storageId) is invalid, removing and re-downloading...")
+                try? fileManager.removeItem(at: localURL)
+                manifest.removeValue(forKey: storageId)
+                persistManifest()
+            }
         }
 
         guard let localURL = await downloadFile(storageId: storageId),
@@ -191,6 +198,7 @@ final class ConvexFileCacheService {
     }
 
     private func downloadFile(storageId: String) async -> URL? {
+        // Re-check manifest/file existence here as well
         if let localURL = cachedLocalFileURL(for: storageId) {
             return localURL
         }
@@ -205,6 +213,13 @@ final class ConvexFileCacheService {
 
             do {
                 let (data, response) = try await URLSession.shared.data(from: remoteURL)
+                
+                // Validate HTTP status code
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                    print("❌ ConvexFileCacheService: Download failed for \(storageId) with status \(httpResponse.statusCode)")
+                    return nil
+                }
+
                 let destinationURL = await MainActor.run {
                     self.cacheDirectory.appendingPathComponent(
                         self.cacheFileName(for: storageId, sourceURL: remoteURL, response: response)
@@ -220,6 +235,7 @@ final class ConvexFileCacheService {
 
                 return destinationURL
             } catch {
+                print("❌ ConvexFileCacheService: Error downloading \(storageId): \(error)")
                 return nil
             }
         }

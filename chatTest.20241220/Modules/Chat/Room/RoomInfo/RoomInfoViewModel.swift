@@ -115,6 +115,24 @@ final class RoomInfoViewModel: ObservableObject {
         isUploadingAvatar = false
     }
 
+    func updateMessageLifetime(_ seconds: TimeInterval) async {
+        isLoading = true
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+        do {
+            try await convexAPI.updateRoom(
+                roomId: room.id,
+                userId: userId,
+                name: room.name,
+                description: room.description,
+                messageLifetime: seconds
+            )
+            await sendSystemMessage("\(currentUserName()) changed message lifetime to \(formatLifetime(seconds))")
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: friendlyErrorMessage(error))
+        }
+        isLoading = false
+    }
+
     func removeMember(_ userId: String) async {
         isLoading = true
         let removedName = members.first { $0.id == userId }?.displayName ?? "a member"

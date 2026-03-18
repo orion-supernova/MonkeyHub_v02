@@ -19,6 +19,7 @@ struct ChatRoom: Identifiable, Hashable, Codable {
     let messageLifetime: TimeInterval?
     var avatarStorageId: String?    // Convex storage ID
     var avatarURL: URL?             // Local cached avatar URL
+    var hasPassword: Bool           // true if the room requires a password to join
 
     init(
         id: String = UUID().uuidString,
@@ -33,7 +34,8 @@ struct ChatRoom: Identifiable, Hashable, Codable {
         type: RoomType = .regular,
         messageLifetime: TimeInterval? = nil,
         avatarStorageId: String? = nil,
-        avatarURL: URL? = nil
+        avatarURL: URL? = nil,
+        hasPassword: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -48,6 +50,7 @@ struct ChatRoom: Identifiable, Hashable, Codable {
         self.messageLifetime = messageLifetime
         self.avatarStorageId = avatarStorageId
         self.avatarURL = avatarURL
+        self.hasPassword = hasPassword
     }
 
     // MARK: - Hashable / Equatable

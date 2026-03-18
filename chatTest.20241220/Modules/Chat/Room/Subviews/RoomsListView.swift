@@ -156,13 +156,69 @@ private struct RoomRow: View {
                 .font(.headline)
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
 
-            HStack {
-                Image(systemName: "person.2.fill")
-                    .imageScale(.small)
-                Text("\(room.participants.count) members")
+            HStack(spacing: 6) {
+                HStack {
+                    Image(systemName: "person.2.fill")
+                        .imageScale(.small)
+                    Text("\(room.participants.count) members")
+                }
+                .font(.caption)
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+
+                if room.type == .secret {
+                    HStack(spacing: 2) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 9))
+                        Text("Secret")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.orange.opacity(0.2), Color.red.opacity(0.2)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        in: Capsule()
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.orange, .red],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .overlay(Capsule().strokeBorder(Color.orange.opacity(0.3), lineWidth: 0.5))
+                }
+
+                if room.hasPassword {
+                    HStack(spacing: 2) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 9))
+                        Text("Password")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.indigo.opacity(0.2), Color.blue.opacity(0.2)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        in: Capsule()
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.indigo, .blue],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .overlay(Capsule().strokeBorder(Color.indigo.opacity(0.3), lineWidth: 0.5))
+                }
             }
-            .font(.caption)
-            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
         }
     }
 

@@ -64,6 +64,7 @@ export default defineSchema({
     type: v.optional(v.string()),            // "text" | "image" | "video" | "audio" | "url" | "system"
     mediaStorageId: v.optional(v.id("_storage")),
     senderName: v.optional(v.string()),
+    expiresAt: v.optional(v.number()),       // Unix ms timestamp — set for Chamber of Secrets rooms
   })
     .index("by_room", ["roomId"])
     .index("by_room_time", ["roomId", "createdAt"]),

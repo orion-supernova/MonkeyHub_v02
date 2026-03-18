@@ -44,6 +44,9 @@ struct MessagesListView: View {
                 }
             )
             .background(Color.clear)
+            // When no messages, pass touches through so the empty state and
+            // input bar behind this scroll view remain fully interactive.
+            .allowsHitTesting(!viewModel.messages.isEmpty)
             .zIndex(1)
         }
         .overlay(alignment: .bottomTrailing) {

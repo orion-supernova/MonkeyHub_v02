@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
@@ -28,6 +28,12 @@ export const send = mutation({
       resolvedSenderName = user?.name ?? user?.username ?? "Unknown";
     }
 
+    // Check if the room has a message lifetime (Chamber of Secrets)
+    const room = await ctx.db.get(roomId);
+    const expiresAt = room?.messageLifetime
+      ? Date.now() + room.messageLifetime * 1000
+      : undefined;
+
     const messageId = await ctx.db.insert("messages", {
       roomId,
       userId,
@@ -36,7 +42,17 @@ export const send = mutation({
       type: msgType,
       mediaStorageId,
       senderName: resolvedSenderName,
+      expiresAt,
     });
+
+    // Schedule server-side deletion for self-destructing messages
+    if (expiresAt !== undefined) {
+      await ctx.scheduler.runAt(
+        new Date(expiresAt),
+        internal.messages.expireMessage,
+        { messageId }
+      );
+    }
 
     // Update room's last message preview
     const preview = msgType === "text" ? content.slice(0, 100) : `[${msgType}]`;
@@ -184,5 +200,29 @@ export const listBefore = query({
       })
     );
     return enriched.reverse(); // chronological order
+  },
+});
+
+// MARK: - Chamber of Secrets: scheduled self-destruction
+
+export const expireMessage = internalMutation({
+  args: { messageId: v.id("messages") },
+  handler: async (ctx, { messageId }) => {
+    const msg = await ctx.db.get(messageId);
+    if (!msg) return; // Already deleted (e.g. manually deleted before expiry)
+
+    // Delete all reactions for this message
+    const reactions = await ctx.db
+      .query("reactions")
+      .withIndex("by_message", (q) => q.eq("messageId", messageId))
+      .collect();
+    for (const r of reactions) await ctx.db.delete(r._id);
+
+    // Delete associated media from storage if present
+    if (msg.mediaStorageId) {
+      await ctx.storage.delete(msg.mediaStorageId);
+    }
+
+    await ctx.db.delete(messageId);
   },
 });

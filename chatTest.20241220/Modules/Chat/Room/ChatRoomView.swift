@@ -1,4 +1,8 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
+
 
 struct ChatRoomView: View {
     @Environment(\.dismiss) private var dismiss
@@ -23,6 +27,10 @@ struct ChatRoomView: View {
     @State private var isUserMember = true  // Assume member until checked
     @State private var showRoomDeletedAlert = false
     @State private var showRemovedFromRoomAlert = false
+
+    #if canImport(UIKit)
+    @State private var screenshotObserver: NSObjectProtocol?
+    #endif
 
     // Keyboard navigation (macOS) — nil means text field cursor mode
     @State private var navIndex: Int? = nil
@@ -58,29 +66,24 @@ struct ChatRoomView: View {
                 ProgressView("Loading messages...")
                     .padding()
                     .modifier(LiquidGlassModifier(cornerRadius: 12))
-                    .zIndex(1)
             } else if viewModel.messages.isEmpty {
-                ContentUnavailableView(
-                    "No Messages",
-                    systemImage: "bubble.left",
-                    description: Text("Start the conversation by sending a message")
-                )
-                .foregroundStyle(.secondary)
-                .zIndex(1)
+                if liveRoom.type == .secret {
+                    ChamberOfSecretsWelcomeView(messageLifetime: liveRoom.messageLifetime)
+                } else {
+                    ContentUnavailableView(
+                        "No Messages",
+                        systemImage: "bubble.left",
+                        description: Text("Start the conversation by sending a message")
+                    )
+                    .foregroundStyle(.secondary)
+                }
             }
 
             // 3. The Main Content Layer
-            MessagesListView(
-                viewModel: viewModel,
-                isLoading: isLoading,
-                onImageTapped: { url in
-                    navigationState.path.append(url)
-                },
-                imageZoomNamespace: imageZoomNamespace
-            )
+            messagesListContent
             // Allows messages to scroll behind the top/bottom pebbles
             .ignoresSafeArea(.container, edges: .vertical)
-            
+
             // --- TOP FLOATING PEBBLES ---
             .safeAreaInset(edge: .top) {
                 HStack {
@@ -90,7 +93,12 @@ struct ChatRoomView: View {
 
                     Spacer()
 
-                    RoomTitleView(title: liveRoom.name, avatarImage: roomAvatarImage, showFocusRing: navIndex == 1)
+                    RoomTitleView(
+                        title: liveRoom.name,
+                        roomType: liveRoom.type,
+                        avatarImage: roomAvatarImage,
+                        showFocusRing: navIndex == 1
+                    )
 
                     Spacer()
 
@@ -217,10 +225,30 @@ struct ChatRoomView: View {
         .onAppear {
             navigationState.currentScreen = .chatRoom
             navigationState.currentRoomId = room.id
+            #if canImport(UIKit)
+            if liveRoom.type == .secret {
+                screenshotObserver = NotificationCenter.default.addObserver(
+                    forName: UIApplication.userDidTakeScreenshotNotification,
+                    object: nil,
+                    queue: .main
+                ) { _ in
+                    AlertManager.shared.showAlert(
+                        title: "Screenshot Detected",
+                        message: "Screenshots are not allowed in Chamber of Secrets rooms."
+                    )
+                }
+            }
+            #endif
         }
         .onDisappear {
             navigationState.currentScreen = .home
             navigationState.currentRoomId = nil
+            #if canImport(UIKit)
+            if let observer = screenshotObserver {
+                NotificationCenter.default.removeObserver(observer)
+                screenshotObserver = nil
+            }
+            #endif
         }
         // Listen for real-time room deletion notifications
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RoomWasDeleted"))) { notification in
@@ -323,6 +351,20 @@ struct ChatRoomView: View {
         )
     }
 
+    // MARK: - Messages List
+
+    @ViewBuilder
+    private var messagesListContent: some View {
+        MessagesListView(
+            viewModel: viewModel,
+            isLoading: isLoading,
+            onImageTapped: { url in
+                navigationState.path.append(url)
+            },
+            imageZoomNamespace: imageZoomNamespace
+        )
+    }
+
     /// Check if current user is still a member of this room
     private func checkMembership() async {
         let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
@@ -387,8 +429,89 @@ struct ChatRoomView: View {
     }
 }
 
+// MARK: - Chamber of Secrets Welcome View
+
+struct ChamberOfSecretsWelcomeView: View {
+    let messageLifetime: TimeInterval?
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 32) {
+                // Big icon
+                ZStack {
+                    Circle()
+                        .fill(RadialGradient(
+                            colors: [Color.orange.opacity(0.3), Color.red.opacity(0.1), Color.clear],
+                            center: .center, startRadius: 10, endRadius: 80
+                        ))
+                        .frame(width: 160, height: 160)
+                    Text("🔥")
+                        .font(.system(size: 72))
+                }
+
+                // Title
+                VStack(spacing: 8) {
+                    Text("Chamber of Secrets")
+                        .font(.title2.bold())
+                        .foregroundStyle(
+                            LinearGradient(colors: [.orange, .red], startPoint: .leading, endPoint: .trailing)
+                        )
+                    Text("Messages in this room automatically delete after a set time — whether read or not.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
+
+                // Feature cards
+                VStack(spacing: 12) {
+                    featureRow(icon: "flame.fill", color: .orange,
+                               title: "Auto-Deleting Messages",
+                               subtitle: messageLifetime != nil ? "Every message deletes after \(formatLifetime(messageLifetime!))" : "Messages delete on a timer")
+                    featureRow(icon: "exclamationmark.shield.fill", color: .red,
+                               title: "Screenshot Detection",
+                               subtitle: "You'll be notified if someone takes a screenshot")
+                    featureRow(icon: "eye.slash.fill", color: .purple,
+                               title: "No Message History",
+                               subtitle: "Once gone, messages cannot be recovered")
+                }
+                .padding(.horizontal, 24)
+            }
+            .padding(.vertical, 48)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .onTapGesture {
+            #if canImport(UIKit)
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            #endif
+        }
+    }
+
+    private func featureRow(icon: String, color: Color, title: String, subtitle: String) -> some View {
+        HStack(spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(color.opacity(0.15))
+                    .frame(width: 48, height: 48)
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundStyle(color)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(color.opacity(0.2), lineWidth: 1))
+    }
+}
+
 struct RoomTitleView: View {
     let title: String
+    var roomType: RoomType = .regular
     let avatarImage: PlatformImage?
 
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
@@ -398,8 +521,9 @@ struct RoomTitleView: View {
     @State private var textLayoutWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
 
-    init(title: String, avatarImage: PlatformImage? = nil, showFocusRing: Bool = false) {
+    init(title: String, roomType: RoomType = .regular, avatarImage: PlatformImage? = nil, showFocusRing: Bool = false) {
         self.title = title
+        self.roomType = roomType
         self.avatarImage = avatarImage
         self.showFocusRing = showFocusRing
     }
@@ -416,6 +540,20 @@ struct RoomTitleView: View {
                     // Thin background-coloured border gives the layered "sticker on top" look
                     .overlay(Circle().strokeBorder(.background, lineWidth: 2))
                     .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+            }
+
+            // Chamber of Secrets flame icon
+            if roomType == .secret {
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.orange, .red],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .symbolEffect(.variableColor.cumulative, options: .repeat(.continuous))
             }
 
             // Room name

@@ -21,11 +21,12 @@ struct UIKitScrollView<Content: View>: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: UIKitScrollViewController<Content>, context: Context) {
         let wasPrepended = vc.lastFirstItemId != nil && firstItemId != nil &&
                           vc.lastFirstItemId != firstItemId && itemCount > vc.lastItemCount
+        let itemCountIncreased = itemCount > vc.lastItemCount
 
         if wasPrepended {
             vc.preservePositionDuringUpdate(content: content)
         } else {
-            vc.updateContent(content)
+            vc.updateContent(content, scrollToBottomIfNeeded: itemCountIncreased)
         }
 
         vc.lastFirstItemId = firstItemId
@@ -92,7 +93,7 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTapToDismissKeyboard(_:)))
         tapGesture.cancelsTouchesInView = false
         tapGesture.delegate = self
-        hostingController.view.addGestureRecognizer(tapGesture)
+        scrollView.addGestureRecognizer(tapGesture)
     }
 
     @objc private func handleTapToDismissKeyboard(_ gesture: UITapGestureRecognizer) {
@@ -244,12 +245,13 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         ])
     }
 
-    func updateContent(_ content: Content) {
+    func updateContent(_ content: Content, scrollToBottomIfNeeded: Bool = false) {
         let wasAtBottom = isAtBottom()
         hostingController.rootView = content
-        if wasAtBottom {
-            // Force layout immediately so contentSize is up-to-date, then snap to bottom
-            // without any async delay (avoids the one-frame flicker).
+        // Only force layout + scroll when a new message was added. Skipping this
+        // for timer-driven re-renders (e.g. Chamber of Secrets countdown) prevents
+        // the periodic setContentOffset calls from fighting with keyboardDismissMode=.interactive.
+        if wasAtBottom && scrollToBottomIfNeeded {
             hostingController.view.setNeedsLayout()
             hostingController.view.layoutIfNeeded()
             scrollView.layoutIfNeeded()

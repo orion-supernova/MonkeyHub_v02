@@ -130,8 +130,9 @@ export const updateRoom = mutation({
     name: v.string(),
     description: v.optional(v.string()),
     isPrivate: v.optional(v.boolean()),
+    messageLifetime: v.optional(v.number()),
   },
-  handler: async (ctx, { roomId, userId, name, description, isPrivate }) => {
+  handler: async (ctx, { roomId, userId, name, description, isPrivate, messageLifetime }) => {
     const room = await ctx.db.get(roomId);
     if (!room) throw new Error("ROOM_NOT_FOUND");
     const membership = await ctx.db
@@ -156,6 +157,7 @@ export const updateRoom = mutation({
       name: trimmed,
       description: description && description.length > 0 ? description : undefined,
       ...(isPrivate !== undefined ? { isPrivate } : {}),
+      ...(messageLifetime !== undefined ? { messageLifetime } : {}),
     });
   },
 });
@@ -180,10 +182,15 @@ export const updateRoomAvatar = mutation({
 
 export const listPublic = query({
   handler: async (ctx) => {
-    return await ctx.db
+    const rooms = await ctx.db
       .query("rooms")
       .filter((q) => q.eq(q.field("isPrivate"), false))
       .collect();
+    // Strip passwordHash for security — expose only a boolean indicator
+    return rooms.map(({ passwordHash, ...rest }) => ({
+      ...rest,
+      hasPassword: !!passwordHash,
+    }));
   },
 });
 

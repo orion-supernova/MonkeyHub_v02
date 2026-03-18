@@ -18,6 +18,7 @@ struct ConvexRoomDoc: Decodable {
     let lastMessageTime: Double?
     let avatarStorageId: String?
     let participantIds: [String]?  // injected by listUserRooms
+    let hasPassword: Bool?         // returned by listPublic (stripped of actual hash)
 
     func toChatRoom() -> ChatRoom {
         ChatRoom(
@@ -33,7 +34,8 @@ struct ConvexRoomDoc: Decodable {
             type: RoomType(rawValue: type ?? "Regular Room") ?? .regular,
             messageLifetime: messageLifetime,
             avatarStorageId: avatarStorageId,
-            avatarURL: nil
+            avatarURL: nil,
+            hasPassword: hasPassword ?? false
         )
     }
 }
@@ -52,6 +54,7 @@ struct ConvexMessageDoc: Decodable {
     let username: String?
     let name: String?
     let reactions: [ConvexReactionDoc]?
+    let expiresAt: Double?  // Unix ms timestamp — set for Chamber of Secrets messages
 
     func toChatMessage() -> ChatMessage {
         let isSystem = type == "system"
@@ -66,7 +69,8 @@ struct ConvexMessageDoc: Decodable {
             mediaStorageId: mediaStorageId,
             assetURL: nil,
             status: .sent,
-            reactions: (reactions ?? []).map { $0.toMessageReaction() }
+            reactions: (reactions ?? []).map { $0.toMessageReaction() },
+            expiresAt: expiresAt.map { Date(timeIntervalSince1970: $0 / 1000) }
         )
     }
 }
@@ -162,24 +166,27 @@ final class ConvexChatAPI {
         messageLifetime: TimeInterval? = nil,
         passwordHash: String? = nil
     ) async throws -> String {
-        let roomId: String = try await convex.mutation("rooms:create", with: [
+        // Only include optional fields when non-nil — Convex rejects explicit null for v.optional(...)
+        var args: [String: ConvexEncodable?] = [
             "name": name,
             "userId": userId,
-            "description": description,
             "isPrivate": isPrivate,
             "type": type.rawValue,
-            "messageLifetime": messageLifetime,
-            "passwordHash": passwordHash
-        ])
+        ]
+        if let description, !description.isEmpty { args["description"] = description }
+        if let messageLifetime { args["messageLifetime"] = messageLifetime }
+        if let passwordHash, !passwordHash.isEmpty { args["passwordHash"] = passwordHash }
+        let roomId: String = try await convex.mutation("rooms:create", with: args)
         return roomId
     }
 
     func joinRoom(roomId: String, userId: String, passwordHash: String? = nil) async throws {
-        try await convex.mutationVoid("rooms:join", with: [
+        var args: [String: ConvexEncodable?] = [
             "roomId": roomId,
             "userId": userId,
-            "passwordHash": passwordHash
-        ])
+        ]
+        if let passwordHash, !passwordHash.isEmpty { args["passwordHash"] = passwordHash }
+        try await convex.mutationVoid("rooms:join", with: args)
     }
 
     func leaveRoom(roomId: String, userId: String) async throws {
@@ -190,15 +197,16 @@ final class ConvexChatAPI {
         try await convex.mutationVoid("rooms:deleteRoom", with: ["roomId": roomId, "userId": userId])
     }
 
-    func updateRoom(roomId: String, userId: String, name: String, description: String?, isPrivate: Bool? = nil) async throws {
+    func updateRoom(roomId: String, userId: String, name: String, description: String?, isPrivate: Bool? = nil, messageLifetime: TimeInterval? = nil) async throws {
         // Only include optional fields when non-nil — Convex rejects explicit null for v.optional(...)
         var args: [String: ConvexEncodable?] = [
             "roomId": roomId,
             "userId": userId,
             "name": name,
         ]
-        if let description { args["description"] = description }
-        if let isPrivate   { args["isPrivate"] = isPrivate }
+        if let description     { args["description"] = description }
+        if let isPrivate       { args["isPrivate"] = isPrivate }
+        if let messageLifetime { args["messageLifetime"] = messageLifetime }
         try await convex.mutationVoid("rooms:updateRoom", with: args)
     }
 

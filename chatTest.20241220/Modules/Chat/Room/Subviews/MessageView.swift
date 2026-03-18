@@ -50,6 +50,32 @@ struct MessageView: View {
     }
 
     private var regularMessageView: some View {
+        Group {
+            if let expiresAt = message.expiresAt {
+                // Wrap in TimelineView so the fade-out and countdown drive off the same clock
+                TimelineView(.periodic(from: .now, by: 1.0)) { context in
+                    let remaining = expiresAt.timeIntervalSince(context.date)
+                    messageBubbleContent(expiresAt: expiresAt)
+                        .opacity(remaining <= 0 ? 0.0 : 1.0)
+                        .animation(.easeOut(duration: 0.5), value: remaining <= 0)
+                }
+            } else {
+                messageBubbleContent(expiresAt: nil)
+            }
+        }
+        .sheet(isPresented: $showAllReactions) {
+            AllReactionsView(message: message, currentUserId: currentUserId) { emoji in
+                Task {
+                    try? await ReactionService.shared.removeReaction(
+                        emoji: emoji, from: message.id, in: message.roomId
+                    )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func messageBubbleContent(expiresAt: Date?) -> some View {
         VStack(alignment: isCurrentUser ? .trailing : .leading, spacing: 0) {
             HStack(alignment: .bottom, spacing: 0) {
                 if isCurrentUser { Spacer(minLength: 60) }
@@ -76,8 +102,17 @@ struct MessageView: View {
                             .zIndex(110)
                         }
                     }
+
+                    // Countdown badge for self-destructing messages (Chamber of Secrets)
+                    if let expiresAt = expiresAt {
+                        TimelineView(.periodic(from: .now, by: 1.0)) { context in
+                            let remaining = expiresAt.timeIntervalSince(context.date)
+                            CountdownBadge(remaining: remaining)
+                        }
+                        .padding(.horizontal, 4)
+                    }
                 }
-                
+
                 // Status indicator (pending/error) sits to the RIGHT of outgoing bubble
                 if isCurrentUser && message.type == .text {
                     Group {
@@ -100,15 +135,6 @@ struct MessageView: View {
                 if !isCurrentUser { Spacer(minLength: 60) }
             }
             .padding(.bottom, message.reactions.isEmpty ? 6 : 22)
-        }
-        .sheet(isPresented: $showAllReactions) {
-            AllReactionsView(message: message, currentUserId: currentUserId) { emoji in
-                Task {
-                    try? await ReactionService.shared.removeReaction(
-                        emoji: emoji, from: message.id, in: message.roomId
-                    )
-                }
-            }
         }
     }
 
@@ -272,6 +298,66 @@ struct MessageView: View {
                 emoji: emoji, on: message.id, in: message.roomId
             )
         }
+    }
+}
+
+// MARK: - Chamber of Secrets: Countdown Badge
+
+struct CountdownBadge: View {
+    let remaining: TimeInterval
+
+    @State private var pulseScale: CGFloat = 1.0
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "flame.fill")
+                .font(.system(size: 9))
+            Text(formattedTime)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(badgeColor.opacity(0.15), in: Capsule())
+        .foregroundStyle(badgeColor)
+        .overlay(Capsule().strokeBorder(badgeColor.opacity(0.3), lineWidth: 0.5))
+        .scaleEffect(remaining <= 10 && remaining > 0 ? pulseScale : 1.0)
+        .onAppear {
+            if remaining <= 10 && remaining > 0 {
+                startPulse()
+            }
+        }
+        .onChange(of: remaining <= 10 && remaining > 0) { _, isPulsing in
+            if isPulsing {
+                startPulse()
+            }
+        }
+    }
+
+    private func startPulse() {
+        withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+            pulseScale = 1.12
+        }
+    }
+
+    private var badgeColor: Color {
+        if remaining <= 0 { return .red }
+        if remaining <= 10 { return .red }
+        if remaining <= 60 { return .orange }
+        return .green
+    }
+
+    private var formattedTime: String {
+        if remaining <= 0 { return "0s" }
+        let secs = Int(remaining)
+        if secs >= 3600 {
+            let h = secs / 3600
+            let m = (secs % 3600) / 60
+            return m > 0 ? "\(h)h \(m)m" : "\(h)h"
+        }
+        if secs >= 60 {
+            return "\(secs / 60)m \(secs % 60)s"
+        }
+        return "\(secs)s"
     }
 }
 

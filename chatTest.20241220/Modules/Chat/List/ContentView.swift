@@ -695,6 +695,26 @@ struct EnhancedRoomCard: View {
                     .font(.caption)
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
                     .lineLimit(1)
+                } else if room.type == .secret,
+                          let sentAt = room.lastMessageDate,
+                          let lifetime = room.messageLifetime {
+                    let expiresAt = sentAt.addingTimeInterval(lifetime)
+                    if expiresAt > Date() {
+                        // Live countdown until the last message expires
+                        TimelineView(.periodic(from: .now, by: 1.0)) { context in
+                            let remaining = max(0, expiresAt.timeIntervalSince(context.date))
+                            HStack(spacing: 4) {
+                                Image(systemName: "flame.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(Color.orange)
+                                Text("Expires in \(formatCountdown(remaining))")
+                                    .font(.caption)
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    // If already expired, show nothing (falls through to implicit empty)
                 } else if let lastMessage = room.lastMessage {
                     Text(lastMessage)
                         .font(.caption)
@@ -716,9 +736,56 @@ struct EnhancedRoomCard: View {
                 Text("\(room.participants.count)")
                 Spacer()
                 if room.type == .secret {
-                    Image(systemName: "lock.shield.fill")
-                        .font(.caption2)
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                    HStack(spacing: 3) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 9))
+                        Text("Secret")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.orange.opacity(0.2), Color.red.opacity(0.2)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        in: Capsule()
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.orange, .red],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .overlay(Capsule().strokeBorder(Color.orange.opacity(0.3), lineWidth: 0.5))
+                }
+                if room.hasPassword {
+                    HStack(spacing: 3) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 9))
+                        Text("Password")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.indigo.opacity(0.2), Color.blue.opacity(0.2)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        in: Capsule()
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.indigo, .blue],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .overlay(Capsule().strokeBorder(Color.indigo.opacity(0.3), lineWidth: 0.5))
                 }
             }
             .font(.caption2)
@@ -740,13 +807,24 @@ struct EnhancedRoomCard: View {
         .scaleEffect(isSelected ? 1.03 : 1.0)
         .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
+
+    private func formatCountdown(_ seconds: TimeInterval) -> String {
+        let s = Int(seconds)
+        if s >= 3600 {
+            return "\(s / 3600)h \((s % 3600) / 60)m"
+        } else if s >= 60 {
+            return "\(s / 60)m \(s % 60)s"
+        } else {
+            return "\(s)s"
+        }
+    }
 }
 
 struct EnhancedNewRoomSheet: View {
     @Binding var isShowingSheet: Bool
     @Binding var roomName: String
     @State private var selectedType: RoomType = .regular
-    @State private var messageLifetime: TimeInterval = 300  // 5 minutes default
+    @State private var messageLifetime: TimeInterval = 30  // 30 seconds default
     let createRoom: (RoomType, TimeInterval?) async -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @State private var animateContent = false
@@ -758,9 +836,13 @@ struct EnhancedNewRoomSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private let lifetimeOptions: [(String, TimeInterval)] = [
+        ("10 seconds", 10),
+        ("30 seconds", 30),
+        ("1 minute", 60),
         ("5 minutes", 300),
+        ("10 minutes", 600),
+        ("30 minutes", 1800),
         ("1 hour", 3600),
-        ("24 hours", 86400),
     ]
 
     var body: some View {
@@ -938,10 +1020,10 @@ struct EnhancedNewRoomSheet: View {
                         } label: {
                             HStack(spacing: 12) {
                                 if selectedType == .secret {
-                                    Image(systemName: "wand.and.rays")
+                                    Image(systemName: "flame.fill")
                                         .symbolEffect(.variableColor.cumulative.hideInactiveLayers.nonReversing, options: .repeat(.continuous))
                                         .transition(.scale.combined(with: .opacity))
-                                    Text("Coming Soon!")
+                                    Text("Create Secret Room")
                                 } else {
                                     Image(systemName: "plus.circle.fill")
                                         .transition(.scale.combined(with: .opacity))
@@ -955,7 +1037,7 @@ struct EnhancedNewRoomSheet: View {
                             .background(
                                 LinearGradient(
                                     colors: selectedType == .secret
-                                        ? [Color.gray, Color.gray.opacity(0.7)]
+                                        ? [Color.orange, Color.red]
                                         : selectedTheme.colors(for: colorScheme).primary,
                                     startPoint: .leading,
                                     endPoint: .trailing
@@ -964,13 +1046,13 @@ struct EnhancedNewRoomSheet: View {
                             .clipShape(RoundedRectangle(cornerRadius: 16))
                             .shadow(
                                 color: selectedType == .secret
-                                    ? Color.clear
+                                    ? Color.orange.opacity(0.4)
                                     : selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
                                 radius: 5, y: 2
                             )
-                            .scaleEffect(roomName.isEmpty || selectedType == .secret ? 0.98 : 1)
+                            .scaleEffect(roomName.isEmpty ? 0.98 : 1)
                         }
-                        .disabled(roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedType == .secret)
+                        .disabled(roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .opacity(animateContent ? 1 : 0)
                         .offset(y: animateContent ? 0 : 20)
 #if os(macOS)
@@ -1046,10 +1128,10 @@ struct EnhancedNewRoomSheet: View {
             }
         }
         #if os(macOS)
-        .frame(minWidth: 500, idealWidth: 560, minHeight: 500, idealHeight: 620)
+        .frame(minWidth: 500, idealWidth: 560, minHeight: 500, idealHeight: selectedType == .secret ? 760 : 620)
         #else
         .presentationDetents([
-            .height(selectedType == .secret ? 760 : 620),
+            .height(selectedType == .secret ? 900 : 620),
             .large,
         ])
         .presentationDragIndicator(.visible)

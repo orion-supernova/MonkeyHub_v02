@@ -18,7 +18,19 @@ struct RoomInfoView: View {
     @State private var showFullscreenAvatar = false
     @State private var showDeleteRoomAlert = false
     @State private var isDeleting = false
+    @State private var isEditingMessageLifetime = false
+    @State private var selectedLifetimeIndex = 1  // default: 30s
     @Namespace private var avatarNamespace
+
+    private let lifetimeOptions: [(label: String, seconds: TimeInterval)] = [
+        ("10s",  10),
+        ("30s",  30),
+        ("1m",   60),
+        ("5m",   300),
+        ("10m",  600),
+        ("30m",  1800),
+        ("1hr",  3600),
+    ]
 
     private let currentUserId: String
 
@@ -463,6 +475,98 @@ struct RoomInfoView: View {
             .padding()
             .background(selectedTheme.colors(for: colorScheme).cardBackground)
             .cornerRadius(12)
+
+            // Message lifetime row — only for Chamber of Secrets rooms
+            if viewModel.room.type == .secret {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("Message Lifetime", systemImage: "timer")
+                            .font(.subheadline)
+
+                        Spacer()
+
+                        if isEditingMessageLifetime {
+                            Button("Cancel") {
+                                isEditingMessageLifetime = false
+                            }
+                            .font(.caption)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                            #if os(macOS)
+                            .buttonStyle(.plain)
+                            .focusable(false)
+                            #endif
+                        } else {
+                            HStack(spacing: 8) {
+                                if let lifetime = viewModel.room.messageLifetime, lifetime > 0 {
+                                    Text(formatLifetime(lifetime))
+                                        .font(.subheadline)
+                                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                                } else {
+                                    Text("Not set")
+                                        .font(.subheadline)
+                                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.5))
+                                        .italic()
+                                }
+
+                                if isMember {
+                                    Button {
+                                        // Pre-select current lifetime in picker
+                                        if let lifetime = viewModel.room.messageLifetime, lifetime > 0 {
+                                            let idx = lifetimeOptions.firstIndex { $0.seconds == lifetime } ?? 1
+                                            selectedLifetimeIndex = idx
+                                        }
+                                        isEditingMessageLifetime = true
+                                    } label: {
+                                        Image(systemName: "pencil.circle.fill")
+                                            .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                                    }
+                                    #if os(macOS)
+                                    .buttonStyle(.plain)
+                                    .focusable(false)
+                                    #endif
+                                    .contentShape(Circle())
+                                }
+                            }
+                        }
+                    }
+
+                    if isEditingMessageLifetime {
+                        VStack(spacing: 12) {
+                            Picker("Message Lifetime", selection: $selectedLifetimeIndex) {
+                                ForEach(lifetimeOptions.indices, id: \.self) { idx in
+                                    Text(lifetimeOptions[idx].label).tag(idx)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+
+                            Button {
+                                let chosen = lifetimeOptions[selectedLifetimeIndex].seconds
+                                isEditingMessageLifetime = false
+                                Task { await viewModel.updateMessageLifetime(chosen) }
+                            } label: {
+                                Text("Save")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .background(
+                                        Capsule()
+                                            .fill(selectedTheme.colors(for: colorScheme).accent)
+                                    )
+                            }
+                            #if os(macOS)
+                            .buttonStyle(.plain)
+                            .focusable(false)
+                            #endif
+                            .contentShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(selectedTheme.colors(for: colorScheme).cardBackground)
+                .cornerRadius(12)
+            }
         }
     }
     

@@ -27,6 +27,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     var assetURL: URL?              // Local cached URL (not persisted as absolute path)
     var status: MessageStatus
     var reactions: [MessageReaction]
+    var expiresAt: Date?            // Non-nil for Chamber of Secrets messages
 
     static let systemSenderId = "system"
     static let systemSenderName = "System"
@@ -37,6 +38,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         case id, senderId, senderName, content, type, timestamp, roomId
         case mediaStorageId, status, reactions
         case assetFileName
+        case expiresAt
     }
 
     init(
@@ -50,7 +52,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         mediaStorageId: String? = nil,
         assetURL: URL? = nil,
         status: MessageStatus = .sent,
-        reactions: [MessageReaction] = []
+        reactions: [MessageReaction] = [],
+        expiresAt: Date? = nil
     ) {
         self.id = id
         self.senderId = senderId
@@ -63,6 +66,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         self.assetURL = assetURL
         self.status = status
         self.reactions = reactions
+        self.expiresAt = expiresAt
     }
 
     // MARK: - Codable
@@ -79,6 +83,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         status = try c.decode(MessageStatus.self, forKey: .status)
         reactions = try c.decodeIfPresent([MessageReaction].self, forKey: .reactions) ?? []
         mediaStorageId = try c.decodeIfPresent(String.self, forKey: .mediaStorageId)
+        expiresAt = try c.decodeIfPresent(Date.self, forKey: .expiresAt)
 
         // Re-base local asset URL from filename only
         let fileName = try c.decodeIfPresent(String.self, forKey: .assetFileName)
@@ -97,6 +102,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         try c.encode(status, forKey: .status)
         try c.encode(reactions, forKey: .reactions)
         try c.encodeIfPresent(mediaStorageId, forKey: .mediaStorageId)
+        try c.encodeIfPresent(expiresAt, forKey: .expiresAt)
         // Persist filename only, not absolute URL
         try c.encodeIfPresent(assetURL?.lastPathComponent, forKey: .assetFileName)
     }
@@ -113,6 +119,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         lhs.id == rhs.id &&
         lhs.status == rhs.status &&
         lhs.reactions.count == rhs.reactions.count &&
-        lhs.assetURL == rhs.assetURL
+        lhs.assetURL == rhs.assetURL &&
+        lhs.expiresAt == rhs.expiresAt
     }
 }

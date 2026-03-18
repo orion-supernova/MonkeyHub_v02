@@ -132,28 +132,6 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         )
     }
 
-    @objc private func keyboardWillChangeFrame(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let endFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
-              let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt else { return }
-
-        let animationCurve = UIView.AnimationOptions(rawValue: curveValue << 16)
-        let overlap = keyboardOverlap(for: endFrame)
-
-        UIView.animate(withDuration: duration, delay: 0, options: [animationCurve, .beginFromCurrentState]) {
-            self.keyboardInset = overlap
-            self.applyInsets()
-            self.view.layoutIfNeeded()
-        } completion: { _ in
-            if self.wasAtBottomBeforeKeyboard || overlap == 0 {
-                self.requestScrollToBottom(animated: false)
-            } else {
-                self.publishAtBottomStateIfNeeded()
-            }
-        }
-    }
-
     @objc private func keyboardWillShow(_ notification: Notification) {
         wasAtBottomBeforeKeyboard = isAtBottom()
     }
@@ -187,8 +165,11 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         let contentHeight = scrollView.contentSize.height
         let frameHeight = scrollView.bounds.height
         let offsetY = scrollView.contentOffset.y
-        let inset = scrollView.contentInset.bottom
-        return (contentHeight - (offsetY + frameHeight - inset)) <= 100
+        let bottomInset = scrollView.contentInset.bottom
+        
+        // Increased threshold to 180 to account for the larger bottom spacer (55px)
+        let distanceFromBottom = contentHeight - (offsetY + frameHeight - bottomInset)
+        return distanceFromBottom <= 180
     }
 
     private func setupScrollView() {
@@ -249,12 +230,94 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         }
     }
 
+    // UIKitScrollView.swift -> Inside UIKitScrollViewController class
+
     func updateContent(_ content: Content, scrollToBottomIfNeeded: Bool = false, forceInitialAnchor: Bool = false) {
         let wasAtBottom = isAtBottom()
         hostingController.rootView = content
-        let shouldAnchorForNewMessage = scrollToBottomIfNeeded && (wasAtBottom || keyboardInset > 0)
-        if forceInitialAnchor || shouldAnchorForNewMessage {
-            scheduleScrollToBottomAfterLayout(animated: false)
+        
+        // FORCE LAYOUT: We must tell the hosting view and the scrollview to
+        // update their geometry NOW so contentSize is accurate.
+        hostingController.view.setNeedsLayout()
+        hostingController.view.layoutIfNeeded()
+        scrollView.setNeedsLayout()
+        scrollView.layoutIfNeeded()
+
+        if forceInitialAnchor {
+            // EMPTY ROOM / FIRST LOAD:
+            // Set the offset to -baseTopInset so the first message
+            // starts exactly below your top controls.
+            scrollView.setContentOffset(CGPoint(x: 0, y: -baseTopInset), animated: false)
+        } else if scrollToBottomIfNeeded && (wasAtBottom || keyboardInset > 0) {
+            // NEW MESSAGE: Use a tiny delay to allow the animation engine to catch up
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                self.performImmediateScrollToBottom(animated: true)
+            }
+        } else {
+            // PREVENT OVERLAP ON SHORT LISTS:
+            // If content is shorter than the screen, ensure it doesn't
+            // snap back behind the top controls.
+            if scrollView.contentOffset.y < -baseTopInset {
+                scrollView.contentOffset.y = -baseTopInset
+            }
+        }
+    }
+
+    private func performImmediateScrollToBottom(animated: Bool) {
+        // Re-verify layout before calculating bottom
+        scrollView.layoutIfNeeded()
+        
+        let contentHeight = scrollView.contentSize.height
+        let frameHeight = scrollView.bounds.height
+        let btmInset = scrollView.contentInset.bottom
+        
+        // Calculate bottom Y.
+        // We max with -baseTopInset so the list never scrolls "up" into the header.
+        let targetY = max(-baseTopInset, contentHeight - frameHeight + btmInset)
+        
+        scrollView.setContentOffset(CGPoint(x: 0, y: targetY), animated: animated)
+    }
+
+    private func applyInsets() {
+        let totalBottomInset = baseBottomInset + keyboardInset
+        
+        let newInsets = UIEdgeInsets(
+            top: baseTopInset,
+            left: 0,
+            bottom: totalBottomInset,
+            right: 0
+        )
+        
+        if scrollView.contentInset != newInsets {
+            scrollView.contentInset = newInsets
+            scrollView.scrollIndicatorInsets = newInsets
+            
+            // If the scrollview is currently "idle" at 0,
+            // force it to sit at the top inset position.
+            if scrollView.contentOffset.y == 0 && baseTopInset > 0 {
+                scrollView.contentOffset.y = -baseTopInset
+            }
+        }
+    }
+
+    @objc private func keyboardWillChangeFrame(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let endFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
+              let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt else { return }
+
+        let animationCurve = UIView.AnimationOptions(rawValue: curveValue << 16)
+        let overlap = keyboardOverlap(for: endFrame)
+
+        UIView.animate(withDuration: duration, delay: 0, options: [animationCurve, .beginFromCurrentState]) {
+            self.keyboardInset = overlap
+            self.applyInsets()
+            
+            // If the user was at the bottom, or just sent a message,
+            // keep the last message visible above the keyboard.
+            if self.wasAtBottomBeforeKeyboard || overlap > 0 {
+                self.performImmediateScrollToBottom(animated: false)
+            }
         }
     }
 
@@ -298,14 +361,6 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         publishAtBottomStateIfNeeded()
     }
 
-    private func performImmediateScrollToBottom(animated: Bool) {
-        let contentHeight = scrollView.contentSize.height
-        let frameHeight = scrollView.bounds.height
-        let bottomInset = scrollView.contentInset.bottom
-        let maxOffsetY = max(0, contentHeight - frameHeight + bottomInset)
-        scrollView.setContentOffset(CGPoint(x: 0, y: maxOffsetY), animated: animated)
-    }
-
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         let offsetY = scrollView.contentOffset.y
         let contentHeight = scrollView.contentSize.height
@@ -342,18 +397,13 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         }
     }
 
-    private func applyInsets() {
-        let indicatorInsets = UIEdgeInsets(top: baseTopInset, left: 0, bottom: baseBottomInset, right: 0)
-        let contentInsets = UIEdgeInsets.zero
-        guard scrollView.contentInset != contentInsets || scrollView.scrollIndicatorInsets != indicatorInsets else { return }
-        scrollView.contentInset = contentInsets
-        scrollView.scrollIndicatorInsets = indicatorInsets
-    }
-
     private func keyboardOverlap(for endFrame: CGRect) -> CGFloat {
         guard let window = view.window else { return 0 }
         let scrollFrameInWindow = scrollView.convert(scrollView.bounds, to: window)
-        return max(0, scrollFrameInWindow.maxY - endFrame.origin.y)
+        
+        // If the keyboard is hidden (endFrame at bottom of screen), overlap is 0
+        let overlap = max(0, scrollFrameInWindow.maxY - endFrame.origin.y)
+        return overlap
     }
 
     private func performProgrammaticScroll(_ action: () -> Void) {

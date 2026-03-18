@@ -65,17 +65,21 @@ struct MessagesListView: View {
         }
     }
 
+    // MessagesListView.swift
+
     private var messagesContent: some View {
+        
         LazyVStack(spacing: 8) {
             Color.clear
-                .frame(height: max(topInset, verticalSizeClass == .compact ? 20 : 45))
-                .overlay(alignment: .bottom) {
-                    if viewModel.isFetchingOlderMessages {
-                        ProgressView().controlSize(.small).padding(.bottom, 8)
-                    }
-                }
+                .frame(height: 55)
+                .listRowSeparator(.hidden)
                 .contentShape(Rectangle())
-                .onTapGesture { dismissPicker() }
+            
+            if viewModel.isFetchingOlderMessages {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.vertical, 8)
+            }
 
             ForEach(viewModel.messages) { message in
                 let isActive = activeReactionPickerMessageId == message.id
@@ -96,11 +100,8 @@ struct MessagesListView: View {
                     },
                     imageZoomNamespace: imageZoomNamespace
                 )
-                // Active row draws above non-active rows
                 .zIndex(isActive ? 1000 : 1)
-                // Fade non-active rows uniformly (no visible per-row rectangles)
                 .opacity(pickerIsOpen && !isActive ? 0.4 : 1.0)
-                // Invisible tap catcher to dismiss picker when tapping other rows
                 .overlay {
                     if pickerIsOpen && !isActive {
                         Color.clear
@@ -116,8 +117,12 @@ struct MessagesListView: View {
                     .padding(.top, 4)
             }
 
-            // Small breathing room; structural clearance is handled by UIKitScrollView insets.
-            Color.clear.frame(height: max(bottomInset, verticalSizeClass == .compact ? 16 : 60))
+            // BOTTOM CLEARANCE:
+            // Protects the "Chamber of Secrets" timer and provides
+            // breathing room above the input bar.
+            Color.clear
+                .frame(height: 55)
+                .listRowSeparator(.hidden)
                 .contentShape(Rectangle())
                 .onTapGesture { dismissPicker() }
         }

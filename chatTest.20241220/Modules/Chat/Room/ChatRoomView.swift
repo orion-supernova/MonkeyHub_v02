@@ -29,6 +29,7 @@ struct ChatRoomView: View {
     @State private var showRemovedFromRoomAlert = false
     @State private var topChromeHeight: CGFloat = 0
     @State private var bottomChromeHeight: CGFloat = 0
+    @State private var bottomChromeTopY: CGFloat = 0
 
     #if canImport(UIKit)
     @State private var screenshotObserver: NSObjectProtocol?
@@ -50,6 +51,10 @@ struct ChatRoomView: View {
     
     var body: some View {
         GeometryReader { proxy in
+        let chromeClearance = bottomChromeTopY > 0
+            ? max(bottomChromeHeight, proxy.size.height - bottomChromeTopY)
+            : bottomChromeHeight
+        let effectiveBottomInset = chromeClearance + 20
         ZStack {
             // 1. Full Screen Background
             LinearGradient(
@@ -83,8 +88,9 @@ struct ChatRoomView: View {
             }
 
             // 3. The Main Content Layer
-            messagesListContent
+            messagesListContent(bottomInset: effectiveBottomInset)
         }
+        .coordinateSpace(name: "ChatRoomSpace")
         .overlay(alignment: .top) {
             topControls
         }
@@ -93,6 +99,7 @@ struct ChatRoomView: View {
         }
         .onPreferenceChange(TopChromeHeightPreferenceKey.self) { topChromeHeight = $0 }
         .onPreferenceChange(BottomChromeHeightPreferenceKey.self) { bottomChromeHeight = $0 }
+        .onPreferenceChange(BottomChromeTopPreferenceKey.self) { bottomChromeTopY = $0 }
         // FIXED: Conditional compilation for cross-platform support
         #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
@@ -285,7 +292,7 @@ struct ChatRoomView: View {
     // MARK: - Messages List
 
     @ViewBuilder
-    private var messagesListContent: some View {
+    private func messagesListContent(bottomInset: CGFloat) -> some View {
         MessagesListView(
             viewModel: viewModel,
             isLoading: isLoading,
@@ -294,7 +301,7 @@ struct ChatRoomView: View {
             },
             imageZoomNamespace: imageZoomNamespace,
             topInset: topChromeHeight,
-            bottomInset: bottomChromeHeight + 20
+            bottomInset: bottomInset
         )
     }
 
@@ -346,6 +353,10 @@ struct ChatRoomView: View {
             GeometryReader { chromeProxy in
                 Color.clear
                     .preference(key: BottomChromeHeightPreferenceKey.self, value: chromeProxy.size.height)
+                    .preference(
+                        key: BottomChromeTopPreferenceKey.self,
+                        value: chromeProxy.frame(in: .named("ChatRoomSpace")).minY
+                    )
             }
         )
     }
@@ -644,6 +655,14 @@ private struct TopChromeHeightPreferenceKey: PreferenceKey {
 }
 
 private struct BottomChromeHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct BottomChromeTopPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {

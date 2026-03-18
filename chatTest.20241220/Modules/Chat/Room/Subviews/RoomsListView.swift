@@ -63,7 +63,7 @@ private struct RoomRow: View {
     @State private var avatarImage: PlatformImage?
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             HStack(spacing: 16) {
                 roomIcon
                 roomInfo
@@ -72,26 +72,43 @@ private struct RoomRow: View {
             .contentShape(Rectangle())
             .simultaneousGesture(primaryInteractionGesture)
 
-            VStack(spacing: 8) {
+            VStack(alignment: .trailing, spacing: 10) {
                 joinStatusButton
 
                 Button {
                     showRoomInfo?(room)
                 } label: {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                        .frame(width: 28, height: 28)
+                    HStack(spacing: 4) {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Details")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(selectedTheme.colors(for: colorScheme).background.opacity(0.92))
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(
+                                selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.16),
+                                lineWidth: 1
+                            )
+                    )
                 }
                 .buttonStyle(.plain)
-                .contentShape(Circle())
+                .contentShape(Capsule())
             }
         }
-        .padding()
-        .frame(minHeight: 82, maxHeight: 82)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(minHeight: 90, maxHeight: 90)
         .background(cardBackground)
         .overlay(cardBorder)
-        .opacity(isJoined ? 0.55 : 1)
+        .opacity(isJoined ? 0.62 : 1)
         .onAppear {
             loadAvatar()
         }
@@ -137,11 +154,11 @@ private struct RoomRow: View {
                 Image(platformImage: avatarImage)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 44, height: 44)
-                    .clipShape(Circle())
+                    .frame(width: 50, height: 50)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             } else {
                 ZStack {
-                    Circle()
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(
                             LinearGradient(
                                 colors: selectedTheme.colors(for: colorScheme).primary,
@@ -149,88 +166,56 @@ private struct RoomRow: View {
                                 endPoint: .bottomTrailing
                             )
                         )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.25), lineWidth: 1)
+                        )
 
                     Image(systemName: room.type == .regular ? "bubble.left" : "lock.shield")
-                        .font(.title3.bold())
+                        .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
                 }
-                .frame(width: 44, height: 44)
+                .frame(width: 50, height: 50)
             }
         }
+        .shadow(
+            color: selectedTheme.colors(for: colorScheme).primary[0].opacity(colorScheme == .dark ? 0.24 : 0.16),
+            radius: 10,
+            y: 5
+        )
     }
 
     private var roomInfo: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 7) {
             Text(room.name)
-                .font(.headline)
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
 
-            HStack(spacing: 6) {
-                HStack {
-                    Image(systemName: "person.2.fill")
-                        .imageScale(.small)
-                    Text(memberCountText)
-                }
-                .font(.caption)
-                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                .fixedSize(horizontal: true, vertical: false)
-
+            HStack(spacing: 7) {
+                roomMetaChip(
+                    systemImage: "person.2.fill",
+                    title: memberCountText,
+                    tint: selectedTheme.colors(for: colorScheme).textSecondary,
+                    fill: selectedTheme.colors(for: colorScheme).headerOverlay.opacity(0.55)
+                )
                 if room.type == .secret {
-                    HStack(spacing: 2) {
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 9))
-                        Text("Secret")
-                            .font(.system(size: 9, weight: .semibold))
-                    }
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(
-                        LinearGradient(
-                            colors: [Color.orange.opacity(0.2), Color.red.opacity(0.2)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        in: Capsule()
+                    roomMetaChip(
+                        systemImage: "flame.fill",
+                        title: "Secret",
+                        tint: .orange,
+                        fill: Color.orange.opacity(0.14)
                     )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.orange, .red],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .overlay(Capsule().strokeBorder(Color.orange.opacity(0.3), lineWidth: 0.5))
-                    .fixedSize(horizontal: true, vertical: false)
                 }
 
                 if room.hasPassword {
-                    HStack(spacing: 2) {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 9))
-                        Text("Password")
-                            .font(.system(size: 9, weight: .semibold))
-                    }
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(
-                        LinearGradient(
-                            colors: [Color.indigo.opacity(0.2), Color.blue.opacity(0.2)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        in: Capsule()
+                    roomMetaChip(
+                        systemImage: "lock.fill",
+                        title: "Password",
+                        tint: .blue,
+                        fill: Color.blue.opacity(0.12)
                     )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.indigo, .blue],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .overlay(Capsule().strokeBorder(Color.indigo.opacity(0.3), lineWidth: 0.5))
-                    .fixedSize(horizontal: true, vertical: false)
                 }
             }
             .lineLimit(1)
@@ -245,17 +230,56 @@ private struct RoomRow: View {
     private var joinStatusButton: some View {
         Group {
             if isJoined {
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11, weight: .bold))
                     Text("Already a member")
                         .lineLimit(1)
                 }
-                .font(.subheadline.weight(.semibold))
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(selectedTheme.colors(for: colorScheme).headerOverlay.opacity(0.65))
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.12), lineWidth: 1)
+                )
             } else {
-                Text("Join")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                HStack(spacing: 5) {
+                    Image(systemName: room.hasPassword ? "key.fill" : "arrow.right.circle.fill")
+                        .font(.system(size: 11, weight: .bold))
+                    Text(room.hasPassword ? "Unlock" : "Join")
+                }
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    selectedTheme.colors(for: colorScheme).headerOverlay.opacity(0.9),
+                                    selectedTheme.colors(for: colorScheme).cardBackground.opacity(0.98),
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(
+                            room.hasPassword
+                                ? Color.blue.opacity(0.22)
+                                : selectedTheme.colors(for: colorScheme).accent.opacity(0.18),
+                            lineWidth: 1
+                        )
+                )
             }
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -263,13 +287,17 @@ private struct RoomRow: View {
 
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: 16)
-            .fill(selectedTheme.colors(for: colorScheme).cardBackground.opacity(isJoined ? 0.82 : 1))
-            .shadow(
-                color: selectedTheme.colors(for: colorScheme).primary[0]
-                    .opacity(isJoined ? 0.08 : (colorScheme == .dark ? 0.35 : 0.2)),
-                radius: 16,
-                y: 6
+            .fill(
+                LinearGradient(
+                    colors: [
+                        selectedTheme.colors(for: colorScheme).cardBackground.opacity(isJoined ? 0.88 : 1),
+                        selectedTheme.colors(for: colorScheme).background.opacity(isJoined ? 0.9 : 0.98),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
             )
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.08 : 0.04), radius: 8, y: 3)
     }
 
     private var cardBorder: some View {
@@ -277,15 +305,36 @@ private struct RoomRow: View {
             .strokeBorder(
                 LinearGradient(
                     colors: [
-                        selectedTheme.colors(for: colorScheme).accent
-                            .opacity(isJoined ? 0.12 : (colorScheme == .dark ? 0.4 : 0.3)),
-                        selectedTheme.colors(for: colorScheme).accent.opacity(isJoined ? 0.02 : 0.05),
+                        Color.white.opacity(colorScheme == .dark ? 0.05 : 0.3),
+                        selectedTheme.colors(for: colorScheme).textSecondary.opacity(isJoined ? 0.06 : 0.08),
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ),
                 lineWidth: 1
             )
+    }
+
+    @ViewBuilder
+    private func roomMetaChip(systemImage: String, title: String, tint: Color, fill: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: systemImage)
+                .font(.system(size: 9, weight: .bold))
+            Text(title)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(fill)
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(tint.opacity(0.12), lineWidth: 0.8)
+        )
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 

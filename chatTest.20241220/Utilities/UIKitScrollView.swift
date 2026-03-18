@@ -58,6 +58,8 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
     }()
 
     var hostingController: UIHostingController<Content>!
+    private let contentContainerView = UIView()
+    private var minContentHeightConstraint: NSLayoutConstraint?
     var lastFirstItemId: String?
     var lastItemCount: Int = 0
     var onNearTop: (() -> Void)?
@@ -73,6 +75,9 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
     private var isProgrammaticScroll = false
     private var isUpdatingContent = false
     private var hasHadScrollableContent = false
+    private var shouldAutoFollowBottom = true
+    private let bottomStateThreshold: CGFloat = 100
+    private let autoFollowThreshold: CGFloat = 140
 
     init(content: Content) {
         super.init(nibName: nil, bundle: nil)
@@ -162,14 +167,19 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
     }
 
     private func isAtBottom() -> Bool {
+        isNearBottom(threshold: bottomStateThreshold)
+    }
+
+    private func isNearBottom(threshold: CGFloat) -> Bool {
+        distanceFromBottom() <= threshold
+    }
+
+    private func distanceFromBottom() -> CGFloat {
         let contentHeight = scrollView.contentSize.height
         let frameHeight = scrollView.bounds.height
         let offsetY = scrollView.contentOffset.y
         let bottomInset = scrollView.contentInset.bottom
-        
-        // Increased threshold to 180 to account for the larger bottom spacer (55px)
-        let distanceFromBottom = contentHeight - (offsetY + frameHeight - bottomInset)
-        return distanceFromBottom <= 180
+        return contentHeight - (offsetY + frameHeight - bottomInset)
     }
 
     private func setupScrollView() {
@@ -184,17 +194,33 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
     }
 
     private func setupHostingController() {
+        contentContainerView.translatesAutoresizingMaskIntoConstraints = false
+        contentContainerView.backgroundColor = .clear
+        scrollView.addSubview(contentContainerView)
+
+        minContentHeightConstraint = contentContainerView.heightAnchor.constraint(
+            greaterThanOrEqualTo: scrollView.frameLayoutGuide.heightAnchor
+        )
+
+        NSLayoutConstraint.activate([
+            contentContainerView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            contentContainerView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            contentContainerView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            contentContainerView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            contentContainerView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
+            minContentHeightConstraint!
+        ])
+
         hostingController.view.backgroundColor = .clear
         hostingController.view.translatesAutoresizingMaskIntoConstraints = false
         addChild(hostingController)
-        scrollView.addSubview(hostingController.view)
+        contentContainerView.addSubview(hostingController.view)
         hostingController.didMove(toParent: self)
         NSLayoutConstraint.activate([
-            hostingController.view.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
-            hostingController.view.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
-            hostingController.view.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
-            hostingController.view.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
-            hostingController.view.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor)
+            hostingController.view.leadingAnchor.constraint(equalTo: contentContainerView.leadingAnchor),
+            hostingController.view.trailingAnchor.constraint(equalTo: contentContainerView.trailingAnchor),
+            hostingController.view.bottomAnchor.constraint(equalTo: contentContainerView.bottomAnchor),
+            hostingController.view.topAnchor.constraint(greaterThanOrEqualTo: contentContainerView.topAnchor)
         ])
     }
 
@@ -219,21 +245,33 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
             isUpdatingContent = false
         }
 
-        if wasPrepended {
+        if transitionedFromEmpty {
+            // Fresh room entry starts in "follow bottom" mode.
+            shouldAutoFollowBottom = true
+        }
+
+        let shouldStickToBottom = shouldAutoFollowBottom && itemCount > 0
+
+        if wasPrepended && !shouldAutoFollowBottom {
             preservePositionDuringUpdate(content: content)
         } else {
             updateContent(
                 content,
-                scrollToBottomIfNeeded: itemCountIncreased,
-                forceInitialAnchor: transitionedFromEmpty
+                scrollToBottomIfNeeded: transitionedFromEmpty || shouldStickToBottom,
+                forceInitialAnchor: transitionedFromEmpty,
+                animatedScroll: !transitionedFromEmpty && !wasPrepended && itemCountIncreased
             )
         }
     }
 
     // UIKitScrollView.swift -> Inside UIKitScrollViewController class
 
-    func updateContent(_ content: Content, scrollToBottomIfNeeded: Bool = false, forceInitialAnchor: Bool = false) {
-        let wasAtBottom = isAtBottom()
+    func updateContent(
+        _ content: Content,
+        scrollToBottomIfNeeded: Bool = false,
+        forceInitialAnchor: Bool = false,
+        animatedScroll: Bool = true
+    ) {
         hostingController.rootView = content
         
         // FORCE LAYOUT: We must tell the hosting view and the scrollview to
@@ -244,15 +282,13 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         scrollView.layoutIfNeeded()
 
         if forceInitialAnchor {
-            // EMPTY ROOM / FIRST LOAD:
-            // Set the offset to -baseTopInset so the first message
-            // starts exactly below your top controls.
-            scrollView.setContentOffset(CGPoint(x: 0, y: -baseTopInset), animated: false)
-        } else if scrollToBottomIfNeeded && (wasAtBottom || keyboardInset > 0) {
-            // NEW MESSAGE: Use a tiny delay to allow the animation engine to catch up
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                self.performImmediateScrollToBottom(animated: true)
-            }
+            // FIRST NON-EMPTY LOAD:
+            // Chat rooms should open on the latest message, but the content
+            // size is not stable until UIKit finishes laying out the hosted
+            // SwiftUI view. Defer the initial anchor until that layout settles.
+            scheduleScrollToBottomAfterLayout(animated: false)
+        } else if scrollToBottomIfNeeded {
+            scheduleScrollToBottomAfterLayout(animated: animatedScroll)
         } else {
             // PREVENT OVERLAP ON SHORT LISTS:
             // If content is shorter than the screen, ensure it doesn't
@@ -278,7 +314,8 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         scrollView.setContentOffset(CGPoint(x: 0, y: targetY), animated: animated)
     }
 
-    private func applyInsets() {
+    private func applyInsets(maintainBottomIfNeeded: Bool = true) {
+        let wasNearBottom = isNearBottom(threshold: autoFollowThreshold)
         let totalBottomInset = baseBottomInset + keyboardInset
         
         let newInsets = UIEdgeInsets(
@@ -298,6 +335,12 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
                 scrollView.contentOffset.y = -baseTopInset
             }
         }
+
+        minContentHeightConstraint?.constant = -(baseTopInset + totalBottomInset)
+
+        if maintainBottomIfNeeded && (shouldAutoFollowBottom || wasNearBottom) {
+            scheduleScrollToBottomAfterLayout(animated: false)
+        }
     }
 
     @objc private func keyboardWillChangeFrame(_ notification: Notification) {
@@ -311,11 +354,10 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
 
         UIView.animate(withDuration: duration, delay: 0, options: [animationCurve, .beginFromCurrentState]) {
             self.keyboardInset = overlap
-            self.applyInsets()
+            self.applyInsets(maintainBottomIfNeeded: false)
             
-            // If the user was at the bottom, or just sent a message,
-            // keep the last message visible above the keyboard.
-            if self.wasAtBottomBeforeKeyboard || overlap > 0 {
+            // Keep anchored only when user was already following bottom.
+            if self.wasAtBottomBeforeKeyboard || self.shouldAutoFollowBottom {
                 self.performImmediateScrollToBottom(animated: false)
             }
         }
@@ -365,9 +407,11 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         let offsetY = scrollView.contentOffset.y
         let contentHeight = scrollView.contentSize.height
         let frameHeight = scrollView.bounds.height
-        let bottomInset = scrollView.contentInset.bottom
 
         hasHadScrollableContent = hasHadScrollableContent || contentHeight > frameHeight + 1
+        if scrollView.isDragging || scrollView.isDecelerating {
+            shouldAutoFollowBottom = isNearBottom(threshold: autoFollowThreshold)
+        }
 
         guard !isUpdatingContent, !isProgrammaticScroll else { return }
 
@@ -386,8 +430,7 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
             hasTriggeredNearTop = false
         }
 
-        let distanceFromBottom = contentHeight - (offsetY + frameHeight - bottomInset)
-        let isAtBottom = distanceFromBottom <= 100
+        let isAtBottom = isNearBottom(threshold: bottomStateThreshold)
         if isAtBottom != lastAtBottomState {
             lastAtBottomState = isAtBottom
             DispatchQueue.main.async { [weak self] in

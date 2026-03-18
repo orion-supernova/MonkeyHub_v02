@@ -27,6 +27,8 @@ struct ChatRoomView: View {
     @State private var isUserMember = true  // Assume member until checked
     @State private var showRoomDeletedAlert = false
     @State private var showRemovedFromRoomAlert = false
+    @State private var topChromeHeight: CGFloat = 0
+    @State private var bottomChromeHeight: CGFloat = 0
 
     #if canImport(UIKit)
     @State private var screenshotObserver: NSObjectProtocol?
@@ -47,6 +49,7 @@ struct ChatRoomView: View {
     }
     
     var body: some View {
+        GeometryReader { proxy in
         ZStack {
             // 1. Full Screen Background
             LinearGradient(
@@ -81,85 +84,15 @@ struct ChatRoomView: View {
 
             // 3. The Main Content Layer
             messagesListContent
-            // Allows messages to scroll behind the top/bottom pebbles
-            .ignoresSafeArea(.container, edges: .vertical)
-
-            // --- TOP FLOATING PEBBLES ---
-            .safeAreaInset(edge: .top) {
-                HStack {
-                    LiquidButton(icon: "chevron.left", showFocusRing: navIndex == 0) {
-                        dismiss()
-                    }
-
-                    Spacer()
-
-                    RoomTitleView(
-                        title: liveRoom.name,
-                        roomType: liveRoom.type,
-                        avatarImage: roomAvatarImage,
-                        showFocusRing: navIndex == 1
-                    )
-
-                    Spacer()
-
-                    LiquidButton(icon: "info.circle", showFocusRing: navIndex == 2) {
-                        showRoomInfo = true
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 5)
-                .background(Color.clear)
-            }
-            
-            // --- BOTTOM FLOATING INPUT ---
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 8) {
-                    if isUserMember {
-                        // Syncing indicator above input field
-                        if viewModel.isFetchingNewMessages {
-                            SyncingIndicatorView()
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
-                        }
-
-                        MessageInputView(
-                            messageText: $messageText,
-                            showImagePicker: $showImagePicker,
-                            isShowingAttachmentMenu: $isShowingAttachmentMenu,
-                            navHighlight: navIndex,
-                            onSendMessage: { text in
-                                Task {
-                                    await viewModel.sendMessage(text)
-                                    await MainActor.run { messageText = "" }
-                                }
-                            },
-                            onTextChanged: { text in viewModel.onTextChanged(text) },
-                            onTakePhoto: { isShowingAttachmentMenu = false; showCamera = true },
-                            onTakeVideo: { isShowingAttachmentMenu = false; showCamera = true },
-                            onRecordAudio: { isShowingAttachmentMenu = false; showVoiceRecorder = true }
-                        )
-                    } else {
-                        // User is no longer a member
-                        HStack(spacing: 8) {
-                            Image(systemName: "person.slash.fill")
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
-                            Text("You are no longer a member of this room")
-                                .font(.subheadline)
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                        }
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(selectedTheme.colors(for: colorScheme).cardBackground)
-                        )
-                        .padding(.horizontal, 16)
-                    }
-                }
-                .padding(.bottom, 8)
-                .background(Color.clear)
-                .animation(.easeInOut(duration: 0.2), value: viewModel.isFetchingNewMessages)
-            }
         }
+        .overlay(alignment: .top) {
+            topControls
+        }
+        .overlay(alignment: .bottom) {
+            bottomControls
+        }
+        .onPreferenceChange(TopChromeHeightPreferenceKey.self) { topChromeHeight = $0 }
+        .onPreferenceChange(BottomChromeHeightPreferenceKey.self) { bottomChromeHeight = $0 }
         // FIXED: Conditional compilation for cross-platform support
         #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
@@ -349,6 +282,7 @@ struct ChatRoomView: View {
                 )
             }
         )
+        }
     }
 
     // MARK: - Messages List
@@ -361,7 +295,92 @@ struct ChatRoomView: View {
             onImageTapped: { url in
                 navigationState.path.append(url)
             },
-            imageZoomNamespace: imageZoomNamespace
+            imageZoomNamespace: imageZoomNamespace,
+            topInset: topChromeHeight,
+            bottomInset: bottomChromeHeight + 20
+        )
+    }
+
+    @ViewBuilder
+    private var bottomControls: some View {
+        VStack(spacing: 8) {
+            if isUserMember {
+                if viewModel.isFetchingNewMessages {
+                    SyncingIndicatorView()
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                MessageInputView(
+                    messageText: $messageText,
+                    showImagePicker: $showImagePicker,
+                    isShowingAttachmentMenu: $isShowingAttachmentMenu,
+                    navHighlight: navIndex,
+                    onSendMessage: { text in
+                        Task {
+                            await viewModel.sendMessage(text)
+                            await MainActor.run { messageText = "" }
+                        }
+                    },
+                    onTextChanged: { text in viewModel.onTextChanged(text) },
+                    onTakePhoto: { isShowingAttachmentMenu = false; showCamera = true },
+                    onTakeVideo: { isShowingAttachmentMenu = false; showCamera = true },
+                    onRecordAudio: { isShowingAttachmentMenu = false; showVoiceRecorder = true }
+                )
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: "person.slash.fill")
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
+                    Text("You are no longer a member of this room")
+                        .font(.subheadline)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+                )
+                .padding(.horizontal, 16)
+            }
+        }
+        .background(Color.clear)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.isFetchingNewMessages)
+        .background(
+            GeometryReader { chromeProxy in
+                Color.clear
+                    .preference(key: BottomChromeHeightPreferenceKey.self, value: chromeProxy.size.height)
+            }
+        )
+    }
+
+    private var topControls: some View {
+        HStack {
+            LiquidButton(icon: "chevron.left", showFocusRing: navIndex == 0) {
+                dismiss()
+            }
+
+            Spacer()
+
+            RoomTitleView(
+                title: liveRoom.name,
+                roomType: liveRoom.type,
+                avatarImage: roomAvatarImage,
+                showFocusRing: navIndex == 1
+            )
+
+            Spacer()
+
+            LiquidButton(icon: "info.circle", showFocusRing: navIndex == 2) {
+                showRoomInfo = true
+            }
+        }
+        .padding(.horizontal, 16)
+        .background(Color.clear)
+        .background(
+            GeometryReader { chromeProxy in
+                Color.clear
+                    .preference(key: TopChromeHeightPreferenceKey.self, value: chromeProxy.size.height + 12)
+            }
         )
     }
 
@@ -616,6 +635,22 @@ struct RoomTitleView: View {
                 }
             }
         }
+    }
+}
+
+private struct TopChromeHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct BottomChromeHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

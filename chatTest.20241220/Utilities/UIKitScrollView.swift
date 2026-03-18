@@ -7,6 +7,8 @@ struct UIKitScrollView<Content: View>: UIViewControllerRepresentable {
     let content: Content
     let firstItemId: String?
     let itemCount: Int
+    let topInset: CGFloat
+    let bottomInset: CGFloat
     @Binding var scrollToBottom: Bool
     var onNearTop: (() -> Void)?
     var onAtBottomChanged: ((Bool) -> Void)?
@@ -15,6 +17,7 @@ struct UIKitScrollView<Content: View>: UIViewControllerRepresentable {
         let vc = UIKitScrollViewController(content: content)
         vc.onNearTop = onNearTop
         vc.onAtBottomChanged = onAtBottomChanged
+        vc.setBaseInsets(top: topInset, bottom: bottomInset)
         return vc
     }
 
@@ -22,19 +25,22 @@ struct UIKitScrollView<Content: View>: UIViewControllerRepresentable {
         let wasPrepended = vc.lastFirstItemId != nil && firstItemId != nil &&
                           vc.lastFirstItemId != firstItemId && itemCount > vc.lastItemCount
         let itemCountIncreased = itemCount > vc.lastItemCount
+        let transitionedFromEmpty = vc.lastItemCount == 0 && itemCount > 0
 
-        if wasPrepended {
-            vc.preservePositionDuringUpdate(content: content)
-        } else {
-            vc.updateContent(content, scrollToBottomIfNeeded: itemCountIncreased)
-        }
+        vc.setBaseInsets(top: topInset, bottom: bottomInset)
 
-        vc.lastFirstItemId = firstItemId
-        vc.lastItemCount = itemCount
+        vc.applyUpdate(
+            content: content,
+            firstItemId: firstItemId,
+            itemCount: itemCount,
+            wasPrepended: wasPrepended,
+            itemCountIncreased: itemCountIncreased,
+            transitionedFromEmpty: transitionedFromEmpty
+        )
 
         if scrollToBottom {
             DispatchQueue.main.async {
-                vc.scrollToBottom(animated: true)
+                vc.requestScrollToBottom(animated: true)
                 self.scrollToBottom = false
             }
         }
@@ -47,7 +53,7 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         sv.translatesAutoresizingMaskIntoConstraints = false
         sv.backgroundColor = .clear
         sv.keyboardDismissMode = .interactive
-        sv.contentInsetAdjustmentBehavior = .automatic
+        sv.contentInsetAdjustmentBehavior = .never
         return sv
     }()
 
@@ -56,12 +62,17 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
     var lastItemCount: Int = 0
     var onNearTop: (() -> Void)?
     var onAtBottomChanged: ((Bool) -> Void)?
-    private var didInitialScroll = false
-    private var contentSizeObservation: NSKeyValueObservation?
     private var hasTriggeredNearTop = false
     private var lastAtBottomState = true
     private var wasAtBottomBeforeKeyboard = true
     private var shouldScrollToBottomAfterLayout = false
+    private var pendingScrollToBottomAnimated = false
+    private var baseTopInset: CGFloat = 0
+    private var baseBottomInset: CGFloat = 0
+    private var keyboardInset: CGFloat = 0
+    private var isProgrammaticScroll = false
+    private var isUpdatingContent = false
+    private var hasHadScrollableContent = false
 
     init(content: Content) {
         super.init(nibName: nil, bundle: nil)
@@ -80,13 +91,7 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         setupHostingController()
         setupKeyboardObservers()
         setupKeyboardDismissGesture()
-
-        contentSizeObservation = scrollView.observe(\.contentSize, options: [.new]) { [weak self] sv, _ in
-            if let self = self, !self.didInitialScroll && sv.contentSize.height > sv.bounds.height {
-                self.didInitialScroll = true
-                self.scrollToBottom(animated: false)
-            }
-        }
+        applyInsets()
     }
 
     private func setupKeyboardDismissGesture() {
@@ -133,81 +138,48 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
               let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
               let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt else { return }
 
-        let screenHeight = UIScreen.main.bounds.height
-        let isKeyboardHiding = endFrame.origin.y >= screenHeight
-
-        // Only handle hide animation here
-        guard isKeyboardHiding else { return }
-
         let animationCurve = UIView.AnimationOptions(rawValue: curveValue << 16)
+        let overlap = keyboardOverlap(for: endFrame)
 
         UIView.animate(withDuration: duration, delay: 0, options: [animationCurve, .beginFromCurrentState]) {
-            // Force layout to animate with keyboard
+            self.keyboardInset = overlap
+            self.applyInsets()
             self.view.layoutIfNeeded()
+        } completion: { _ in
+            if self.wasAtBottomBeforeKeyboard || overlap == 0 {
+                self.requestScrollToBottom(animated: false)
+            } else {
+                self.publishAtBottomStateIfNeeded()
+            }
         }
     }
 
     @objc private func keyboardWillShow(_ notification: Notification) {
         wasAtBottomBeforeKeyboard = isAtBottom()
-
-        guard wasAtBottomBeforeKeyboard,
-              let userInfo = notification.userInfo,
-              let keyboardFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
-              let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt,
-              let window = view.window else { return }
-
-        // Calculate the expected bottom inset after keyboard appears
-        let scrollViewFrameInWindow = scrollView.convert(scrollView.bounds, to: window)
-        let keyboardOverlap = max(0, scrollViewFrameInWindow.maxY - keyboardFrame.origin.y)
-
-        let contentHeight = scrollView.contentSize.height
-        let frameHeight = scrollView.bounds.height
-        let currentInset = scrollView.adjustedContentInset.bottom
-        let expectedInset = currentInset + keyboardOverlap
-        let maxOffsetY = max(0, contentHeight - frameHeight + expectedInset)
-
-        let animationCurve = UIView.AnimationOptions(rawValue: curveValue << 16)
-
-        UIView.animate(withDuration: duration, delay: 0, options: [animationCurve, .beginFromCurrentState]) {
-            self.scrollView.contentOffset = CGPoint(x: 0, y: maxOffsetY)
-        }
     }
 
     @objc private func keyboardWillHide(_ notification: Notification) {
-        guard wasAtBottomBeforeKeyboard,
-              let userInfo = notification.userInfo,
-              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
-              let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt else { return }
-
-        let animationCurve = UIView.AnimationOptions(rawValue: curveValue << 16)
-
-        // Delay slightly to let the system adjust insets first
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
-            guard let self = self else { return }
-            UIView.animate(withDuration: duration - 0.01, delay: 0, options: [animationCurve, .beginFromCurrentState]) {
-                self.scrollToBottom(animated: false)
-            }
-        }
+        guard notification.userInfo != nil else { return }
     }
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
 
         if isAtBottom() {
-            shouldScrollToBottomAfterLayout = true
+            scheduleScrollToBottomAfterLayout(animated: false)
 
             coordinator.animate(alongsideTransition: nil) { [weak self] _ in
-                self?.shouldScrollToBottomAfterLayout = false
+                self?.publishAtBottomStateIfNeeded()
             }
         }
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        hasHadScrollableContent = hasHadScrollableContent || isScrollable()
 
         if shouldScrollToBottomAfterLayout {
-            scrollToBottom(animated: false)
+            flushPendingScrollToBottomIfNeeded()
         }
     }
 
@@ -215,8 +187,8 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         let contentHeight = scrollView.contentSize.height
         let frameHeight = scrollView.bounds.height
         let offsetY = scrollView.contentOffset.y
-        let adjustedInset = scrollView.adjustedContentInset.bottom
-        return (contentHeight - (offsetY + frameHeight - adjustedInset)) <= 100
+        let inset = scrollView.contentInset.bottom
+        return (contentHeight - (offsetY + frameHeight - inset)) <= 100
     }
 
     private func setupScrollView() {
@@ -245,17 +217,44 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         ])
     }
 
-    func updateContent(_ content: Content, scrollToBottomIfNeeded: Bool = false) {
+    func setBaseInsets(top: CGFloat, bottom: CGFloat) {
+        baseTopInset = top
+        baseBottomInset = bottom
+        applyInsets()
+    }
+
+    func applyUpdate(
+        content: Content,
+        firstItemId: String?,
+        itemCount: Int,
+        wasPrepended: Bool,
+        itemCountIncreased: Bool,
+        transitionedFromEmpty: Bool
+    ) {
+        isUpdatingContent = true
+        defer {
+            lastFirstItemId = firstItemId
+            lastItemCount = itemCount
+            isUpdatingContent = false
+        }
+
+        if wasPrepended {
+            preservePositionDuringUpdate(content: content)
+        } else {
+            updateContent(
+                content,
+                scrollToBottomIfNeeded: itemCountIncreased,
+                forceInitialAnchor: transitionedFromEmpty
+            )
+        }
+    }
+
+    func updateContent(_ content: Content, scrollToBottomIfNeeded: Bool = false, forceInitialAnchor: Bool = false) {
         let wasAtBottom = isAtBottom()
         hostingController.rootView = content
-        // Only force layout + scroll when a new message was added. Skipping this
-        // for timer-driven re-renders (e.g. Chamber of Secrets countdown) prevents
-        // the periodic setContentOffset calls from fighting with keyboardDismissMode=.interactive.
-        if wasAtBottom && scrollToBottomIfNeeded {
-            hostingController.view.setNeedsLayout()
-            hostingController.view.layoutIfNeeded()
-            scrollView.layoutIfNeeded()
-            scrollToBottom(animated: false)
+        let shouldAnchorForNewMessage = scrollToBottomIfNeeded && (wasAtBottom || keyboardInset > 0)
+        if forceInitialAnchor || shouldAnchorForNewMessage {
+            scheduleScrollToBottomAfterLayout(animated: false)
         }
     }
 
@@ -268,14 +267,41 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         scrollView.layoutIfNeeded()
         let delta = scrollView.contentSize.height - oldHeight
         if delta > 0 {
-            scrollView.contentOffset.y = oldOffset + delta
+            performProgrammaticScroll {
+                self.scrollView.contentOffset.y = oldOffset + delta
+            }
         }
     }
 
-    func scrollToBottom(animated: Bool) {
+    func requestScrollToBottom(animated: Bool) {
+        scheduleScrollToBottomAfterLayout(animated: animated)
+    }
+
+    private func scheduleScrollToBottomAfterLayout(animated: Bool) {
+        shouldScrollToBottomAfterLayout = true
+        pendingScrollToBottomAnimated = pendingScrollToBottomAnimated || animated
+        view.setNeedsLayout()
+        scrollView.setNeedsLayout()
+        DispatchQueue.main.async { [weak self] in
+            self?.flushPendingScrollToBottomIfNeeded()
+        }
+    }
+
+    private func flushPendingScrollToBottomIfNeeded() {
+        guard shouldScrollToBottomAfterLayout else { return }
+        shouldScrollToBottomAfterLayout = false
+        let animated = pendingScrollToBottomAnimated
+        pendingScrollToBottomAnimated = false
+        performProgrammaticScroll {
+            self.performImmediateScrollToBottom(animated: animated)
+        }
+        publishAtBottomStateIfNeeded()
+    }
+
+    private func performImmediateScrollToBottom(animated: Bool) {
         let contentHeight = scrollView.contentSize.height
         let frameHeight = scrollView.bounds.height
-        let bottomInset = scrollView.adjustedContentInset.bottom
+        let bottomInset = scrollView.contentInset.bottom
         let maxOffsetY = max(0, contentHeight - frameHeight + bottomInset)
         scrollView.setContentOffset(CGPoint(x: 0, y: maxOffsetY), animated: animated)
     }
@@ -284,30 +310,72 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         let offsetY = scrollView.contentOffset.y
         let contentHeight = scrollView.contentSize.height
         let frameHeight = scrollView.bounds.height
-        let bottomInset = scrollView.adjustedContentInset.bottom
+        let bottomInset = scrollView.contentInset.bottom
 
-        // 1. Wrap Near Top detection in async to fix "Modifying state" error
-        if offsetY <= 150 && contentHeight > frameHeight {
+        hasHadScrollableContent = hasHadScrollableContent || contentHeight > frameHeight + 1
+
+        guard !isUpdatingContent, !isProgrammaticScroll else { return }
+
+        if offsetY <= 150 &&
+            contentHeight > frameHeight &&
+            hasHadScrollableContent &&
+            (scrollView.isDragging || scrollView.isDecelerating) {
             if !hasTriggeredNearTop {
                 hasTriggeredNearTop = true
                 DispatchQueue.main.async { [weak self] in
-                    self?.onNearTop?()
+                    guard let self = self, !self.isUpdatingContent, !self.isProgrammaticScroll else { return }
+                    self.onNearTop?()
                 }
             }
         } else if offsetY > 200 {
             hasTriggeredNearTop = false
         }
 
-        // 2. Wrap At Bottom detection in async as well
-        // Account for bottom inset when calculating if at bottom
         let distanceFromBottom = contentHeight - (offsetY + frameHeight - bottomInset)
         let isAtBottom = distanceFromBottom <= 100
         if isAtBottom != lastAtBottomState {
             lastAtBottomState = isAtBottom
             DispatchQueue.main.async { [weak self] in
-                self?.onAtBottomChanged?(isAtBottom)
+                guard let self = self, !self.isUpdatingContent, !self.isProgrammaticScroll else { return }
+                self.onAtBottomChanged?(isAtBottom)
             }
         }
+    }
+
+    private func applyInsets() {
+        let indicatorInsets = UIEdgeInsets(top: baseTopInset, left: 0, bottom: baseBottomInset, right: 0)
+        let contentInsets = UIEdgeInsets.zero
+        guard scrollView.contentInset != contentInsets || scrollView.scrollIndicatorInsets != indicatorInsets else { return }
+        scrollView.contentInset = contentInsets
+        scrollView.scrollIndicatorInsets = indicatorInsets
+    }
+
+    private func keyboardOverlap(for endFrame: CGRect) -> CGFloat {
+        guard let window = view.window else { return 0 }
+        let scrollFrameInWindow = scrollView.convert(scrollView.bounds, to: window)
+        return max(0, scrollFrameInWindow.maxY - endFrame.origin.y)
+    }
+
+    private func performProgrammaticScroll(_ action: () -> Void) {
+        isProgrammaticScroll = true
+        action()
+        DispatchQueue.main.async { [weak self] in
+            self?.isProgrammaticScroll = false
+        }
+    }
+
+    private func publishAtBottomStateIfNeeded() {
+        let isAtBottomNow = isAtBottom()
+        guard isAtBottomNow != lastAtBottomState else { return }
+        lastAtBottomState = isAtBottomNow
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, !self.isUpdatingContent, !self.isProgrammaticScroll else { return }
+            self.onAtBottomChanged?(isAtBottomNow)
+        }
+    }
+
+    private func isScrollable() -> Bool {
+        scrollView.contentSize.height > scrollView.bounds.height + 1
     }
 }
 
@@ -319,6 +387,8 @@ struct UIKitScrollView<Content: View>: NSViewControllerRepresentable {
     let content: Content
     let firstItemId: String?
     let itemCount: Int
+    let topInset: CGFloat
+    let bottomInset: CGFloat
     @Binding var scrollToBottom: Bool
     var onNearTop: (() -> Void)?
     var onAtBottomChanged: ((Bool) -> Void)?

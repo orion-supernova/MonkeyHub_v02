@@ -6,6 +6,8 @@ struct MessagesListView: View {
     let isLoading: Bool
     let onImageTapped: (URL) -> Void
     let imageZoomNamespace: Namespace.ID
+    let topInset: CGFloat
+    let bottomInset: CGFloat
     
     @State private var activeReactionPickerMessageId: String?
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -33,6 +35,8 @@ struct MessagesListView: View {
                 content: messagesContent,
                 firstItemId: viewModel.messages.first?.id,
                 itemCount: viewModel.messages.count,
+                topInset: topInset,
+                bottomInset: bottomInset,
                 scrollToBottom: $scrollToBottom,
                 onNearTop: {
                     if !viewModel.isFetchingOlderMessages {
@@ -63,9 +67,8 @@ struct MessagesListView: View {
 
     private var messagesContent: some View {
         LazyVStack(spacing: 8) {
-            // Top Padding / Loading Indicator
             Color.clear
-                .frame(height: verticalSizeClass == .compact ? 80 : 120)
+                .frame(height: max(topInset, verticalSizeClass == .compact ? 20 : 45))
                 .overlay(alignment: .bottom) {
                     if viewModel.isFetchingOlderMessages {
                         ProgressView().controlSize(.small).padding(.bottom, 8)
@@ -113,8 +116,8 @@ struct MessagesListView: View {
                     .padding(.top, 4)
             }
 
-            // Bottom buffer for floating input area
-            Color.clear.frame(height: verticalSizeClass == .compact ? 60 : 80)
+            // Small breathing room; structural clearance is handled by UIKitScrollView insets.
+            Color.clear.frame(height: max(bottomInset, verticalSizeClass == .compact ? 16 : 60))
                 .contentShape(Rectangle())
                 .onTapGesture { dismissPicker() }
         }

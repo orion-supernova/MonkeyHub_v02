@@ -212,7 +212,8 @@ export const listUserRooms = query({
           .withIndex("by_room", (q) => q.eq("roomId", m.roomId))
           .collect();
         const participantIds = members.map((mem) => mem.userId.toString());
-        return { ...room, participantIds };
+        const { passwordHash, ...rest } = room;
+        return { ...rest, participantIds, hasPassword: !!passwordHash };
       })
     );
 
@@ -273,7 +274,8 @@ export const getRoom = query({
       .query("roomMembers")
       .withIndex("by_room", (q) => q.eq("roomId", roomId))
       .collect();
-    return { ...room, participantIds: members.map((m) => m.userId.toString()) };
+    const { passwordHash, ...rest } = room;
+    return { ...rest, participantIds: members.map((m) => m.userId.toString()), hasPassword: !!passwordHash };
   },
 });
 

@@ -55,7 +55,13 @@ class SearchViewModel: ObservableObject {
             switch searchMode {
             case .rooms:
                 let allPublic = try await convexAPI.fetchPublicRooms()
-                joinedRoomIds = Set(allPublic.filter { $0.participants.contains(userId) }.map { $0.id })
+                let joinedIdsFromRepository = Set(ChatRepository.shared.rooms.map(\.id))
+                if joinedIdsFromRepository.isEmpty {
+                    let joinedRooms = try await convexAPI.fetchUserRooms(userId: userId)
+                    joinedRoomIds = Set(joinedRooms.map(\.id))
+                } else {
+                    joinedRoomIds = joinedIdsFromRepository
+                }
                 rooms = allPublic.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
             case .users:
                 users = try await convexAPI.searchUsers(query: searchText, currentUserId: userId)

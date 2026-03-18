@@ -13,6 +13,7 @@ struct ChatRoom: Identifiable, Hashable, Codable {
     var lastMessage: String?
     var lastMessageDate: Date?
     var participants: [String]
+    var memberCount: Int
     let description: String?
     var isPrivate: Bool
     let type: RoomType
@@ -29,6 +30,7 @@ struct ChatRoom: Identifiable, Hashable, Codable {
         lastMessage: String? = nil,
         lastMessageDate: Date? = nil,
         participants: [String] = [],
+        memberCount: Int? = nil,
         description: String? = nil,
         isPrivate: Bool = true,
         type: RoomType = .regular,
@@ -44,6 +46,7 @@ struct ChatRoom: Identifiable, Hashable, Codable {
         self.lastMessage = lastMessage
         self.lastMessageDate = lastMessageDate
         self.participants = participants
+        self.memberCount = memberCount ?? participants.count
         self.description = description
         self.isPrivate = isPrivate
         self.type = type
@@ -51,6 +54,10 @@ struct ChatRoom: Identifiable, Hashable, Codable {
         self.avatarStorageId = avatarStorageId
         self.avatarURL = avatarURL
         self.hasPassword = hasPassword
+    }
+
+    var resolvedMemberCount: Int {
+        max(memberCount, participants.count)
     }
 
     // MARK: - Hashable / Equatable

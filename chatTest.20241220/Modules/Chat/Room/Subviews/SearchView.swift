@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 
 struct SearchView: View {
     @Environment(\.dismiss) private var dismiss
@@ -8,6 +9,8 @@ struct SearchView: View {
 
     @StateObject private var viewModel = SearchViewModel()
     @State private var animateContent = false
+    @State private var roomDetailsRoom: ChatRoom?
+    @State private var passwordPromptRoom: ChatRoom?
 
     var body: some View {
         NavigationStack {
@@ -259,22 +262,15 @@ struct SearchView: View {
                             rooms: viewModel.rooms,
                             joinedRoomIds: viewModel.joinedRoomIds,
                             joinRoom: { room in
-                                Task {
-                                    let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
-                                    try? await ConvexChatAPI.shared.joinRoom(roomId: room.id, userId: userId)
-                                    var joinedRoom = room
-                                    if !joinedRoom.participants.contains(userId) {
-                                        joinedRoom.participants.append(userId)
-                                    }
-                                    dismiss()
-                                    // Navigate to the room after joining (pass updated room object)
-                                    NavigationStateManager.shared.navigateToRoom(joinedRoom)
-                                }
+                                await handleJoinSelection(for: room)
                             },
                             openRoom: { room in
                                 // Room is already joined - just navigate to it
                                 dismiss()
                                 NavigationStateManager.shared.navigateToRoom(room)
+                            },
+                            showRoomInfo: { room in
+                                roomDetailsRoom = room
                             }
                         )
                     } else {
@@ -289,7 +285,8 @@ struct SearchView: View {
                                         id: roomId ?? UUID().uuidString,
                                         name: "Chat with \(user.displayName)",
                                         createdBy: userId,
-                                        participants: [userId, user.id]
+                                        participants: [userId, user.id],
+                                        memberCount: 2
                                     )
                                     dismiss()
                                     // Navigate to the newly created room
@@ -333,6 +330,182 @@ struct SearchView: View {
         )
         .offset(y: -50)
         .padding(.top, 50)
+        .sheet(item: $roomDetailsRoom) { room in
+            SearchRoomInfoSheet(room: room)
+        }
+        .sheet(item: $passwordPromptRoom) { room in
+            RoomPasswordSheet(
+                room: room,
+                submit: { password in
+                    await submitPasswordJoin(for: room, password: password)
+                }
+            )
+        }
+    }
+
+    private func handleJoinSelection(for room: ChatRoom) async {
+        if room.hasPassword {
+            passwordPromptRoom = room
+            return
+        }
+        let error = await joinRoom(room, password: nil)
+        if error == "Password required." {
+            passwordPromptRoom = room
+        } else if let error {
+            viewModel.errorMessage = error
+        }
+    }
+
+    private func submitPasswordJoin(for room: ChatRoom, password: String) async -> String? {
+        await joinRoom(room, password: password)
+    }
+
+    @discardableResult
+    private func joinRoom(_ room: ChatRoom, password: String?) async -> String? {
+        let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
+        let passwordHash = password.map(sha256)
+
+        do {
+            try await ConvexChatAPI.shared.joinRoom(roomId: room.id, userId: userId, passwordHash: passwordHash)
+            var joinedRoom = room
+            let addedParticipant = !joinedRoom.participants.contains(userId)
+            if addedParticipant {
+                joinedRoom.participants.append(userId)
+                joinedRoom.memberCount = max(joinedRoom.memberCount + 1, joinedRoom.participants.count)
+            }
+            passwordPromptRoom = nil
+            dismiss()
+            NavigationStateManager.shared.navigateToRoom(joinedRoom)
+            return nil
+        } catch {
+            let message = AppLogger.shared.friendlyError(error)
+            if message.contains("ROOM_PASSWORD_REQUIRED") {
+                return "Password required."
+            }
+            if message.contains("ROOM_PASSWORD_INVALID") {
+                return "Wrong room password."
+            }
+            return message
+        }
+    }
+
+    private func sha256(_ input: String) -> String {
+        let data = Data(input.utf8)
+        let hash = SHA256.hash(data: data)
+        return hash.compactMap { String(format: "%02x", $0) }.joined()
+    }
+}
+
+private struct SearchRoomInfoSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let room: ChatRoom
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Room") {
+                    LabeledContent("Name", value: room.name)
+                    LabeledContent("Members", value: "\(room.resolvedMemberCount)")
+                    LabeledContent("Type", value: room.type == .secret ? "Secret" : "Regular")
+                    LabeledContent("Password", value: room.hasPassword ? "Required" : "None")
+                }
+
+                if let description = room.description, !description.isEmpty {
+                    Section("Description") {
+                        Text(description)
+                    }
+                }
+            }
+            .navigationTitle("Room Details")
+            #if canImport(UIKit)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 420, idealWidth: 480, minHeight: 280, idealHeight: 320)
+        #endif
+    }
+}
+
+private struct RoomPasswordSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let room: ChatRoom
+    let submit: (String) async -> String?
+
+    @State private var password = ""
+    @State private var errorMessage: String?
+    @State private var isSubmitting = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(room.name)
+                    .font(.headline)
+                    .lineLimit(2)
+
+                Text("This room requires a password before you can join.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                SecureField("Room password", text: $password)
+                    .textFieldStyle(.roundedBorder)
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+
+                Button {
+                    Task {
+                        await handleSubmit()
+                    }
+                } label: {
+                    if isSubmitting {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Text("Join Room")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isSubmitting || password.isEmpty)
+
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Enter Password")
+            #if canImport(UIKit)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .disabled(isSubmitting)
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 420, idealWidth: 460, minHeight: 220, idealHeight: 240)
+        #endif
+    }
+
+    private func handleSubmit() async {
+        isSubmitting = true
+        errorMessage = nil
+        let result = await submit(password)
+        isSubmitting = false
+        errorMessage = result
     }
 }
 

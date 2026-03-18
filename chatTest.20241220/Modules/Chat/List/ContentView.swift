@@ -54,6 +54,7 @@ struct ContentView: View {
                 name: newRoomName,
                 createdBy: userId,
                 participants: [userId],
+                memberCount: 1,
                 type: type,
                 messageLifetime: messageLifetime
             )
@@ -590,7 +591,8 @@ struct ContentView: View {
                 id: roomId,
                 name: "Chat with \(friend.displayName)",
                 createdBy: userId,
-                participants: [userId, friend.id]
+                participants: [userId, friend.id],
+                memberCount: 2
             )
             viewModel.addRoomOptimistically(room)
         } catch {
@@ -737,7 +739,7 @@ struct EnhancedRoomCard: View {
             HStack(spacing: 4) {
                 Image(systemName: "person.2.fill")
                     .imageScale(.small)
-                Text("\(room.participants.count)")
+                Text("\(room.resolvedMemberCount)")
                 Spacer()
                 if room.type == .secret {
                     HStack(spacing: 3) {
@@ -1229,7 +1231,7 @@ struct JoinRoomSheet: View {
                                         HStack {
                                             Image(systemName: "person.2.fill")
                                                 .imageScale(.small)
-                                            Text("\(room.participants.count) members")
+                                            Text("\(room.resolvedMemberCount) members")
                                         }
                                         .font(.caption)
                                         .foregroundStyle(

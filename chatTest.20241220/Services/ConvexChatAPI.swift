@@ -29,6 +29,7 @@ struct ConvexRoomDoc: Decodable {
             lastMessage: lastMessage,
             lastMessageDate: lastMessageTime.map { Date(timeIntervalSince1970: $0 / 1000) },
             participants: participantIds ?? [],
+            memberCount: memberCount,
             description: description,
             isPrivate: isPrivate,
             type: RoomType(rawValue: type ?? "Regular Room") ?? .regular,

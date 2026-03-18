@@ -327,7 +327,7 @@ struct RoomInfoView: View {
             HStack(spacing: 4) {
                 Image(systemName: "person.2.fill")
                     .font(.caption)
-                Text("\(viewModel.room.participants.count) members")
+                Text("\(viewModel.room.resolvedMemberCount) members")
                     .font(.subheadline)
             }
             .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)

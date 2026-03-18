@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Single Source of Truth for all chat data.
 /// Real-time updates arrive via ConvexSubscriptionManager.
-/// No local disk cache — Convex is the authoritative source.
+/// Local disk cache is used only for fast bootstrap; Convex remains authoritative.
 @MainActor
 class ChatRepository: ObservableObject {
     static let shared = ChatRepository()
@@ -17,17 +17,25 @@ class ChatRepository: ObservableObject {
 
     // MARK: - Dependencies
     private let convexAPI = ConvexChatAPI.shared
+    private let persistence = MessagePersistenceService.shared
     private var activeRoomId: String?
+    private var hasPerformedInitialRoomFetch = false
 
-    private init() {}
+    private init() {
+        rooms = persistence.loadRooms()
+        unreadCounts = persistence.loadUnreadCounts()
+        updateGlobalBadge()
+    }
 
     // MARK: - Subscription Callbacks (called by ConvexSubscriptionManager)
 
     /// Called when Convex room list subscription delivers updated rooms.
     func handleRoomsUpdate(_ updatedRooms: [ChatRoom]) {
+        let mergedRooms = mergeCachedRoomData(into: updatedRooms)
+
         if !rooms.isEmpty {
             // Rooms that disappeared were deleted or user was removed — notify open views.
-            let removedIds = Set(rooms.map { $0.id }).subtracting(updatedRooms.map { $0.id })
+            let removedIds = Set(rooms.map { $0.id }).subtracting(mergedRooms.map { $0.id })
             for roomId in removedIds {
                 NotificationCenter.default.post(
                     name: NSNotification.Name("RoomWasDeleted"),
@@ -39,7 +47,7 @@ class ChatRepository: ObservableObject {
             // Increment unread counts for rooms that received a new message
             // while the user is not in that room (Convex subscription-driven).
             let previousById = Dictionary(uniqueKeysWithValues: rooms.map { ($0.id, $0) })
-            for updated in updatedRooms {
+            for updated in mergedRooms {
                 guard updated.id != activeRoomId,
                       let previous = previousById[updated.id],
                       let newTime = updated.lastMessageDate,
@@ -48,9 +56,11 @@ class ChatRepository: ObservableObject {
                 unreadCounts[updated.id, default: 0] += 1
             }
         }
-        withAnimation { rooms = updatedRooms }
+        hasPerformedInitialRoomFetch = true
+        withAnimation { rooms = mergedRooms }
         reconcileUnreadCounts()
         updateGlobalBadge()
+        persistRoomState()
     }
 
     /// Called when the typing-for-user subscription delivers updated data.
@@ -107,6 +117,7 @@ class ChatRepository: ObservableObject {
         merged.sort { $0.timestamp < $1.timestamp }
 
         activeRoomMessages = merged
+        persistMessages(for: roomId)
     }
 
     // MARK: - Optimistic Helpers for Media Sending
@@ -142,13 +153,31 @@ class ChatRepository: ObservableObject {
 
     // MARK: - Room Management
 
-    func fetchRooms() async {
+    func ensureRoomsLoaded() async {
+        guard !hasPerformedInitialRoomFetch else { return }
+
+        guard rooms.isEmpty else {
+            hasPerformedInitialRoomFetch = true
+            return
+        }
+        await fetchRooms(force: true)
+    }
+
+    func fetchRooms(force: Bool = false) async {
+        if !force, !rooms.isEmpty {
+            hasPerformedInitialRoomFetch = true
+            return
+        }
+
         guard let userId = userDefaults.string(forKey: userIdUserDefaultsKey) else { return }
         do {
             let fetched = try await convexAPI.fetchUserRooms(userId: userId)
-            withAnimation { rooms = fetched }
+            let mergedRooms = mergeCachedRoomData(into: fetched)
+            hasPerformedInitialRoomFetch = true
+            withAnimation { rooms = mergedRooms }
             reconcileUnreadCounts()
             updateGlobalBadge()
+            persistRoomState()
         } catch {
             AppLogger.shared.logError("ChatRepository.fetchRooms", error)
         }
@@ -157,15 +186,20 @@ class ChatRepository: ObservableObject {
     func addRoomOptimistically(_ room: ChatRoom) {
         guard !rooms.contains(where: { $0.id == room.id }) else { return }
         withAnimation { rooms.insert(room, at: 0) }
+        persistRoomState()
     }
 
     func removeRoomOptimistically(_ roomId: String) {
         withAnimation { rooms.removeAll { $0.id == roomId } }
+        unreadCounts.removeValue(forKey: roomId)
+        updateGlobalBadge()
+        persistRoomState()
     }
 
     func markRoomAsRead(roomId: String) {
         unreadCounts[roomId] = 0
         updateGlobalBadge()
+        persistUnreadCounts()
     }
 
     /// Clears the active room only if it still matches the expected roomId.
@@ -182,9 +216,10 @@ class ChatRepository: ObservableObject {
             // Defer @Published mutations — setActiveRoom is called from ChatRoomViewModel.init
             // which runs during @StateObject creation (a view update). Publishing synchronously
             // here would trigger "Publishing from within view updates" warnings.
+            let cachedMessages = hydrateCachedMessages(persistence.loadMessages(for: roomId))
             Task { [weak self] in
                 self?.markRoomAsRead(roomId: roomId)
-                self?.activeRoomMessages = []
+                self?.activeRoomMessages = cachedMessages
             }
         } else {
             ConvexSubscriptionManager.shared.unsubscribeFromCurrentRoom()
@@ -266,6 +301,7 @@ class ChatRepository: ObservableObject {
 
         if roomId == activeRoomId {
             withAnimation { activeRoomMessages.removeAll { $0.id == messageId } }
+            persistMessages(for: roomId)
         }
         do {
             try await convexAPI.deleteMessage(messageId: messageId, userId: userId)
@@ -285,6 +321,7 @@ class ChatRepository: ObservableObject {
         if activeRoomId != roomId && senderId != currentUserId {
             unreadCounts[roomId, default: 0] += 1
             updateGlobalBadge()
+            persistUnreadCounts()
         }
 
         if let content = userInfo["content"] as? String,
@@ -297,8 +334,9 @@ class ChatRepository: ObservableObject {
                 let r = rooms.remove(at: index)
                 rooms.insert(r, at: 0)
             }
+            persistRoomState()
         } else if !rooms.contains(where: { $0.id == roomId }) {
-            Task { await fetchRooms() }
+            Task { await fetchRooms(force: true) }
         }
     }
 
@@ -310,6 +348,7 @@ class ChatRepository: ObservableObject {
             unreadCounts.removeValue(forKey: roomId)
             updateGlobalBadge()
         }
+        persistRoomState()
         NotificationCenter.default.post(
             name: NSNotification.Name("RoomWasDeleted"),
             object: nil,
@@ -329,6 +368,7 @@ class ChatRepository: ObservableObject {
             activeRoomMessages.append(message)
         }
         activeRoomMessages.sort { $0.timestamp < $1.timestamp }
+        persistMessages(for: roomId)
     }
 
     private func upsertMessages(_ messages: [ChatMessage], in roomId: String) {
@@ -343,6 +383,7 @@ class ChatRepository: ObservableObject {
             }
         }
         activeRoomMessages.sort { $0.timestamp < $1.timestamp }
+        persistMessages(for: roomId)
     }
 
     private func updateLocalRoom(for message: ChatMessage) {
@@ -354,6 +395,61 @@ class ChatRepository: ObservableObject {
             rooms[idx] = updated
             let r = rooms.remove(at: idx)
             rooms.insert(r, at: 0)
+        }
+        persistRoomState()
+    }
+
+    private func mergeCachedRoomData(into incomingRooms: [ChatRoom]) -> [ChatRoom] {
+        let previousById = Dictionary(uniqueKeysWithValues: rooms.map { ($0.id, $0) })
+
+        return incomingRooms.map { room in
+            var mergedRoom = room
+
+            if let previous = previousById[room.id],
+               previous.avatarStorageId == room.avatarStorageId {
+                mergedRoom.avatarURL = previous.avatarURL
+            }
+
+            if mergedRoom.avatarURL == nil,
+               let cachedAvatarURL = ConvexFileCacheService.shared.cachedLocalFileURL(for: room.avatarStorageId) {
+                mergedRoom.avatarURL = cachedAvatarURL
+            }
+
+            return mergedRoom
+        }
+    }
+
+    private func hydrateCachedMessages(_ cachedMessages: [ChatMessage]) -> [ChatMessage] {
+        cachedMessages.map { message in
+            guard message.assetURL == nil,
+                  let storageId = message.mediaStorageId,
+                  let cachedURL = ConvexFileCacheService.shared.cachedLocalFileURL(for: storageId) else {
+                return message
+            }
+
+            var hydrated = message
+            hydrated.assetURL = cachedURL
+            return hydrated
+        }
+    }
+
+    private func persistRoomState() {
+        Task {
+            await persistence.saveRooms(rooms)
+            await persistence.saveUnreadCounts(unreadCounts)
+        }
+    }
+
+    private func persistUnreadCounts() {
+        Task {
+            await persistence.saveUnreadCounts(unreadCounts)
+        }
+    }
+
+    private func persistMessages(for roomId: String) {
+        let persistedMessages = hydrateCachedMessages(activeRoomMessages.filter { $0.roomId == roomId })
+        Task {
+            await persistence.saveMessages(persistedMessages, for: roomId)
         }
     }
 }

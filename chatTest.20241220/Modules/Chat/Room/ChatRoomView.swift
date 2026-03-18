@@ -137,11 +137,8 @@ struct ChatRoomView: View {
         .task(id: liveRoom.avatarStorageId) {
             roomAvatarImage = nil
             if let storageId = liveRoom.avatarStorageId {
-                // Load from Convex storage (real-time: re-runs when storageId changes)
-                if let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
-                   let url = URL(string: urlString),
-                   let (data, _) = try? await URLSession.shared.data(from: url),
-                   let image = PlatformImage.fromData(data) {
+                // Realtime-safe: same storageId reads from cache, changed storageId refetches.
+                if let image = await ConvexFileCacheService.shared.image(for: storageId) {
                     roomAvatarImage = image
                 }
             } else {

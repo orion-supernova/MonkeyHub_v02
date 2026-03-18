@@ -91,34 +91,18 @@ private struct RoomRow: View {
     }
 
     private func loadAvatar() {
-        // Try persisted avatarURL first (resolving filename to current session's path)
-        if let avatarURL = room.avatarURL {
-            let filename = avatarURL.lastPathComponent
-            if let resolvedURL = AssetPersistenceService.shared.getURL(for: filename),
-               let data = try? Data(contentsOf: resolvedURL),
-               let image = PlatformImage.fromData(data) {
-                avatarImage = image
-                return
-            }
+        avatarImage = nil
+
+        if let avatarURL = room.avatarURL,
+           let image = PlatformImage.fromFile(avatarURL.path) {
+            avatarImage = image
+            return
         }
 
-        // Fallback: fetch from Convex storage if available
         if let storageId = room.avatarStorageId {
-            Task { await fetchAvatarFromConvex(storageId: storageId) }
-        }
-    }
-
-    private func fetchAvatarFromConvex(storageId: String) async {
-        do {
-            if let urlString = try await ConvexChatAPI.shared.getFileURL(storageId: storageId),
-               let url = URL(string: urlString) {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                if let image = PlatformImage.fromData(data) {
-                    await MainActor.run { avatarImage = image }
-                }
+            Task {
+                avatarImage = await ConvexFileCacheService.shared.image(for: storageId)
             }
-        } catch {
-            // Silently fail — show placeholder
         }
     }
 

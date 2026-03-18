@@ -144,14 +144,10 @@ struct SettingsView: View {
               let storageId = currentUser?.avatarStorageId else { return }
         isLoadingAvatar = true
         defer { isLoadingAvatar = false }
-        do {
-            guard let urlString = try await ConvexChatAPI.shared.getFileURL(storageId: storageId),
-                  let url = URL(string: urlString),
-                  let (data, _) = try? await URLSession.shared.data(from: url),
-                  let image = UIImage(data: data) else { return }
+        if let image = await ConvexFileCacheService.shared.image(for: storageId) {
             profileAvatarImage = image
-        } catch {
-            print("⚠️ SettingsView: could not load avatar: \(error)")
+        } else {
+            print("⚠️ SettingsView: could not load avatar for \(storageId)")
         }
     }
 
@@ -540,6 +536,9 @@ struct SettingsView: View {
                 catch { print("⚠️ Could not delete old avatar \(oldStorageId): \(error)") }
             }
             let storageId = try await ConvexChatAPI.shared.uploadFile(data: data, mimeType: "image/jpeg")
+            if let localURL = saveAvatarToLocalCache(data: data) {
+                ConvexFileCacheService.shared.replaceCachedFile(storageId: storageId, with: localURL)
+            }
             try await ConvexChatAPI.shared.updateUserAvatar(userId: user.id, storageId: storageId)
             // Update in-memory user so the next replacement knows the current storageId
             currentUser = ChatUser(
@@ -550,6 +549,23 @@ struct SettingsView: View {
             AlertManager.shared.showAlert(title: "Success", message: "Profile picture updated successfully")
         } catch {
             AlertManager.shared.showAlert(title: "Error", message: "Failed to update profile picture: \(error.localizedDescription)")
+        }
+    }
+
+    private func saveAvatarToLocalCache(data: Data) -> URL? {
+        let fileManager = FileManager.default
+        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let assetsDirectory = documentsDirectory.appendingPathComponent("ChatAssets", isDirectory: true)
+        if !fileManager.fileExists(atPath: assetsDirectory.path) {
+            try? fileManager.createDirectory(at: assetsDirectory, withIntermediateDirectories: true)
+        }
+
+        let fileURL = assetsDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        do {
+            try data.write(to: fileURL, options: .atomic)
+            return fileURL
+        } catch {
+            return nil
         }
     }
 }

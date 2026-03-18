@@ -132,6 +132,7 @@ class ChatRoomViewModel: ObservableObject {
 
         do {
             let storageId = try await ConvexChatAPI.shared.uploadFile(data: data, mimeType: "image/jpeg")
+            ConvexFileCacheService.shared.replaceCachedFile(storageId: storageId, with: localURL)
             // Replace temp optimistic with real one (same id → upsert overwrites it)
             let message = ChatMessage(
                 id: tempId, senderId: userId, senderName: userName,
@@ -157,6 +158,7 @@ class ChatRoomViewModel: ObservableObject {
 
         do {
             let storageId = try await ConvexChatAPI.shared.uploadFileFromURL(localURL, mimeType: "video/mp4")
+            ConvexFileCacheService.shared.replaceCachedFile(storageId: storageId, with: localURL)
             let message = ChatMessage(
                 id: tempId, senderId: userId, senderName: userName,
                 content: "🎥 Video", type: .video, roomId: roomId,
@@ -181,6 +183,7 @@ class ChatRoomViewModel: ObservableObject {
 
         do {
             let storageId = try await ConvexChatAPI.shared.uploadFileFromURL(localURL, mimeType: "audio/m4a")
+            ConvexFileCacheService.shared.replaceCachedFile(storageId: storageId, with: localURL)
             let message = ChatMessage(
                 id: tempId, senderId: userId, senderName: userName,
                 content: "🎵 Voice Message", type: .audio, roomId: roomId,

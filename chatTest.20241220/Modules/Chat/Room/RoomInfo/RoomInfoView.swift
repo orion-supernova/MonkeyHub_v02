@@ -92,12 +92,12 @@ struct RoomInfoView: View {
             .onDisappear { viewModel.stopSubscriptions() }
             .task(id: viewModel.room.avatarStorageId) {
                 roomAvatarImage = nil
-                guard let storageId = viewModel.room.avatarStorageId else { isLoadingRoomAvatar = false; return }
+                guard let storageId = viewModel.room.avatarStorageId else {
+                    isLoadingRoomAvatar = false
+                    return
+                }
                 isLoadingRoomAvatar = true
-                if let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
-                   let url = URL(string: urlString),
-                   let (data, _) = try? await URLSession.shared.data(from: url),
-                   let image = PlatformImage.fromData(data) {
+                if let image = await ConvexFileCacheService.shared.image(for: storageId) {
                     roomAvatarImage = image
                 }
                 isLoadingRoomAvatar = false
@@ -711,10 +711,7 @@ struct MemberRowView: View {
             .task(id: member.avatarStorageId) {
                 avatarImage = nil
                 guard let storageId = member.avatarStorageId else { return }
-                if let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
-                   let url = URL(string: urlString),
-                   let (data, _) = try? await URLSession.shared.data(from: url),
-                   let image = PlatformImage.fromData(data) {
+                if let image = await ConvexFileCacheService.shared.image(for: storageId) {
                     avatarImage = image
                 }
             }

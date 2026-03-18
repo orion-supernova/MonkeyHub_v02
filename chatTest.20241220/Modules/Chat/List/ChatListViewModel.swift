@@ -34,7 +34,13 @@ class ChatListViewModel: ObservableObject {
 
     func loadRooms() async {
         isLoading = true
-        await repository.fetchRooms()
+        await repository.ensureRoomsLoaded()
+        isLoading = false
+    }
+
+    func refreshRooms() async {
+        isLoading = true
+        await repository.fetchRooms(force: true)
         isLoading = false
     }
 

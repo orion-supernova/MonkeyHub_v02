@@ -35,6 +35,10 @@ struct ContentView: View {
         await viewModel.loadRooms()
     }
 
+    private func refreshData() async {
+        await viewModel.refreshRooms()
+    }
+
     private func createRoom(type: RoomType, messageLifetime: TimeInterval?) async {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         do {
@@ -492,7 +496,7 @@ struct ContentView: View {
             await loadData()
         }
         .refreshable {
-            await loadData()
+            await refreshData()
         }
         .alert("Sign Out", isPresented: $showingSignOutAlert) {
             Button("Cancel", role: .cancel) {}
@@ -641,12 +645,12 @@ struct EnhancedRoomCard: View {
                 .shadow(color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.2), radius: 4, y: 2)
                 .task(id: room.avatarStorageId) {
                     roomAvatarImage = nil
-                    guard let storageId = room.avatarStorageId else { isLoadingAvatar = false; return }
+                    guard let storageId = room.avatarStorageId else {
+                        isLoadingAvatar = false
+                        return
+                    }
                     isLoadingAvatar = true
-                    if let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
-                       let url = URL(string: urlString),
-                       let (data, _) = try? await URLSession.shared.data(from: url),
-                       let image = PlatformImage.fromData(data) {
+                    if let image = await ConvexFileCacheService.shared.image(for: storageId) {
                         roomAvatarImage = image
                     }
                     isLoadingAvatar = false

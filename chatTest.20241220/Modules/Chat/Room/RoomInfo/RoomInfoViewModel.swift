@@ -106,6 +106,9 @@ final class RoomInfoViewModel: ObservableObject {
                 catch { print("⚠️ Could not delete old room avatar \(oldStorageId): \(error)") }
             }
             let storageId = try await convexAPI.uploadFile(data: data, mimeType: "image/jpeg")
+            if let cachedURL = saveTempImage(data: data) {
+                ConvexFileCacheService.shared.replaceCachedFile(storageId: storageId, with: cachedURL)
+            }
             let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
             try await convexAPI.updateRoomAvatar(roomId: room.id, userId: userId, storageId: storageId)
             await sendSystemMessage("\(currentUserName()) updated the room avatar")
@@ -113,6 +116,23 @@ final class RoomInfoViewModel: ObservableObject {
             AlertManager.shared.showAlert(title: "Error", message: friendlyErrorMessage(error))
         }
         isUploadingAvatar = false
+    }
+
+    private func saveTempImage(data: Data) -> URL? {
+        let fileManager = FileManager.default
+        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let assetsDirectory = documentsDirectory.appendingPathComponent("ChatAssets", isDirectory: true)
+        if !fileManager.fileExists(atPath: assetsDirectory.path) {
+            try? fileManager.createDirectory(at: assetsDirectory, withIntermediateDirectories: true)
+        }
+
+        let fileURL = assetsDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        do {
+            try data.write(to: fileURL, options: .atomic)
+            return fileURL
+        } catch {
+            return nil
+        }
     }
 
     func updateMessageLifetime(_ seconds: TimeInterval) async {

@@ -613,9 +613,7 @@ private struct ConvexImageView: View {
 
     private func resolve() async {
         guard assetURL == nil, let storageId, resolvedURL == nil else { return }
-        guard let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
-              let url = URL(string: urlString) else { return }
-        resolvedURL = url
+        resolvedURL = await ConvexFileCacheService.shared.fileURL(for: storageId)
     }
 }
 
@@ -648,9 +646,7 @@ private struct ConvexVideoView: View {
 
     private func resolve() async {
         guard assetURL == nil, let storageId, resolvedURL == nil else { return }
-        guard let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
-              let url = URL(string: urlString) else { return }
-        resolvedURL = url
+        resolvedURL = await ConvexFileCacheService.shared.fileURL(for: storageId)
     }
 }
 
@@ -681,8 +677,6 @@ private struct ConvexAudioView: View {
 
     private func resolve() async {
         guard assetURL == nil, let storageId, resolvedURL == nil else { return }
-        guard let urlString = try? await ConvexChatAPI.shared.getFileURL(storageId: storageId),
-              let url = URL(string: urlString) else { return }
-        resolvedURL = url
+        resolvedURL = await ConvexFileCacheService.shared.fileURL(for: storageId)
     }
 }

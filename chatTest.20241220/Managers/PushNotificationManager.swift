@@ -4,15 +4,9 @@
 //
 //  Manages push notification registration via OneSignal (iOS SDK v5.x).
 //
-//  Responsibilities:
-//    • Initialize OneSignal at app launch
-//    • Associate the device with a user via OneSignal.login(_:) after sign-in
-//    • Disassociate on sign-out via OneSignal.logout()
-//    • Delegate incoming push payloads to ChatRepository.handleIncomingPush
-//    • Clear the badge count on demand
-//
-//  OneSignal manages APNs device-token registration automatically.
-//  No manual token storage or Convex mutation is needed for device tokens.
+//  The only job of this file is to call OneSignal.login(userId) at the right times
+//  so the device's push subscription is always linked to the authenticated user.
+//  The SDK handles APNs token registration, environment detection, and opt-in state.
 
 import Foundation
 import UserNotifications
@@ -21,65 +15,88 @@ import UIKit
 #endif
 #if os(iOS)
 import OneSignalFramework
+
+// MARK: - Subscription observer
+
+/// Fires whenever OneSignal creates or changes the push subscription on this device
+/// (e.g. new APNs token after an Xcode ↔ TestFlight environment switch).
+/// Re-calls login() so the new subscription is always linked to the current user.
+private final class PushSubscriptionObserver: NSObject, OSPushSubscriptionObserver {
+    func onPushSubscriptionDidChange(state: OSPushSubscriptionChangedState) {
+        guard let subId = state.current.id else { return }
+        guard let userId = ConvexAuthService.storedUserId, !userId.isEmpty else {
+            Swift.print("PushNotificationManager ⚠️ subscription ready (\(subId)) but no userId in Keychain")
+            return
+        }
+        DispatchQueue.main.async {
+            OneSignal.login(userId)
+            Swift.print("PushNotificationManager ✅ subscription changed (\(subId)) → re-linked \(userId)")
+        }
+    }
+}
 #endif
+
+// MARK: - Manager
 
 @MainActor
 final class PushNotificationManager {
 
-    // MARK: - Singleton
-
     static let shared = PushNotificationManager()
     private init() {}
 
-    // MARK: - Constants
-
     private let oneSignalAppId = "c191a9f0-15cf-402a-8a04-dcc16108f4b0"
+
+    #if os(iOS)
+    private let subscriptionObserver = PushSubscriptionObserver()
+    #endif
 
     // MARK: - Public API
 
-    /// Initialize OneSignal. Call this from AppDelegate.didFinishLaunchingWithOptions.
     #if os(iOS)
     func initialize(launchOptions: [UIApplication.LaunchOptionsKey: Any]?) {
         OneSignal.initialize(oneSignalAppId, withLaunchOptions: launchOptions)
+
+        // Register observer before login so any subscription change during init is caught.
+        OneSignal.User.pushSubscription.addObserver(subscriptionObserver)
+
+        // Link the authenticated user to this device's subscription.
+        // login() is idempotent — safe to call on every launch.
+        if let userId = ConvexAuthService.storedUserId, !userId.isEmpty {
+            OneSignal.login(userId)
+            Swift.print("PushNotificationManager ✅ login on launch — userId: \(userId)")
+        } else {
+            Swift.print("PushNotificationManager ℹ️ no stored userId — will login after sign-in")
+        }
+
         OneSignal.Notifications.requestPermission({ accepted in
-            print("PushNotificationManager: OneSignal permission accepted = \(accepted)")
+            Swift.print("PushNotificationManager ℹ️ push permission accepted = \(accepted)")
         }, fallbackToSettings: true)
     }
     #else
-    func initialize(launchOptions: [AnyHashable: Any]?) {
-        // OneSignal not supported on macOS — no-op
-    }
+    func initialize(launchOptions: [AnyHashable: Any]?) {}
     #endif
 
-    /// Associate this device with a user after successful login.
-    /// OneSignal uses this external ID to target pushes to a specific user.
+    /// Call after successful sign-in with the Convex user ID.
     func setExternalUserId(_ userId: String) {
         #if os(iOS)
         OneSignal.login(userId)
-        print("PushNotificationManager: OneSignal login with externalId = \(userId)")
+        Swift.print("PushNotificationManager ✅ setExternalUserId → login(\(userId))")
         #endif
     }
 
-    /// Disassociate this device from the current user after sign-out.
     func logout() {
         #if os(iOS)
         OneSignal.logout()
-        print("PushNotificationManager: OneSignal logout")
+        Swift.print("PushNotificationManager ℹ️ logout")
         #endif
     }
 
-    /// No-op: kept for call-site backward compatibility.
-    /// OneSignal manages token registration automatically — nothing to sync.
-    func syncStoredTokenIfNeeded() {
-        // No-op: OneSignal manages device token registration internally.
-    }
+    func syncStoredTokenIfNeeded() {}
 
-    /// Forward an incoming push payload to ChatRepository.
     func handleIncomingPush(_ userInfo: [AnyHashable: Any]) {
         ChatRepository.shared.handleIncomingPush(userInfo)
     }
 
-    /// Set the app-icon badge count to zero.
     func clearBadge() {
         BadgeManager.shared.updateBadge(count: 0)
     }

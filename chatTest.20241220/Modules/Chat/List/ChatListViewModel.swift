@@ -103,6 +103,16 @@ class ChatListViewModel: ObservableObject {
         }
     }
 
+    func removeFriend(_ friend: ChatUser) async {
+        let userId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
+        guard !userId.isEmpty else { return }
+        do {
+            try await convexAPI.removeFriend(userId: userId, friendId: friend.id)
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: AppLogger.shared.friendlyError(error))
+        }
+    }
+
     func reject(_ request: FriendRequest) async {
         let userId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
         guard !userId.isEmpty else { return }

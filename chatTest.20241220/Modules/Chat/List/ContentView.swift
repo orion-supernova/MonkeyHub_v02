@@ -391,6 +391,9 @@ struct ContentView: View {
                                         startFriendChat: { friend in
                                             directStartFriend = friend
                                         },
+                                        removeFriend: { friend in
+                                            Task { await viewModel.removeFriend(friend) }
+                                        },
                                         approveRequest: { request in
                                             Task { await viewModel.approve(request) }
                                         },

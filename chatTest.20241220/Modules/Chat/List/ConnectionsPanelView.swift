@@ -6,6 +6,7 @@ struct ConnectionsPanelView: View {
     let outgoingRequests: [FriendRequest]
     let selectedSection: ChatListViewModel.Section
     let startFriendChat: (ChatUser) -> Void
+    let removeFriend: (ChatUser) -> Void
     let approveRequest: (FriendRequest) -> Void
     let rejectRequest: (FriendRequest) -> Void
     let previewRequest: (FriendRequest) -> Void
@@ -46,7 +47,8 @@ struct ConnectionsPanelView: View {
                         accent: selectedTheme.colors(for: colorScheme).accent,
                         buttonTitle: "Open",
                         buttonRole: nil,
-                        action: { startFriendChat(friend) }
+                        action: { startFriendChat(friend) },
+                        removeAction: { removeFriend(friend) }
                     )
                 }
             }
@@ -122,6 +124,7 @@ private struct ConnectionUserCard: View {
     let buttonTitle: String
     let buttonRole: ButtonRole?
     let action: () -> Void
+    var removeAction: (() -> Void)? = nil
 
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
@@ -144,6 +147,10 @@ private struct ConnectionUserCard: View {
             Button(buttonTitle, role: buttonRole, action: action)
                 .buttonStyle(.borderedProminent)
                 .tint(accent)
+            if let removeAction {
+                Button("Remove", role: .destructive, action: removeAction)
+                    .buttonStyle(.bordered)
+            }
         }
         .padding(16)
         .background(

@@ -2,9 +2,13 @@ import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
-// Required Convex environment variables (set in Convex dashboard):
-//   ONESIGNAL_APP_ID   — your OneSignal App ID
-//   ONESIGNAL_API_KEY  — your OneSignal REST API key (from OneSignal dashboard → Settings → Keys & IDs)
+// Required Convex environment variables (set in Convex dashboard → Settings → Environment Variables):
+//   ONESIGNAL_API_KEY  — REST API key from OneSignal dashboard → Settings → Keys & IDs
+//
+// The App ID is hardcoded (same as PushNotificationManager.swift — not a secret).
+
+const ONESIGNAL_APP_ID = "c191a9f0-15cf-402a-8a04-dcc16108f4b0";
+const ONESIGNAL_BASE = "https://api.onesignal.com";
 
 export const sendMessagePush = internalAction({
   args: {
@@ -16,15 +20,16 @@ export const sendMessagePush = internalAction({
     type: v.string(),
   },
   handler: async (ctx, { roomId, senderId, senderName, content, type }) => {
-    const appId = process.env.ONESIGNAL_APP_ID;
     const apiKey = process.env.ONESIGNAL_API_KEY;
 
-    if (!appId || !apiKey) {
-      // Push not configured — skip silently
+    if (!apiKey) {
+      console.error(
+        "sendMessagePush: ONESIGNAL_API_KEY env var is not set — push skipped."
+      );
       return;
     }
 
-    // Fetch all room members except the sender (we only need their user IDs now)
+    // Fetch all room members except the sender
     const members: Array<{ userId: string }> = await ctx.runQuery(
       internal.rooms.getMemberIds,
       { roomId, excludeUserId: senderId }
@@ -32,7 +37,7 @@ export const sendMessagePush = internalAction({
 
     if (members.length === 0) return;
 
-    const externalUserIds = members.map((m) => m.userId.toString());
+    const externalIds = members.map((m) => m.userId.toString());
 
     const body =
       type === "text"
@@ -45,9 +50,17 @@ export const sendMessagePush = internalAction({
         ? "🎵 Audio"
         : "New message";
 
+    // Use the OneSignal v5 User Model API: target users by external_id via
+    // include_aliases + target_channel. This lets OneSignal resolve the correct
+    // subscription server-side — no client-side subscription ID fetch needed.
+    // This is the only approach that is race-condition free when a device switches
+    // between APNs environments (Xcode dev ↔ TestFlight prod).
     const payload = {
-      app_id: appId,
-      include_external_user_ids: externalUserIds,
+      app_id: ONESIGNAL_APP_ID,
+      target_channel: "push",
+      include_aliases: {
+        external_id: externalIds,
+      },
       headings: { en: senderName },
       contents: { en: body },
       data: {
@@ -59,24 +72,30 @@ export const sendMessagePush = internalAction({
       },
       ios_badgeType: "Increase",
       ios_badgeCount: 1,
-      // Attach the notification category so iOS renders the quick-reply action
       ios_category: "CHAT_MESSAGE",
     };
 
-    const response = await fetch("https://onesignal.com/api/v1/notifications", {
+    console.log(
+      `sendMessagePush: targeting ${externalIds.length} user(s) by external_id`
+    );
+
+    const response = await fetch(`${ONESIGNAL_BASE}/notifications`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Basic ${apiKey}`,
+        Authorization: `Key ${apiKey}`,
       },
       body: JSON.stringify(payload),
     });
 
+    const responseText = await response.text();
+
     if (!response.ok) {
-      const errorText = await response.text();
       console.error(
-        `OneSignal push failed (${response.status}): ${errorText}`
+        `sendMessagePush: OneSignal API error (HTTP ${response.status}): ${responseText}`
       );
+    } else {
+      console.log(`sendMessagePush: OneSignal accepted — ${responseText}`);
     }
   },
 });

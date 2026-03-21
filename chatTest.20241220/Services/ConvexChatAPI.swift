@@ -473,6 +473,13 @@ final class ConvexChatAPI {
         return roomId
     }
 
+    func removeFriend(userId: String, friendId: String) async throws {
+        try await convex.mutationVoid("friends:removeFriend", with: [
+            "userId": userId,
+            "friendId": friendId,
+        ])
+    }
+
     func rejectDirectRequest(userId: String, requesterId: String) async throws {
         try await convex.mutationVoid("friends:rejectDirectRequest", with: [
             "userId": userId,

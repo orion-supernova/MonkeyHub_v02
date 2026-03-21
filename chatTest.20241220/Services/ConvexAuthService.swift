@@ -82,6 +82,13 @@ final class ConvexAuthService: ObservableObject {
         KeychainService.get(keychainUserIdKey)
     }
 
+    /// Reads the stored user ID directly from Keychain without accessing the
+    /// shared singleton or triggering any initialization side-effects.
+    /// Safe to call from AppDelegate before SwiftUI starts.
+    nonisolated static var storedUserId: String? {
+        KeychainService.get("convex_userId")
+    }
+
     private func finishSession(response: AuthResponse) async {
         KeychainService.save(response.userId, for: keychainUserIdKey)
         userDefaults.set(response.userId, forKey: userIdUserDefaultsKey)

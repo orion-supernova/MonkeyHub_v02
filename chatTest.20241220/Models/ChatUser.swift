@@ -8,15 +8,19 @@ struct ChatUser: Identifiable, Hashable {
     let avatarStorageId: String?    // Convex storage ID
     let bio: String?
     let deviceTokens: [String]?
+    let friendshipStatus: FriendshipStatus
+    let requestId: String?
 
     init(
         id: String,
         name: String? = nil,
-        username: String = "",
-        email: String = "",
+        username: String,
+        email: String,
         avatarStorageId: String? = nil,
         bio: String? = nil,
-        deviceTokens: [String]? = nil
+        deviceTokens: [String]? = nil,
+        friendshipStatus: FriendshipStatus = .none,
+        requestId: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -25,6 +29,8 @@ struct ChatUser: Identifiable, Hashable {
         self.avatarStorageId = avatarStorageId
         self.bio = bio
         self.deviceTokens = deviceTokens
+        self.friendshipStatus = friendshipStatus
+        self.requestId = requestId
     }
 
     /// Best available display name — name, then username

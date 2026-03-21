@@ -11,6 +11,7 @@ struct SearchView: View {
     @State private var animateContent = false
     @State private var roomDetailsRoom: ChatRoom?
     @State private var passwordPromptRoom: ChatRoom?
+    @State private var directStartUser: ChatUser?
 
     var body: some View {
         NavigationStack {
@@ -35,6 +36,7 @@ struct SearchView: View {
                 }
             }
             .background(selectedTheme.colors(for: colorScheme).background)
+            .onDisappear { viewModel.cleanup() }
             .navigationTitle("Search")
             #if canImport(UIKit)
             .navigationBarTitleDisplayMode(.inline)
@@ -272,20 +274,11 @@ struct SearchView: View {
                         UsersListView(
                             users: viewModel.users,
                             selectUser: { user in
-                                Task {
-                                    let userId =
-                                        UserDefaults.standard.string(forKey: "userId") ?? ""
-                                    let roomId = try? await ConvexChatAPI.shared.getOrCreateDM(userId: userId, friendId: user.id)
-                                    let room = ChatRoom(
-                                        id: roomId ?? UUID().uuidString,
-                                        name: "Chat with \(user.displayName)",
-                                        createdBy: userId,
-                                        participants: [userId, user.id],
-                                        memberCount: 2
-                                    )
-                                    dismiss()
-                                    // Navigate to the newly created room
-                                    NavigationStateManager.shared.navigateToRoom(room)
+                                switch user.friendshipStatus {
+                                case .friend, .none, .outgoingPending:
+                                    directStartUser = user
+                                case .incomingPending:
+                                    viewModel.errorMessage = "\(user.displayName) already sent you a request. Open Requests to approve or deny it."
                                 }
                             }
                         )
@@ -335,6 +328,14 @@ struct SearchView: View {
                     await submitPasswordJoin(for: room, password: password)
                 }
             )
+        }
+        .sheet(item: $directStartUser) { user in
+            DirectRoomConfigurationSheet(
+                user: user,
+                actionTitle: user.friendshipStatus == .friend ? "Open Chat" : "Continue"
+            ) { roomType, messageLifetime in
+                await startDirectConversation(with: user, roomType: roomType, messageLifetime: messageLifetime)
+            }
         }
     }
 
@@ -388,6 +389,48 @@ struct SearchView: View {
         let data = Data(input.utf8)
         let hash = SHA256.hash(data: data)
         return hash.compactMap { String(format: "%02x", $0) }.joined()
+    }
+
+    private func startDirectConversation(with user: ChatUser, roomType: RoomType, messageLifetime: TimeInterval?) async {
+        let userId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
+
+        switch user.friendshipStatus {
+        case .friend:
+            do {
+                let roomId = try await ConvexChatAPI.shared.getOrCreateDM(
+                    userId: userId,
+                    friendId: user.id,
+                    roomType: roomType,
+                    messageLifetime: messageLifetime
+                )
+                let room = ChatRoom(
+                    id: roomId,
+                    name: "Chat with \(user.displayName)",
+                    createdBy: userId,
+                    participants: [userId, user.id],
+                    memberCount: 2,
+                    isPrivate: true,
+                    type: roomType,
+                    messageLifetime: messageLifetime
+                )
+                dismiss()
+                NavigationStateManager.shared.navigateToRoom(room)
+            } catch {
+                viewModel.errorMessage = AppLogger.shared.friendlyError(error)
+            }
+        case .none, .outgoingPending:
+            dismiss()
+            NavigationStateManager.shared.navigateToDraftChat(
+                DraftDirectChatSession(
+                    user: user,
+                    roomType: roomType,
+                    messageLifetime: messageLifetime,
+                    requestId: user.requestId
+                )
+            )
+        case .incomingPending:
+            viewModel.errorMessage = "\(user.displayName) already sent you a request. Open Requests to approve or deny it."
+        }
     }
 }
 

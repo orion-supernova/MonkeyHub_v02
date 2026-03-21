@@ -20,6 +20,9 @@ struct ContentView: View {
     @State private var availableRooms: [ChatRoom] = []
     @State private var isShowingSearchView = false
     @StateObject private var navigationState = NavigationStateManager.shared
+    @State private var selectedSection: ChatListViewModel.Section = .chats
+    @State private var directStartFriend: ChatUser?
+    @State private var previewRequest: FriendRequest?
 
     // MARK: - Keyboard Navigation (macOS)
     @State private var selectedRoomIndex: Int? = nil
@@ -153,9 +156,9 @@ struct ContentView: View {
     private var headerHeight: CGFloat {
         switch verticalSizeClass {
         case .compact:
-            return 200  // Landscape mode
+            return 240  // Landscape mode
         default:
-            return 260  // Portrait mode
+            return 320  // Portrait mode
         }
     }
 
@@ -184,7 +187,7 @@ struct ContentView: View {
                                 // Title and room count
                                 HStack {
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text("Chat Rooms")
+                                        Text(selectedSection == .chats ? "Chat Rooms" : selectedSection.rawValue)
                                             .font(
                                                 .system(
                                                     size: verticalSizeClass == .compact ? 28 : 34,
@@ -195,7 +198,7 @@ struct ContentView: View {
                                                 selectedTheme.colors(for: colorScheme).text)
 
                                         Text(
-                                            "\(viewModel.myRooms.count) Active Room\(viewModel.myRooms.count == 1 ? "" : "s")"
+                                            sectionSummary
                                         )
                                         .font(.subheadline)
                                         .foregroundStyle(
@@ -290,17 +293,15 @@ struct ContentView: View {
 #endif
                                     }
                                 }
-                                .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
-#if os(macOS)
-                                .buttonStyle(.plain)
-#endif
+
+                                sectionSelector
                             }
                             .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
-                            .padding(.bottom, verticalSizeClass == .compact ? 16 : 24)
+                            .padding(.bottom, verticalSizeClass == .compact ? 36 : 44)
 
-                            // Rooms list
+                            // Main content
                             LazyVStack(spacing: 16) {
-                                if viewModel.myRooms.isEmpty {
+                                if selectedSection == .chats && viewModel.myRooms.isEmpty {
                                     if viewModel.isLoading {
                                         VStack(spacing: 16) {
                                             ProgressView()
@@ -340,7 +341,7 @@ struct ContentView: View {
                                         .frame(maxWidth: .infinity)
                                         .padding(40)
                                     }
-                                } else {
+                                } else if selectedSection == .chats {
                                     VStack(spacing: 24) {
                                         // Section header
                                         HStack {
@@ -381,8 +382,37 @@ struct ContentView: View {
                                         .padding(
                                             .horizontal, horizontalSizeClass == .regular ? 32 : 16)
                                     }
+                                } else {
+                                    ConnectionsPanelView(
+                                        friends: viewModel.friends,
+                                        incomingRequests: viewModel.incomingRequests,
+                                        outgoingRequests: viewModel.outgoingRequests,
+                                        selectedSection: selectedSection,
+                                        startFriendChat: { friend in
+                                            directStartFriend = friend
+                                        },
+                                        approveRequest: { request in
+                                            Task { await viewModel.approve(request) }
+                                        },
+                                        rejectRequest: { request in
+                                            Task { await viewModel.reject(request) }
+                                        },
+                                        previewRequest: { request in
+                                            previewRequest = request
+                                        },
+                                        openOutgoingRequest: { request in
+                                            navigationState.path.append(
+                                                DraftDirectChatSession(
+                                                    user: request.user,
+                                                    roomType: request.roomType,
+                                                    messageLifetime: request.messageLifetime,
+                                                    requestId: request.id
+                                                )
+                                            )
+                                        }
+                                    )
                                 }
-                            }
+                        }
                             .padding(.top, 16)
                             .background(
                                 ZStack {
@@ -415,6 +445,9 @@ struct ContentView: View {
                         viewModel.clearUnread(for: room.id)
                     }
             }
+            .navigationDestination(for: DraftDirectChatSession.self) { draft in
+                FriendRequestDraftView(session: draft)
+            }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenChatRoom"))) { notification in
                 // Handle room object passed directly (for newly joined rooms from search)
                 if let room = notification.userInfo?["room"] as? ChatRoom {
@@ -429,6 +462,11 @@ struct ContentView: View {
                     if let room = viewModel.myRooms.first(where: { $0.id == roomId }) {
                         navigationState.path.append(room)
                     }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenDraftChat"))) { notification in
+                if let draft = notification.userInfo?["draft"] as? DraftDirectChatSession {
+                    navigationState.path.append(draft)
                 }
             }
             .background(selectedTheme.colors(for: colorScheme).background)
@@ -491,6 +529,25 @@ struct ContentView: View {
                 }
             }) {
                 SearchView()
+            }
+            .sheet(item: $previewRequest) { request in
+                FriendRequestPreviewView(
+                    request: request,
+                    approve: {
+                        await viewModel.approve(request)
+                    },
+                    reject: {
+                        await viewModel.reject(request)
+                    }
+                )
+            }
+            .sheet(item: $directStartFriend) { friend in
+                DirectRoomConfigurationSheet(
+                    user: friend,
+                    actionTitle: "Open Chat"
+                ) { roomType, messageLifetime in
+                    await startFriendConversation(with: friend, roomType: roomType, messageLifetime: messageLifetime)
+                }
             }
         }
         .task {
@@ -586,7 +643,12 @@ struct ContentView: View {
     private func createPrivateRoom(with friend: ChatUser) async {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         do {
-            let roomId = try await ConvexChatAPI.shared.getOrCreateDM(userId: userId, friendId: friend.id)
+            let roomId = try await ConvexChatAPI.shared.getOrCreateDM(
+                userId: userId,
+                friendId: friend.id,
+                roomType: .regular,
+                messageLifetime: nil
+            )
             let room = ChatRoom(
                 id: roomId,
                 name: "Chat with \(friend.displayName)",
@@ -597,6 +659,87 @@ struct ContentView: View {
             viewModel.addRoomOptimistically(room)
         } catch {
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+        }
+    }
+
+    private var sectionSummary: String {
+        switch selectedSection {
+        case .chats:
+            return "\(viewModel.myRooms.count) Active Room\(viewModel.myRooms.count == 1 ? "" : "s")"
+        case .friends:
+            return "\(viewModel.friends.count) Friend\(viewModel.friends.count == 1 ? "" : "s")"
+        case .requests:
+            return "\(viewModel.totalPendingRequestCount) Pending Request\(viewModel.totalPendingRequestCount == 1 ? "" : "s")"
+        }
+    }
+
+    private var sectionSelector: some View {
+        HStack(spacing: 0) {
+            ForEach(ChatListViewModel.Section.allCases, id: \.self) { section in
+                Button {
+                    withAnimation(.spring(duration: 0.25)) {
+                        selectedSection = section
+                    }
+                } label: {
+                    VStack(spacing: 6) {
+                        Label(section.rawValue, systemImage: section.icon)
+                            .font(.subheadline.bold())
+                        if section == .requests && viewModel.totalPendingRequestCount > 0 {
+                            Text("\(viewModel.totalPendingRequestCount)")
+                                .font(.caption.bold())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.orange.opacity(0.18), in: Capsule())
+                        }
+                    }
+                    .foregroundStyle(
+                        selectedSection == section
+                            ? selectedTheme.colors(for: colorScheme).text
+                            : selectedTheme.colors(for: colorScheme).text.opacity(0.6)
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(
+                        selectedSection == section
+                            ? selectedTheme.colors(for: colorScheme).headerOverlay
+                            : Color.clear
+                    )
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(selectedTheme.colors(for: colorScheme).headerOverlay.opacity(0.6))
+        .clipShape(Capsule())
+    }
+
+    private func startFriendConversation(with friend: ChatUser, roomType: RoomType, messageLifetime: TimeInterval?) async {
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+
+        do {
+            let roomId = try await ConvexChatAPI.shared.getOrCreateDM(
+                userId: userId,
+                friendId: friend.id,
+                roomType: roomType,
+                messageLifetime: messageLifetime
+            )
+            let room = ChatRoom(
+                id: roomId,
+                name: "Chat with \(friend.displayName)",
+                createdBy: userId,
+                participants: [userId, friend.id],
+                memberCount: 2,
+                isPrivate: true,
+                type: roomType,
+                messageLifetime: messageLifetime
+            )
+            if !viewModel.myRooms.contains(where: { $0.id == room.id }) {
+                viewModel.addRoomOptimistically(room)
+            }
+            navigationState.path.append(room)
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: AppLogger.shared.friendlyError(error))
         }
     }
 }

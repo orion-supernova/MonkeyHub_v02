@@ -52,20 +52,54 @@ export const searchUsers = query({
   args: { query: v.string(), currentUserId: v.id("users") },
   handler: async (ctx, { query: q, currentUserId }) => {
     const users = await ctx.db.query("users").collect();
-    return users
+    const filtered = users
       .filter(
         (u) =>
           u._id !== currentUserId &&
           (u.username.toLowerCase().includes(q.toLowerCase()) ||
             (u.name ?? "").toLowerCase().includes(q.toLowerCase()))
       )
-      .slice(0, 20)
-      .map((u) => ({
-        _id: u._id,
-        username: u.username,
-        name: u.name ?? u.username,
-        status: u.status,
-        avatarStorageId: u.avatarStorageId,
-      }));
+      .slice(0, 20);
+
+    const enriched = await Promise.all(
+      filtered.map(async (u) => {
+        const outgoing = await ctx.db
+          .query("friendships")
+          .withIndex("by_pair", (query) =>
+            query.eq("userId", currentUserId).eq("friendId", u._id)
+          )
+          .first();
+        const incoming = await ctx.db
+          .query("friendships")
+          .withIndex("by_pair", (query) =>
+            query.eq("userId", u._id).eq("friendId", currentUserId)
+          )
+          .first();
+
+        let friendshipStatus = "none";
+        let requestId = undefined;
+        if (outgoing?.status === "accepted" || incoming?.status === "accepted") {
+          friendshipStatus = "friend";
+        } else if (outgoing?.status === "pending") {
+          friendshipStatus = "outgoingPending";
+          requestId = outgoing._id;
+        } else if (incoming?.status === "pending") {
+          friendshipStatus = "incomingPending";
+          requestId = incoming._id;
+        }
+
+        return {
+          _id: u._id,
+          username: u.username,
+          name: u.name ?? u.username,
+          status: u.status,
+          avatarStorageId: u.avatarStorageId,
+          friendshipStatus,
+          requestId,
+        };
+      })
+    );
+
+    return enriched;
   },
 });

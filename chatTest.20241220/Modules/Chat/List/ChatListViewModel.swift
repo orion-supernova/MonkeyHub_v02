@@ -3,12 +3,33 @@ import Combine
 
 @MainActor
 class ChatListViewModel: ObservableObject {
+    enum Section: String, CaseIterable {
+        case chats = "Chats"
+        case friends = "Friends"
+        case requests = "Requests"
+
+        var icon: String {
+            switch self {
+            case .chats:
+                return "bubble.left.and.bubble.right.fill"
+            case .friends:
+                return "person.2.fill"
+            case .requests:
+                return "person.badge.plus"
+            }
+        }
+    }
+
     @Published var myRooms: [ChatRoom] = []
     @Published var unreadCounts: [String: Int] = [:]
     @Published var roomListTyping: [String: [String]] = [:]
     @Published var isLoading = false
+    @Published var friends: [ChatUser] = []
+    @Published var incomingRequests: [FriendRequest] = []
+    @Published var outgoingRequests: [FriendRequest] = []
 
     private let repository = ChatRepository.shared
+    private let convexAPI = ConvexChatAPI.shared
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -30,6 +51,21 @@ class ChatListViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .assign(to: \.roomListTyping, on: self)
             .store(in: &cancellables)
+
+        repository.$friends
+            .receive(on: DispatchQueue.main)
+            .assign(to: \.friends, on: self)
+            .store(in: &cancellables)
+
+        repository.$incomingRequests
+            .receive(on: DispatchQueue.main)
+            .assign(to: \.incomingRequests, on: self)
+            .store(in: &cancellables)
+
+        repository.$outgoingRequests
+            .receive(on: DispatchQueue.main)
+            .assign(to: \.outgoingRequests, on: self)
+            .store(in: &cancellables)
     }
 
     func loadRooms() async {
@@ -42,6 +78,44 @@ class ChatListViewModel: ObservableObject {
         isLoading = true
         await repository.fetchRooms(force: true)
         isLoading = false
+    }
+
+    func approve(_ request: FriendRequest) async {
+        let userId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
+        guard !userId.isEmpty else { return }
+
+        do {
+            let roomId = try await convexAPI.approveDirectRequest(userId: userId, requesterId: request.user.id)
+            let room = ChatRoom(
+                id: roomId,
+                name: "Chat with \(request.user.displayName)",
+                createdBy: request.user.id,
+                participants: [userId, request.user.id],
+                memberCount: 2,
+                isPrivate: true,
+                type: request.roomType,
+                messageLifetime: request.messageLifetime
+            )
+            repository.addRoomOptimistically(room)
+            NavigationStateManager.shared.navigateToRoom(room)
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: AppLogger.shared.friendlyError(error))
+        }
+    }
+
+    func reject(_ request: FriendRequest) async {
+        let userId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
+        guard !userId.isEmpty else { return }
+
+        do {
+            try await convexAPI.rejectDirectRequest(userId: userId, requesterId: request.user.id)
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: AppLogger.shared.friendlyError(error))
+        }
+    }
+
+    var totalPendingRequestCount: Int {
+        incomingRequests.count + outgoingRequests.count
     }
 
     func addRoomOptimistically(_ room: ChatRoom) {

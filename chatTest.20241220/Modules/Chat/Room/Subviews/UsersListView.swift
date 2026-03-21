@@ -120,30 +120,23 @@ struct UserRow: View {
                 .font(.headline)
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
 
-            Text("Tap to start chatting")
+            Text(statusSubtitle)
                 .font(.caption)
-                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                .foregroundStyle(statusColor)
         }
     }
 
     private var messageIcon: some View {
-        Image(systemName: "message.circle.fill")
-            .font(.title3)
-            .foregroundStyle(
-                LinearGradient(
-                    colors: [
-                        selectedTheme.colors(for: colorScheme).accent,
-                        selectedTheme.colors(for: colorScheme).accent.opacity(0.8),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .shadow(
-                color: selectedTheme.colors(for: colorScheme).accent.opacity(0.3),
-                radius: 4,
-                y: 2
-            )
+        HStack(spacing: 6) {
+            Image(systemName: statusIcon)
+                .font(.caption.bold())
+            Text(user.friendshipStatus.actionLabel)
+                .font(.caption.bold())
+        }
+        .foregroundStyle(statusColor)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(statusColor.opacity(0.12), in: Capsule())
     }
 
     private var cardBackground: some View {
@@ -171,6 +164,43 @@ struct UserRow: View {
                 ),
                 lineWidth: 1
             )
+    }
+
+    private var statusSubtitle: String {
+        switch user.friendshipStatus {
+        case .none:
+            return "Choose a room type, then send a friend request with your first message."
+        case .friend:
+            return "Choose Regular Room or Chamber of Secrets."
+        case .outgoingPending:
+            return "Friend request already sent."
+        case .incomingPending:
+            return "This user already sent you a request."
+        }
+    }
+
+    private var statusIcon: String {
+        switch user.friendshipStatus {
+        case .none:
+            return "paperplane.fill"
+        case .friend:
+            return "bubble.left.and.bubble.right.fill"
+        case .outgoingPending:
+            return "clock.fill"
+        case .incomingPending:
+            return "person.badge.plus"
+        }
+    }
+
+    private var statusColor: Color {
+        switch user.friendshipStatus {
+        case .none:
+            return selectedTheme.colors(for: colorScheme).accent
+        case .friend:
+            return .green
+        case .outgoingPending, .incomingPending:
+            return .orange
+        }
     }
 }
 

@@ -280,28 +280,32 @@ export const getRoom = query({
 });
 
 export const getOrCreateDM = mutation({
-  args: { userId: v.id("users"), friendId: v.id("users") },
-  handler: async (ctx, { userId, friendId }) => {
+  args: {
+    userId: v.id("users"),
+    friendId: v.id("users"),
+    roomType: v.optional(v.string()),
+    messageLifetime: v.optional(v.number()),
+  },
+  handler: async (ctx, { userId, friendId, roomType, messageLifetime }) => {
     if (userId.toString() === friendId.toString()) throw new Error("CANNOT_DM_SELF");
 
-    // Check for existing private room with both users
-    const memberships = await ctx.db
-      .query("roomMembers")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .collect();
+    const acceptedForward = await ctx.db
+      .query("friendships")
+      .withIndex("by_pair", (q) => q.eq("userId", userId).eq("friendId", friendId))
+      .first();
+    const acceptedReverse = await ctx.db
+      .query("friendships")
+      .withIndex("by_pair", (q) => q.eq("userId", friendId).eq("friendId", userId))
+      .first();
 
-    for (const m of memberships) {
-      const room = await ctx.db.get(m.roomId);
-      if (!room || !room.isPrivate) continue;
-      const friendMembership = await ctx.db
-        .query("roomMembers")
-        .withIndex("by_room_user", (q) => q.eq("roomId", m.roomId).eq("userId", friendId))
-        .first();
-      if (friendMembership) return m.roomId;
-    }
+    const isAccepted =
+      acceptedForward?.status === "accepted" || acceptedReverse?.status === "accepted";
+    if (!isAccepted) throw new Error("FRIENDSHIP_REQUIRED");
 
+    const resolvedRoomType = roomType ?? "Regular Room";
+    const roomKey = resolvedRoomType === "Chamber of Secrets" ? "secret" : "regular";
     const ordered = [userId.toString(), friendId.toString()].sort();
-    const name = `dm:${ordered[0]}:${ordered[1]}`;
+    const name = `dm:${roomKey}:${ordered[0]}:${ordered[1]}`;
 
     const existingByName = await ctx.db
       .query("rooms")
@@ -309,13 +313,23 @@ export const getOrCreateDM = mutation({
       .first();
     if (existingByName) return existingByName._id;
 
+    if (roomKey === "regular") {
+      const legacyName = `dm:${ordered[0]}:${ordered[1]}`;
+      const legacyRoom = await ctx.db
+        .query("rooms")
+        .withIndex("by_name", (q) => q.eq("name", legacyName))
+        .first();
+      if (legacyRoom) return legacyRoom._id;
+    }
+
     const roomId = await ctx.db.insert("rooms", {
       name,
       createdBy: userId,
       createdAt: Date.now(),
       isPrivate: true,
       memberCount: 2,
-      type: "regular",
+      type: resolvedRoomType,
+      messageLifetime,
     });
 
     await ctx.db.insert("roomMembers", { roomId, userId, joinedAt: Date.now(), role: "owner" });

@@ -21,6 +21,8 @@ final class ConvexAuthService: ObservableObject {
             isAuthenticated = true
             // Load cached user profile in background
             Task { await loadCachedUserProfile(userId: storedId) }
+            // Start real-time subscriptions
+            ConvexSubscriptionManager.shared.subscribeToRooms(userId: storedId)
             // Re-associate this device with the logged-in user in OneSignal.
             // Deferred to next run-loop tick so ConvexAuthService.shared is fully
             // initialised before PushNotificationManager accesses currentUserId.
@@ -63,6 +65,8 @@ final class ConvexAuthService: ObservableObject {
         Task {
             try? await convex.mutationVoid("auth:logout", with: ["userId": userId])
         }
+        // Stop all subscriptions
+        ConvexSubscriptionManager.shared.clearAll()
         // Disassociate this device from the user in OneSignal before clearing credentials.
         PushNotificationManager.shared.logout()
         KeychainService.delete(keychainUserIdKey)
@@ -84,6 +88,9 @@ final class ConvexAuthService: ObservableObject {
         userDefaults.set(response.name, forKey: "userName")
         isAuthenticated = true
         await loadCachedUserProfile(userId: response.userId)
+
+        // Start real-time subscriptions
+        ConvexSubscriptionManager.shared.subscribeToRooms(userId: response.userId)
 
         // Associate this device with the newly authenticated user in OneSignal.
         // OneSignal.initialize was already called at app launch — this just links the user.

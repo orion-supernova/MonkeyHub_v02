@@ -19,9 +19,14 @@ final class ConvexSubscriptionManager: ObservableObject {
     private var roomListTypingSubscription: AnyCancellable?
     private var messagesSubscription: AnyCancellable?
     private var typingSubscription: AnyCancellable?
+    private var friendsSubscription: AnyCancellable?
+    private var incomingRequestsSubscription: AnyCancellable?
+    private var outgoingRequestsSubscription: AnyCancellable?
+    private var requestMessagesSubscription: AnyCancellable?
 
     private var activeRoomId: String?
     private var activeUserId: String?
+    private var activeRequestId: String?
 
     private init() {}
 
@@ -33,6 +38,9 @@ final class ConvexSubscriptionManager: ObservableObject {
         activeUserId = userId
         roomsSubscription?.cancel()
         roomListTypingSubscription?.cancel()
+        friendsSubscription?.cancel()
+        incomingRequestsSubscription?.cancel()
+        outgoingRequestsSubscription?.cancel()
 
         roomsSubscription = client
             .subscribe(to: "rooms:listUserRooms", with: ["userId": userId], yielding: [ConvexRoomDoc].self)
@@ -54,6 +62,76 @@ final class ConvexSubscriptionManager: ObservableObject {
                     self?.repository.handleRoomListTypingUpdate(typingMap)
                 }
             )
+
+        friendsSubscription = client
+            .subscribe(to: "friends:listFriends", with: ["userId": userId], yielding: [ConvexUserDoc].self)
+            .receive(on: RunLoop.main)
+            .sink(
+                receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        AppLogger.shared.logError("friends:listFriends subscription", error)
+                    }
+                },
+                receiveValue: { [weak self] docs in
+                    self?.repository.handleFriendsUpdate(docs.map { $0.toChatUser() })
+                }
+            )
+
+        incomingRequestsSubscription = client
+            .subscribe(to: "friends:listIncomingDirectRequests", with: ["userId": userId], yielding: [ConvexFriendRequestDoc].self)
+            .receive(on: RunLoop.main)
+            .sink(
+                receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        AppLogger.shared.logError("friends:listIncomingDirectRequests subscription", error)
+                    }
+                },
+                receiveValue: { [weak self] docs in
+                    self?.repository.handleIncomingRequestsUpdate(docs.map { $0.toFriendRequest() })
+                }
+            )
+
+        outgoingRequestsSubscription = client
+            .subscribe(to: "friends:listOutgoingDirectRequests", with: ["userId": userId], yielding: [ConvexFriendRequestDoc].self)
+            .receive(on: RunLoop.main)
+            .sink(
+                receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        AppLogger.shared.logError("friends:listOutgoingDirectRequests subscription", error)
+                    }
+                },
+                receiveValue: { [weak self] docs in
+                    self?.repository.handleOutgoingRequestsUpdate(docs.map { $0.toFriendRequest() })
+                }
+            )
+    }
+
+    // MARK: - Request Messages Subscription
+
+    func subscribeToRequestMessages(_ requestId: String) {
+        guard activeRequestId != requestId else { return }
+        unsubscribeFromRequestMessages()
+        activeRequestId = requestId
+
+        requestMessagesSubscription = client
+            .subscribe(to: "friends:listDirectRequestMessages", with: ["requestId": requestId], yielding: [ConvexFriendRequestMessageDoc].self)
+            .receive(on: RunLoop.main)
+            .sink(
+                receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        AppLogger.shared.logError("friends:listDirectRequestMessages subscription", error)
+                    }
+                },
+                receiveValue: { [weak self] docs in
+                    self?.repository.handleRequestMessagesUpdate(docs.map { $0.toMessage() }, for: requestId)
+                }
+            )
+    }
+
+    func unsubscribeFromRequestMessages() {
+        requestMessagesSubscription?.cancel()
+        requestMessagesSubscription = nil
+        activeRequestId = nil
     }
 
     // MARK: - Active Room Subscriptions

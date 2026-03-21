@@ -32,6 +32,14 @@ class NavigationStateManager: ObservableObject {
         )
     }
 
+    func navigateToDraftChat(_ draft: DraftDirectChatSession) {
+        NotificationCenter.default.post(
+            name: NSNotification.Name("OpenDraftChat"),
+            object: nil,
+            userInfo: ["draft": draft]
+        )
+    }
+
     var shouldShowFloatingMenu: Bool {
         // Only show if we are on root View and not deep in navigation
         return (currentScreen == .home || currentScreen == .feedView || currentScreen == .settings) && path.isEmpty

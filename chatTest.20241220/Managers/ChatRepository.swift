@@ -14,11 +14,16 @@ class ChatRepository: ObservableObject {
     @Published var activeRoomMessages: [ChatMessage] = []
     @Published var unreadCounts: [String: Int] = [:]
     @Published var roomListTyping: [String: [String]] = [:]  // roomId → [typer names]
+    @Published var friends: [ChatUser] = []
+    @Published var incomingRequests: [FriendRequest] = []
+    @Published var outgoingRequests: [FriendRequest] = []
+    @Published var activeRequestMessages: [FriendRequestMessage] = []
 
     // MARK: - Dependencies
     private let convexAPI = ConvexChatAPI.shared
     private let persistence = MessagePersistenceService.shared
     private var activeRoomId: String?
+    private var activeRequestId: String?
     private var hasPerformedInitialRoomFetch = false
 
     private init() {
@@ -28,6 +33,47 @@ class ChatRepository: ObservableObject {
     }
 
     // MARK: - Subscription Callbacks (called by ConvexSubscriptionManager)
+
+    func handleFriendsUpdate(_ updatedFriends: [ChatUser]) {
+        withAnimation {
+            friends = updatedFriends.sorted {
+                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            }
+        }
+        NotificationCenter.default.post(name: .friendRequestsUpdated, object: nil)
+    }
+
+    func handleIncomingRequestsUpdate(_ updatedRequests: [FriendRequest]) {
+        withAnimation {
+            incomingRequests = updatedRequests.sorted { $0.createdAt > $1.createdAt }
+        }
+        updateGlobalBadge()
+        NotificationCenter.default.post(name: .friendRequestsUpdated, object: nil)
+    }
+
+    func handleOutgoingRequestsUpdate(_ updatedRequests: [FriendRequest]) {
+        withAnimation {
+            outgoingRequests = updatedRequests.sorted { $0.createdAt > $1.createdAt }
+        }
+        NotificationCenter.default.post(name: .friendRequestsUpdated, object: nil)
+    }
+
+    func handleRequestMessagesUpdate(_ messages: [FriendRequestMessage], for requestId: String) {
+        guard requestId == activeRequestId else { return }
+        withAnimation {
+            activeRequestMessages = messages.sorted { $0.createdAt < $1.createdAt }
+        }
+    }
+
+    func setActiveRequest(_ requestId: String?) {
+        activeRequestId = requestId
+        if let requestId {
+            ConvexSubscriptionManager.shared.subscribeToRequestMessages(requestId)
+        } else {
+            ConvexSubscriptionManager.shared.unsubscribeFromRequestMessages()
+            activeRequestMessages = []
+        }
+    }
 
     /// Called when Convex room list subscription delivers updated rooms.
     func handleRoomsUpdate(_ updatedRooms: [ChatRoom]) {
@@ -147,7 +193,8 @@ class ChatRepository: ObservableObject {
 
     private func updateGlobalBadge() {
         let validIds = Set(rooms.map { $0.id })
-        let total = unreadCounts.filter { validIds.contains($0.key) }.values.reduce(0, +)
+        let roomUnreads = unreadCounts.filter { validIds.contains($0.key) }.values.reduce(0, +)
+        let total = roomUnreads + incomingRequests.count
         BadgeManager.shared.updateBadge(count: total)
     }
 

@@ -116,6 +116,8 @@ struct ConvexUserDoc: Decodable {
     let avatarStorageId: String?
     let status: String?
     let deviceTokens: [String]?
+    let friendshipStatus: String?
+    let requestId: String?
 
     func toChatUser() -> ChatUser {
         ChatUser(
@@ -125,7 +127,45 @@ struct ConvexUserDoc: Decodable {
             email: email ?? "",
             avatarStorageId: avatarStorageId,
             bio: bio,
-            deviceTokens: deviceTokens
+            deviceTokens: deviceTokens,
+            friendshipStatus: FriendshipStatus(rawValue: friendshipStatus ?? "none") ?? .none,
+            requestId: requestId
+        )
+    }
+}
+
+struct ConvexFriendRequestDoc: Decodable {
+    let _id: String
+    let createdAt: Double
+    let roomType: String
+    let messageLifetime: Double?
+    let initialMessage: String
+    let user: ConvexUserDoc
+
+    func toFriendRequest() -> FriendRequest {
+        FriendRequest(
+            id: _id,
+            user: user.toChatUser(),
+            roomType: RoomType(rawValue: roomType) ?? .regular,
+            messageLifetime: messageLifetime,
+            initialMessage: initialMessage,
+            createdAt: Date(timeIntervalSince1970: createdAt / 1000)
+        )
+    }
+}
+
+struct ConvexFriendRequestMessageDoc: Decodable {
+    let _id: String
+    let userId: String
+    let content: String
+    let createdAt: Double
+
+    func toMessage() -> FriendRequestMessage {
+        FriendRequestMessage(
+            id: _id,
+            userId: userId,
+            content: content,
+            createdAt: Date(timeIntervalSince1970: createdAt / 1000)
         )
     }
 }
@@ -216,11 +256,21 @@ final class ConvexChatAPI {
         return docs.map { $0.toChatUser() }
     }
 
-    func getOrCreateDM(userId: String, friendId: String) async throws -> String {
-        let roomId: String = try await convex.mutation("rooms:getOrCreateDM", with: [
+    func getOrCreateDM(
+        userId: String,
+        friendId: String,
+        roomType: RoomType = .regular,
+        messageLifetime: TimeInterval? = nil
+    ) async throws -> String {
+        var args: [String: ConvexEncodable?] = [
             "userId": userId,
-            "friendId": friendId
-        ])
+            "friendId": friendId,
+            "roomType": roomType.rawValue,
+        ]
+        if let messageLifetime {
+            args["messageLifetime"] = messageLifetime
+        }
+        let roomId: String = try await convex.mutation("rooms:getOrCreateDM", with: args)
         return roomId
     }
 
@@ -370,6 +420,80 @@ final class ConvexChatAPI {
             "currentUserId": currentUserId
         ])
         return docs.map { $0.toChatUser() }
+    }
+
+    func fetchFriends(userId: String) async throws -> [ChatUser] {
+        let docs: [ConvexUserDoc] = try await convex.queryOnce("friends:listFriends", with: [
+            "userId": userId
+        ])
+        return docs.map { $0.toChatUser() }
+    }
+
+    func fetchIncomingDirectRequests(userId: String) async throws -> [FriendRequest] {
+        let docs: [ConvexFriendRequestDoc] = try await convex.queryOnce(
+            "friends:listIncomingDirectRequests",
+            with: ["userId": userId]
+        )
+        return docs.map { $0.toFriendRequest() }
+    }
+
+    func fetchOutgoingDirectRequests(userId: String) async throws -> [FriendRequest] {
+        let docs: [ConvexFriendRequestDoc] = try await convex.queryOnce(
+            "friends:listOutgoingDirectRequests",
+            with: ["userId": userId]
+        )
+        return docs.map { $0.toFriendRequest() }
+    }
+
+    func createDirectRequest(
+        userId: String,
+        friendId: String,
+        roomType: RoomType,
+        messageLifetime: TimeInterval?,
+        initialMessage: String
+    ) async throws -> String {
+        var args: [String: ConvexEncodable?] = [
+            "userId": userId,
+            "friendId": friendId,
+            "roomType": roomType.rawValue,
+            "initialMessage": initialMessage,
+        ]
+        if let messageLifetime {
+            args["messageLifetime"] = messageLifetime
+        }
+        let requestId: String = try await convex.mutation("friends:createDirectRequest", with: args)
+        return requestId
+    }
+
+    func approveDirectRequest(userId: String, requesterId: String) async throws -> String {
+        let roomId: String = try await convex.mutation("friends:approveDirectRequest", with: [
+            "userId": userId,
+            "requesterId": requesterId,
+        ])
+        return roomId
+    }
+
+    func rejectDirectRequest(userId: String, requesterId: String) async throws {
+        try await convex.mutationVoid("friends:rejectDirectRequest", with: [
+            "userId": userId,
+            "requesterId": requesterId,
+        ])
+    }
+
+    func appendDirectRequestMessage(requestId: String, userId: String, content: String) async throws {
+        try await convex.mutationVoid("friends:appendDirectRequestMessage", with: [
+            "requestId": requestId,
+            "userId": userId,
+            "content": content,
+        ])
+    }
+
+    func fetchDirectRequestMessages(requestId: String) async throws -> [FriendRequestMessage] {
+        let docs: [ConvexFriendRequestMessageDoc] = try await convex.queryOnce(
+            "friends:listDirectRequestMessages",
+            with: ["requestId": requestId]
+        )
+        return docs.map { $0.toMessage() }
     }
 
     // MARK: - File Storage

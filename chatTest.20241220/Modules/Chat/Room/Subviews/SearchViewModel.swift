@@ -14,6 +14,7 @@ class SearchViewModel: ObservableObject {
 
     private let convexAPI = ConvexChatAPI.shared
     private var searchCancellable: AnyCancellable?
+    private var currentSearchTask: Task<Void, Never>?
 
     enum SearchMode: String, CaseIterable {
         case rooms = "Rooms"
@@ -28,49 +29,27 @@ class SearchViewModel: ObservableObject {
     }
 
     init() {
-        // Debounced real-time search — fires 300ms after the user stops typing
+        // Search fires 300ms after the user stops typing. Any new keystroke resets the timer,
+        // and any in-flight search task from a previous term is cancelled before the new one starts.
         searchCancellable = $searchText
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in
-                guard let self else { return }
-                Task { await self.search() }
+                self?.scheduleSearch()
             }
     }
+
+    deinit {
+        currentSearchTask?.cancel()
+    }
+
+    // MARK: - Public Interface
 
     func setSearchMode(_ mode: SearchMode) {
         searchMode = mode
         clearResults()
         if !searchText.isEmpty {
-            Task { await search() }
+            scheduleSearch()
         }
-    }
-
-    func search() async {
-        guard !searchText.isEmpty else { clearResults(); return }
-        isSearching = true
-        errorMessage = nil
-        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-
-        do {
-            switch searchMode {
-            case .rooms:
-                let allPublic = try await convexAPI.fetchPublicRooms()
-                let joinedIdsFromRepository = Set(ChatRepository.shared.rooms.map(\.id))
-                if joinedIdsFromRepository.isEmpty {
-                    let joinedRooms = try await convexAPI.fetchUserRooms(userId: userId)
-                    joinedRoomIds = Set(joinedRooms.map(\.id))
-                } else {
-                    joinedRoomIds = joinedIdsFromRepository
-                }
-                rooms = allPublic.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-            case .users:
-                users = try await convexAPI.searchUsers(query: searchText, currentUserId: userId)
-            }
-        } catch {
-            errorMessage = "Search failed: \(error.localizedDescription)"
-        }
-
-        isSearching = false
     }
 
     func clearSearch() {
@@ -83,13 +62,68 @@ class SearchViewModel: ObservableObject {
         errorMessage = nil
     }
 
+    /// Called by the view on disappear. Cancels any in-flight search task and tears down
+    /// the text subscription so no further work runs after the sheet is dismissed.
+    func cleanup() {
+        currentSearchTask?.cancel()
+        currentSearchTask = nil
+        searchCancellable = nil
+    }
+
+    func isRoomJoined(_ room: ChatRoom) -> Bool {
+        joinedRoomIds.contains(room.id)
+    }
+
+    // MARK: - Private
+
+    private func scheduleSearch() {
+        // Cancel the previous task before starting a new one. This prevents concurrent
+        // searches from piling up when the user types quickly, and ensures a cancelled
+        // task releases its strong `self` reference so the ViewModel can deinit cleanly.
+        currentSearchTask?.cancel()
+        currentSearchTask = Task { await search() }
+    }
+
+    private func search() async {
+        guard !searchText.isEmpty else { clearResults(); return }
+
+        isSearching = true
+        errorMessage = nil
+        defer { isSearching = false }
+
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+
+        do {
+            switch searchMode {
+            case .rooms:
+                let allPublic = try await convexAPI.fetchPublicRooms()
+                guard !Task.isCancelled else { return }
+
+                let joinedIdsFromRepository = Set(ChatRepository.shared.rooms.map(\.id))
+                if joinedIdsFromRepository.isEmpty {
+                    let joinedRooms = try await convexAPI.fetchUserRooms(userId: userId)
+                    guard !Task.isCancelled else { return }
+                    joinedRoomIds = Set(joinedRooms.map(\.id))
+                } else {
+                    joinedRoomIds = joinedIdsFromRepository
+                }
+
+                rooms = allPublic.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+
+            case .users:
+                let result = try await convexAPI.searchUsers(query: searchText, currentUserId: userId)
+                guard !Task.isCancelled else { return }
+                users = result
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            errorMessage = "Search failed: \(error.localizedDescription)"
+        }
+    }
+
     private func clearResults() {
         rooms = []
         users = []
         joinedRoomIds = []
-    }
-
-    func isRoomJoined(_ room: ChatRoom) -> Bool {
-        return joinedRoomIds.contains(room.id)
     }
 }

@@ -21,6 +21,11 @@ export default defineSchema({
     friendId: v.id("users"),
     status: v.string(), // "pending" | "accepted"
     createdAt: v.number(),
+    respondedAt: v.optional(v.number()),
+    roomType: v.optional(v.string()),
+    messageLifetime: v.optional(v.number()),
+    initialMessage: v.optional(v.string()),
+    roomId: v.optional(v.id("rooms")),
   })
     .index("by_user", ["userId"])
     .index("by_friend", ["friendId"])
@@ -85,4 +90,13 @@ export default defineSchema({
   })
     .index("by_room", ["roomId"])
     .index("by_room_user", ["roomId", "userId"]),
+
+  friendRequestMessages: defineTable({
+    requestId: v.id("friendships"),
+    userId: v.id("users"),
+    content: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_request", ["requestId"])
+    .index("by_user", ["userId"]),
 });

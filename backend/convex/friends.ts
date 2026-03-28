@@ -192,7 +192,7 @@ export const createDirectRequest = mutation({
     friendId: v.id("users"),
     roomType: v.string(),
     messageLifetime: v.optional(v.number()),
-    initialMessage: v.string(),
+    initialMessage: v.optional(v.string()),
   },
   handler: async (ctx, { userId, friendId, roomType, messageLifetime, initialMessage }) => {
     if (userId.toString() === friendId.toString()) throw new Error("CANNOT_ADD_SELF");
@@ -212,6 +212,7 @@ export const createDirectRequest = mutation({
       throw new Error("REQUEST_ALREADY_RECEIVED");
     }
 
+    const trimmed = initialMessage?.trim() ?? "";
     const requestId = await ctx.db.insert("friendships", {
       userId,
       friendId,
@@ -219,9 +220,11 @@ export const createDirectRequest = mutation({
       createdAt: Date.now(),
       roomType,
       messageLifetime,
-      initialMessage: initialMessage.trim(),
+      initialMessage: trimmed,
     });
-    await insertRequestMessage(ctx, requestId, userId, initialMessage.trim());
+    if (trimmed.length > 0) {
+      await insertRequestMessage(ctx, requestId, userId, trimmed);
+    }
     return requestId;
   },
 });
@@ -269,26 +272,31 @@ export const approveDirectRequest = mutation({
       .first();
     if (!request || request.status !== "pending") throw new Error("REQUEST_NOT_FOUND");
 
-    const roomId =
-      request.roomId ??
-      (await createDirectRoom(
-        ctx,
-        requesterId,
-        userId,
-        request.roomType,
-        request.messageLifetime
-      ));
     const requestMessages = await ctx.db
       .query("friendRequestMessages")
       .withIndex("by_request", (q: any) => q.eq("requestId", request._id))
       .collect();
     requestMessages.sort((a, b) => a.createdAt - b.createdAt);
 
+    // Only create a room if there are messages to migrate (or a room already exists).
+    // A plain friend request with no messages just marks the friendship as accepted.
+    const hasMessages = requestMessages.length > 0;
+    const roomId: string | null = hasMessages
+      ? (request.roomId ??
+          (await createDirectRoom(
+            ctx,
+            requesterId,
+            userId,
+            request.roomType,
+            request.messageLifetime
+          )))
+      : null;
+
     const now = Date.now();
     await ctx.db.patch(request._id, {
       status: "accepted",
       respondedAt: now,
-      roomId,
+      ...(roomId ? { roomId } : {}),
     });
 
     const reverse = await ctx.db
@@ -304,7 +312,7 @@ export const approveDirectRequest = mutation({
         respondedAt: now,
         roomType: reverse.roomType ?? request.roomType,
         messageLifetime: reverse.messageLifetime ?? request.messageLifetime,
-        roomId,
+        ...(roomId ? { roomId } : {}),
       });
     } else {
       await ctx.db.insert("friendships", {
@@ -315,11 +323,11 @@ export const approveDirectRequest = mutation({
         respondedAt: now,
         roomType: request.roomType,
         messageLifetime: request.messageLifetime,
-        roomId,
+        ...(roomId ? { roomId } : {}),
       });
     }
 
-    if (requestMessages.length > 0) {
+    if (roomId && hasMessages) {
       // Compute expiry from approval time if this is a secret room.
       const expiresAt = request.messageLifetime
         ? now + request.messageLifetime * 1000
@@ -354,6 +362,20 @@ export const approveDirectRequest = mutation({
   },
 });
 
+export const cancelDirectRequest = mutation({
+  args: { userId: v.id("users"), friendId: v.id("users") },
+  handler: async (ctx, { userId, friendId }) => {
+    const request = await ctx.db
+      .query("friendships")
+      .withIndex("by_pair", (q) => q.eq("userId", userId).eq("friendId", friendId))
+      .first();
+    if (request?.status === "pending") {
+      await clearRequestMessages(ctx, request._id);
+      await ctx.db.delete(request._id);
+    }
+  },
+});
+
 export const rejectDirectRequest = mutation({
   args: { userId: v.id("users"), requesterId: v.id("users") },
   handler: async (ctx, { userId, requesterId }) => {
@@ -384,12 +406,18 @@ export const listIncomingDirectRequests = query({
         const requester = await ctx.db.get(request.userId);
         if (!requester) return null;
 
+        const messages = await ctx.db
+          .query("friendRequestMessages")
+          .withIndex("by_request", (q: any) => q.eq("requestId", request._id))
+          .collect();
+
         return {
           _id: request._id,
           createdAt: request.createdAt,
           roomType: request.roomType ?? "Regular Room",
           messageLifetime: request.messageLifetime,
           initialMessage: request.initialMessage ?? "",
+          messageCount: messages.length,
           user: {
             _id: requester._id,
             username: requester.username,
@@ -421,12 +449,18 @@ export const listOutgoingDirectRequests = query({
         const receiver = await ctx.db.get(request.friendId);
         if (!receiver) return null;
 
+        const messages = await ctx.db
+          .query("friendRequestMessages")
+          .withIndex("by_request", (q: any) => q.eq("requestId", request._id))
+          .collect();
+
         return {
           _id: request._id,
           createdAt: request.createdAt,
           roomType: request.roomType ?? "Regular Room",
           messageLifetime: request.messageLifetime,
           initialMessage: request.initialMessage ?? "",
+          messageCount: messages.length,
           user: {
             _id: receiver._id,
             username: receiver.username,

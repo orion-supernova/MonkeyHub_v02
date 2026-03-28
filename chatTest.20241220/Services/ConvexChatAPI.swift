@@ -140,6 +140,7 @@ struct ConvexFriendRequestDoc: Decodable {
     let roomType: String
     let messageLifetime: Double?
     let initialMessage: String
+    let messageCount: Int
     let user: ConvexUserDoc
 
     func toFriendRequest() -> FriendRequest {
@@ -149,6 +150,7 @@ struct ConvexFriendRequestDoc: Decodable {
             roomType: RoomType(rawValue: roomType) ?? .regular,
             messageLifetime: messageLifetime,
             initialMessage: initialMessage,
+            messageCount: messageCount,
             createdAt: Date(timeIntervalSince1970: createdAt / 1000)
         )
     }
@@ -450,14 +452,16 @@ final class ConvexChatAPI {
         friendId: String,
         roomType: RoomType,
         messageLifetime: TimeInterval?,
-        initialMessage: String
+        initialMessage: String? = nil
     ) async throws -> String {
         var args: [String: ConvexEncodable?] = [
             "userId": userId,
             "friendId": friendId,
             "roomType": roomType.rawValue,
-            "initialMessage": initialMessage,
         ]
+        if let initialMessage {
+            args["initialMessage"] = initialMessage
+        }
         if let messageLifetime {
             args["messageLifetime"] = messageLifetime
         }
@@ -465,8 +469,8 @@ final class ConvexChatAPI {
         return requestId
     }
 
-    func approveDirectRequest(userId: String, requesterId: String) async throws -> String {
-        let roomId: String = try await convex.mutation("friends:approveDirectRequest", with: [
+    func approveDirectRequest(userId: String, requesterId: String) async throws -> String? {
+        let roomId: String? = try await convex.mutation("friends:approveDirectRequest", with: [
             "userId": userId,
             "requesterId": requesterId,
         ])
@@ -475,6 +479,13 @@ final class ConvexChatAPI {
 
     func removeFriend(userId: String, friendId: String) async throws {
         try await convex.mutationVoid("friends:removeFriend", with: [
+            "userId": userId,
+            "friendId": friendId,
+        ])
+    }
+
+    func cancelDirectRequest(userId: String, friendId: String) async throws {
+        try await convex.mutationVoid("friends:cancelDirectRequest", with: [
             "userId": userId,
             "friendId": friendId,
         ])

@@ -98,6 +98,7 @@ struct ChatRoomView: View {
         // FIXED: Conditional compilation for cross-platform support
         #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
+        .background(SwipeBackEnabler())
         #else
         .navigationTitle("")
         .navigationBarBackButtonHidden()
@@ -653,6 +654,24 @@ private struct BottomChromeHeightPreferenceKey: PreferenceKey {
         value = nextValue()
     }
 }
+
+#if os(iOS)
+/// Re-enables the interactive pop gesture that SwiftUI disables when the nav bar is hidden.
+private struct SwipeBackEnabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIViewController {
+        SwipeBackViewController()
+    }
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+
+    private class SwipeBackViewController: UIViewController {
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = true
+            navigationController?.interactivePopGestureRecognizer?.delegate = nil
+        }
+    }
+}
+#endif
 
 #Preview {
     NavigationView {

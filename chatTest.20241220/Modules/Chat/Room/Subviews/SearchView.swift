@@ -332,10 +332,14 @@ struct SearchView: View {
         .sheet(item: $directStartUser) { user in
             DirectRoomConfigurationSheet(
                 user: user,
-                actionTitle: user.friendshipStatus == .friend ? "Open Chat" : "Continue"
-            ) { roomType, messageLifetime in
-                await startDirectConversation(with: user, roomType: roomType, messageLifetime: messageLifetime)
-            }
+                actionTitle: user.friendshipStatus == .friend ? "Open Chat" : "Continue",
+                submit: { roomType, messageLifetime in
+                    await startDirectConversation(with: user, roomType: roomType, messageLifetime: messageLifetime)
+                },
+                sendRequestOnly: user.friendshipStatus == .none ? {
+                    await sendFriendRequestOnly(to: user)
+                } : nil
+            )
         }
     }
 
@@ -430,6 +434,21 @@ struct SearchView: View {
             )
         case .incomingPending:
             viewModel.errorMessage = "\(user.displayName) already sent you a request. Open Requests to approve or deny it."
+        }
+    }
+
+    private func sendFriendRequestOnly(to user: ChatUser) async {
+        let userId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
+        guard !userId.isEmpty else { return }
+        do {
+            try await ConvexChatAPI.shared.createDirectRequest(
+                userId: userId,
+                friendId: user.id,
+                roomType: .regular,
+                messageLifetime: nil
+            )
+        } catch {
+            viewModel.errorMessage = AppLogger.shared.friendlyError(error)
         }
     }
 }

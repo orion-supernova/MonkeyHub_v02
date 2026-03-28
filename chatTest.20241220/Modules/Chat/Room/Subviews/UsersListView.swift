@@ -169,7 +169,7 @@ struct UserRow: View {
     private var statusSubtitle: String {
         switch user.friendshipStatus {
         case .none:
-            return "Choose a room type, then send a friend request with your first message."
+            return "Send a friend request — optionally include a message."
         case .friend:
             return "Choose Regular Room or Chamber of Secrets."
         case .outgoingPending:

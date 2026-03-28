@@ -6,11 +6,14 @@ struct DirectRoomConfigurationSheet: View {
     let user: ChatUser
     let actionTitle: String
     let submit: (RoomType, TimeInterval?) async -> Void
+    /// When non-nil, a "Friend Request Only" option is shown that calls this instead of submit.
+    var sendRequestOnly: (() async -> Void)? = nil
 
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var selectedType: RoomType = .regular
+    @State private var friendRequestOnly = false
     @State private var messageLifetime: TimeInterval = 30
     @State private var isSubmitting = false
 
@@ -31,7 +34,7 @@ struct DirectRoomConfigurationSheet: View {
                     headerCard
                     roomTypeSection
 
-                    if selectedType == .secret {
+                    if selectedType == .secret && !friendRequestOnly {
                         lifetimeSection
                     }
                 }
@@ -53,7 +56,11 @@ struct DirectRoomConfigurationSheet: View {
                     Button {
                         Task {
                             isSubmitting = true
-                            await submit(selectedType, selectedType == .secret ? messageLifetime : nil)
+                            if friendRequestOnly, let sendRequestOnly {
+                                await sendRequestOnly()
+                            } else {
+                                await submit(selectedType, selectedType == .secret ? messageLifetime : nil)
+                            }
                             isSubmitting = false
                             dismiss()
                         }
@@ -61,7 +68,7 @@ struct DirectRoomConfigurationSheet: View {
                         if isSubmitting {
                             ProgressView()
                         } else {
-                            Text(actionTitle)
+                            Text(friendRequestOnly ? "Send Request" : actionTitle)
                         }
                     }
                     .disabled(isSubmitting)
@@ -118,6 +125,7 @@ struct DirectRoomConfigurationSheet: View {
                 Button {
                     withAnimation(.spring(duration: 0.25)) {
                         selectedType = type
+                        friendRequestOnly = false
                     }
                 } label: {
                     HStack(spacing: 14) {
@@ -137,8 +145,8 @@ struct DirectRoomConfigurationSheet: View {
 
                         Spacer()
 
-                        Image(systemName: selectedType == type ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(selectedType == type ? selectedTheme.colors(for: colorScheme).accent : selectedTheme.colors(for: colorScheme).textSecondary)
+                        Image(systemName: (!friendRequestOnly && selectedType == type) ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle((!friendRequestOnly && selectedType == type) ? selectedTheme.colors(for: colorScheme).accent : selectedTheme.colors(for: colorScheme).textSecondary)
                     }
                     .padding(16)
                     .background(
@@ -148,10 +156,54 @@ struct DirectRoomConfigurationSheet: View {
                     .overlay(
                         RoundedRectangle(cornerRadius: 20)
                             .strokeBorder(
-                                selectedType == type
+                                (!friendRequestOnly && selectedType == type)
                                     ? selectedTheme.colors(for: colorScheme).accent
                                     : selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.14),
-                                lineWidth: selectedType == type ? 2 : 1
+                                lineWidth: (!friendRequestOnly && selectedType == type) ? 2 : 1
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            if sendRequestOnly != nil {
+                Button {
+                    withAnimation(.spring(duration: 0.25)) {
+                        friendRequestOnly = true
+                    }
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: "person.badge.plus")
+                            .font(.title3)
+                            .foregroundStyle(Color.green)
+                            .frame(width: 32)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Friend Request Only")
+                                .font(.headline)
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                            Text("Just add them as a friend. Start a chat whenever you're ready.")
+                                .font(.footnote)
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                        }
+
+                        Spacer()
+
+                        Image(systemName: friendRequestOnly ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(friendRequestOnly ? Color.green : selectedTheme.colors(for: colorScheme).textSecondary)
+                    }
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .strokeBorder(
+                                friendRequestOnly
+                                    ? Color.green.opacity(0.7)
+                                    : selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.14),
+                                lineWidth: friendRequestOnly ? 2 : 1
                             )
                     )
                 }

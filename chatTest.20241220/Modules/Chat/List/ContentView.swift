@@ -400,6 +400,9 @@ struct ContentView: View {
                                         rejectRequest: { request in
                                             Task { await viewModel.reject(request) }
                                         },
+                                        cancelRequest: { request in
+                                            Task { await viewModel.cancelRequest(request) }
+                                        },
                                         previewRequest: { request in
                                             previewRequest = request
                                         },
@@ -463,9 +466,21 @@ struct ContentView: View {
                 // Handle room ID (for existing rooms already in myRooms)
                 else if let roomId = notification.userInfo?["roomId"] as? String {
                     if let room = viewModel.myRooms.first(where: { $0.id == roomId }) {
-                        navigationState.path.append(room)
+                        // Don't double-push if already navigated to this room
+                        if navigationState.currentRoomId != roomId {
+                            navigationState.path.append(room)
+                        }
+                    } else {
+                        // Rooms not loaded yet (cold launch) — retry when they arrive
+                        navigationState.pendingRoomId = roomId
                     }
                 }
+            }
+            .onChange(of: viewModel.myRooms) { _, rooms in
+                guard let pendingId = navigationState.pendingRoomId,
+                      let room = rooms.first(where: { $0.id == pendingId }) else { return }
+                navigationState.pendingRoomId = nil
+                navigationState.path.append(room)
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenDraftChat"))) { notification in
                 if let draft = notification.userInfo?["draft"] as? DraftDirectChatSession {

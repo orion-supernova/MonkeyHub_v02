@@ -86,18 +86,22 @@ class ChatListViewModel: ObservableObject {
 
         do {
             let roomId = try await convexAPI.approveDirectRequest(userId: userId, requesterId: request.user.id)
-            let room = ChatRoom(
-                id: roomId,
-                name: "Chat with \(request.user.displayName)",
-                createdBy: request.user.id,
-                participants: [userId, request.user.id],
-                memberCount: 2,
-                isPrivate: true,
-                type: request.roomType,
-                messageLifetime: request.messageLifetime
-            )
-            repository.addRoomOptimistically(room)
-            NavigationStateManager.shared.navigateToRoom(room)
+            if let roomId {
+                // Request had messages — room was created, navigate straight to it.
+                let room = ChatRoom(
+                    id: roomId,
+                    name: "Chat with \(request.user.displayName)",
+                    createdBy: request.user.id,
+                    participants: [userId, request.user.id],
+                    memberCount: 2,
+                    isPrivate: true,
+                    type: request.roomType,
+                    messageLifetime: request.messageLifetime
+                )
+                repository.addRoomOptimistically(room)
+                NavigationStateManager.shared.navigateToRoom(room)
+            }
+            // else: plain friend request, no room yet — friends list will update via subscription.
         } catch {
             AlertManager.shared.showAlert(title: "Error", message: AppLogger.shared.friendlyError(error))
         }
@@ -119,6 +123,17 @@ class ChatListViewModel: ObservableObject {
 
         do {
             try await convexAPI.rejectDirectRequest(userId: userId, requesterId: request.user.id)
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: AppLogger.shared.friendlyError(error))
+        }
+    }
+
+    func cancelRequest(_ request: FriendRequest) async {
+        let userId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
+        guard !userId.isEmpty else { return }
+
+        do {
+            try await convexAPI.cancelDirectRequest(userId: userId, friendId: request.user.id)
         } catch {
             AlertManager.shared.showAlert(title: "Error", message: AppLogger.shared.friendlyError(error))
         }

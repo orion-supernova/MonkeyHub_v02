@@ -9,6 +9,7 @@ struct ConnectionsPanelView: View {
     let removeFriend: (ChatUser) -> Void
     let approveRequest: (FriendRequest) -> Void
     let rejectRequest: (FriendRequest) -> Void
+    let cancelRequest: (FriendRequest) -> Void
     let previewRequest: (FriendRequest) -> Void
     let openOutgoingRequest: (FriendRequest) -> Void
 
@@ -79,7 +80,7 @@ struct ConnectionsPanelView: View {
             ) { request in
                 OutgoingRequestCard(
                     request: request,
-                    cancel: { rejectRequest(request) },
+                    cancel: { cancelRequest(request) },
                     open: { openOutgoingRequest(request) }
                 )
             }
@@ -208,31 +209,41 @@ private struct IncomingRequestCard: View {
                     Text(request.user.displayName)
                         .font(.headline)
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                    Text("\(request.roomType.rawValue) request")
-                        .font(.footnote)
-                        .foregroundStyle(request.roomType == .secret ? .orange : selectedTheme.colors(for: colorScheme).accent)
+                    if !request.hasMessages {
+                        Text("Friend Request")
+                            .font(.footnote)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                    } else {
+                        Text("\(request.roomType.rawValue) request")
+                            .font(.footnote)
+                            .foregroundStyle(request.roomType == .secret ? .orange : selectedTheme.colors(for: colorScheme).accent)
+                    }
                 }
 
                 Spacer()
             }
 
-            Text(request.initialMessage)
-                .font(.body)
-                .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(selectedTheme.colors(for: colorScheme).background)
-                )
+            if request.hasMessages {
+                Text(request.initialMessage.isEmpty ? "Sent \(request.messageCount) message\(request.messageCount == 1 ? "" : "s") — tap Preview to read." : request.initialMessage)
+                    .font(.body)
+                    .foregroundStyle(request.initialMessage.isEmpty ? selectedTheme.colors(for: colorScheme).textSecondary : selectedTheme.colors(for: colorScheme).textPrimary)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(selectedTheme.colors(for: colorScheme).background)
+                    )
+            }
 
             HStack(spacing: 10) {
                 Button("Deny", role: .destructive, action: reject)
                     .buttonStyle(.bordered)
 
-                Button("Preview", action: preview)
-                    .buttonStyle(.borderedProminent)
-                    .tint(selectedTheme.colors(for: colorScheme).accent.opacity(0.3))
+                if request.hasMessages {
+                    Button("Preview", action: preview)
+                        .buttonStyle(.borderedProminent)
+                        .tint(selectedTheme.colors(for: colorScheme).accent.opacity(0.3))
+                }
 
                 Button("Approve", action: approve)
                     .buttonStyle(.borderedProminent)
@@ -274,17 +285,25 @@ private struct OutgoingRequestCard: View {
                     .background(Color.orange.opacity(0.12), in: Capsule())
             }
 
-            Text(request.initialMessage)
-                .font(.footnote)
-                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                .lineLimit(3)
-
-            HStack(spacing: 8) {
-                Image(systemName: request.roomType == .secret ? "flame.fill" : "bubble.left.and.bubble.right.fill")
-                    .foregroundStyle(request.roomType == .secret ? Color.orange : selectedTheme.colors(for: colorScheme).accent)
-                Text(request.roomType.rawValue)
+            if request.hasMessages {
+                Text(request.initialMessage.isEmpty ? "\(request.messageCount) message\(request.messageCount == 1 ? "" : "s") sent" : request.initialMessage)
                     .font(.footnote)
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                    .lineLimit(3)
+            }
+
+            HStack(spacing: 8) {
+                if request.hasMessages {
+                    Image(systemName: request.roomType == .secret ? "flame.fill" : "bubble.left.and.bubble.right.fill")
+                        .foregroundStyle(request.roomType == .secret ? Color.orange : selectedTheme.colors(for: colorScheme).accent)
+                    Text(request.roomType.rawValue)
+                        .font(.footnote)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                } else {
+                    Text("Friend Request")
+                        .font(.footnote)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                }
                 Spacer()
                 Button("Open", action: open)
                     .buttonStyle(.borderedProminent)

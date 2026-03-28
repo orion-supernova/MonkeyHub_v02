@@ -21,6 +21,8 @@ struct FriendRequestDraftView: View {
     @State private var hasTransitioned = false
     // Set to true when the request disappears without a room (rejected or cancelled by receiver).
     @State private var requestRejected = false
+    // Set to true when a no-message request is accepted (friend added, no room created yet).
+    @State private var requestAccepted = false
     // Holds the initial message optimistically while we wait for the subscription to deliver it.
     @State private var optimisticMessages: [FriendRequestMessage] = []
 
@@ -43,11 +45,11 @@ struct FriendRequestDraftView: View {
                     statusBanner
 
                     messageList
-                    if repository.activeRequestMessages.isEmpty && optimisticMessages.isEmpty {
+                    if repository.activeRequestMessages.isEmpty && optimisticMessages.isEmpty && requestSubmitted {
                         ContentUnavailableView(
-                            "No Messages Yet",
+                            "No Messages",
                             systemImage: session.roomType == .secret ? "flame.fill" : "bubble.left",
-                            description: Text("Your first message becomes the friend request once you confirm it.")
+                            description: Text("You sent this request without a message.")
                         )
                         .padding(.top, 60)
                     }
@@ -82,7 +84,8 @@ struct FriendRequestDraftView: View {
             NavigationStateManager.shared.path.removeLast()
             NavigationStateManager.shared.path.append(room)
         }
-        // When the outgoing request disappears without a room, it was rejected or cancelled.
+        // When the outgoing request disappears without a room, it was either accepted (no
+        // messages → no room created) or rejected/cancelled.
         .onChange(of: repository.outgoingRequests) { _, newRequests in
             guard requestSubmitted, !hasTransitioned else { return }
             guard let requestId else { return }
@@ -95,10 +98,15 @@ struct FriendRequestDraftView: View {
             guard requestSeenInOutgoing else { return }
             let userId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
             let names = dmRoomNames(userId: userId, friendId: session.user.id)
-            // If the room already exists the rooms observer will handle navigation.
+            // If a room appeared the rooms observer handles navigation — nothing to do here.
             guard repository.rooms.first(where: { names.contains($0.name) }) == nil else { return }
             hasTransitioned = true
-            requestRejected = true
+            // If the person is now in our friends list, the request was accepted without a room.
+            if repository.friends.contains(where: { $0.id == session.user.id }) {
+                requestAccepted = true
+            } else {
+                requestRejected = true
+            }
         }
         .alert("Send Friend Request?", isPresented: Binding(
             get: { pendingConfirmationText != nil },
@@ -116,12 +124,17 @@ struct FriendRequestDraftView: View {
                 }
             }
         } message: {
-            Text("The request will be sent with this first message. The room will only be created after \(session.user.displayName) accepts.")
+            Text("The room will only be created after \(session.user.displayName) accepts.")
         }
         .alert("Request Resolved", isPresented: $requestRejected) {
             Button("OK") { dismiss() }
         } message: {
             Text("Your request to \(session.user.displayName) is no longer pending.")
+        }
+        .alert("You're Now Friends!", isPresented: $requestAccepted) {
+            Button("OK") { dismiss() }
+        } message: {
+            Text("\(session.user.displayName) accepted your request. Start a chat from your friends list.")
         }
     }
 
@@ -173,13 +186,13 @@ struct FriendRequestDraftView: View {
                 .foregroundStyle(requestSubmitted ? Color.orange : selectedTheme.colors(for: colorScheme).accent)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(requestSubmitted ? "Pending Request" : "Friend request will be sent with your first message.")
+                Text(requestSubmitted ? "Pending Request" : "Send a Friend Request")
                     .font(.headline)
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
                 Text(
                     requestSubmitted
                         ? "\(session.user.displayName) will see your request in their Requests screen."
-                        : "Nothing is stored in the chat database until you confirm the first message."
+                        : "You can include a message or just send the request on its own."
                 )
                 .font(.footnote)
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
@@ -257,7 +270,7 @@ struct FriendRequestDraftView: View {
             }
 
             HStack(spacing: 12) {
-                TextField("Write your first message", text: $draftText, axis: .vertical)
+                TextField("Write your first message (optional)", text: $draftText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...5)
                     .padding(.horizontal, 16)
@@ -303,8 +316,24 @@ struct FriendRequestDraftView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
-            .padding(.bottom, 20)
+
+            // Show a plain "Send Request" option when the request hasn't been sent yet
+            // and the user hasn't typed anything — lets them add without a message.
+            if requestId == nil && draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button {
+                    Task { await confirmFriendRequest(pendingText: "") }
+                } label: {
+                    Text("Send Request Without Message")
+                        .font(.footnote)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(isSubmitting)
+            }
+
+            Spacer().frame(height: 12)
         }
+        .padding(.bottom, 8)
         .background(selectedTheme.colors(for: colorScheme).background)
     }
 

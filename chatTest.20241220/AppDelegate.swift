@@ -27,11 +27,14 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        UNUserNotificationCenter.current().delegate = self
         registerNotificationCategories()
         // OneSignal handles APNs registration and permission requests.
         // PushNotificationManager.initialize is responsible for all setup.
         PushNotificationManager.shared.initialize(launchOptions: launchOptions)
+        // Set delegate AFTER OneSignal initializes so AppDelegate is the final
+        // UNUserNotificationCenter delegate — ensuring willPresent and didReceive
+        // are always routed through our own handlers.
+        UNUserNotificationCenter.current().delegate = self
         return true
     }
     #endif
@@ -87,7 +90,7 @@ class AppDelegate: NSObject, BaseAppDelegate, UNUserNotificationCenterDelegate {
         }
 
         if router.shouldSuppressUI(for: userInfo) {
-            completionHandler([])
+            completionHandler([.sound])
         } else if router.isSystemMessage(userInfo) {
             completionHandler([])
         } else {

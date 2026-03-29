@@ -10,6 +10,7 @@ struct ChatUser: Identifiable, Hashable {
     let deviceTokens: [String]?
     let friendshipStatus: FriendshipStatus
     let requestId: String?
+    let role: String?
 
     init(
         id: String,
@@ -20,7 +21,8 @@ struct ChatUser: Identifiable, Hashable {
         bio: String? = nil,
         deviceTokens: [String]? = nil,
         friendshipStatus: FriendshipStatus = .none,
-        requestId: String? = nil
+        requestId: String? = nil,
+        role: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -31,6 +33,7 @@ struct ChatUser: Identifiable, Hashable {
         self.deviceTokens = deviceTokens
         self.friendshipStatus = friendshipStatus
         self.requestId = requestId
+        self.role = role
     }
 
     /// Best available display name — name, then username

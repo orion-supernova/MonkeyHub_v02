@@ -9,6 +9,21 @@ final class RoomInfoViewModel: ObservableObject {
     @Published private(set) var isLoading = true
     @Published private(set) var isUploadingAvatar = false
 
+    var currentUserId: String {
+        userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+    }
+
+    var isCreator: Bool {
+        if let myMember = members.first(where: { $0.id == currentUserId }), let role = myMember.role {
+            return role == "owner"
+        }
+        return !currentUserId.isEmpty && room.createdBy == currentUserId
+    }
+
+    var isMember: Bool {
+        !currentUserId.isEmpty && (room.participants.contains(currentUserId) || members.contains(where: { $0.id == currentUserId }))
+    }
+
     private let convexAPI = ConvexChatAPI.shared
     private let client = ConvexService.shared.client
     private var roomSubscription: AnyCancellable?
@@ -91,6 +106,23 @@ final class RoomInfoViewModel: ObservableObject {
         do {
             try await convexAPI.updateRoom(roomId: room.id, userId: userId, name: room.name, description: room.description, isPrivate: isPrivate)
             await sendSystemMessage("\(currentUserName()) made the room \(isPrivate ? "private" : "public")")
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: friendlyErrorMessage(error))
+        }
+        isLoading = false
+    }
+
+    func updateRoomPassword(_ password: String?) async {
+        isLoading = true
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+        let passwordHash = password.map { SecurityUtils.sha256($0) }
+        do {
+            try await convexAPI.updateRoomPassword(roomId: room.id, userId: userId, passwordHash: passwordHash)
+            if password == nil {
+                await sendSystemMessage("\(currentUserName()) removed the room password")
+            } else {
+                await sendSystemMessage("\(currentUserName()) updated the room password")
+            }
         } catch {
             AlertManager.shared.showAlert(title: "Error", message: friendlyErrorMessage(error))
         }

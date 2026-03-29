@@ -115,7 +115,9 @@ struct ConvexUserDoc: Decodable {
     let bio: String?
     let avatarStorageId: String?
     let status: String?
-    let deviceTokens: [String]?
+    let role: String? // returned by rooms:getMembers
+
+    // Optional fields for friendships/search
     let friendshipStatus: String?
     let requestId: String?
 
@@ -127,9 +129,9 @@ struct ConvexUserDoc: Decodable {
             email: email ?? "",
             avatarStorageId: avatarStorageId,
             bio: bio,
-            deviceTokens: deviceTokens,
-            friendshipStatus: FriendshipStatus(rawValue: friendshipStatus ?? "none") ?? .none,
-            requestId: requestId
+            friendshipStatus: FriendshipStatus(rawValue: friendshipStatus ?? "") ?? .none,
+            requestId: requestId,
+            role: role
         )
     }
 }
@@ -238,6 +240,17 @@ final class ConvexChatAPI {
 
     func deleteRoom(roomId: String, userId: String) async throws {
         try await convex.mutationVoid("rooms:deleteRoom", with: ["roomId": roomId, "userId": userId])
+    }
+
+    func updateRoomPassword(roomId: String, userId: String, passwordHash: String?) async throws {
+        var args: [String: ConvexEncodable?] = [
+            "roomId": roomId,
+            "userId": userId,
+        ]
+        if let passwordHash {
+            args["passwordHash"] = passwordHash
+        }
+        try await convex.mutationVoid("rooms:updatePassword", with: args)
     }
 
     func updateRoom(roomId: String, userId: String, name: String, description: String?, isPrivate: Bool? = nil, messageLifetime: TimeInterval? = nil) async throws {

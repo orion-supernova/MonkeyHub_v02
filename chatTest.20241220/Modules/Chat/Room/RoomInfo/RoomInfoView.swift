@@ -22,6 +22,11 @@ struct RoomInfoView: View {
     @State private var selectedLifetimeIndex = 1  // default: 30s
     @Namespace private var avatarNamespace
 
+    // Password editing state
+    @State private var isEditingPassword = false
+    @State private var editedPassword = ""
+    @State private var showRemovePasswordAlert = false
+
     private let lifetimeOptions: [(label: String, seconds: TimeInterval)] = [
         ("10s",  10),
         ("30s",  30),
@@ -32,17 +37,8 @@ struct RoomInfoView: View {
         ("1hr",  3600),
     ]
 
-    private let currentUserId: String
-
-    private var isCreator: Bool {
-        viewModel.room.createdBy == currentUserId
-    }
-
-    private var isMember: Bool { true } // always true — you can only open this view if you're in the room
-
     init(room: ChatRoom) {
         self._viewModel = StateObject(wrappedValue: RoomInfoViewModel(room: room))
-        self.currentUserId = UserDefaults.standard.string(forKey: "userId") ?? ""
     }
     
     var body: some View {
@@ -119,8 +115,9 @@ struct RoomInfoView: View {
                 VStack(spacing: 24) {
                     avatarSection
                     roomInfoSection
+                    securitySection
                     membersSection
-                    if isCreator { actionsSection }
+                    if viewModel.isCreator { actionsSection }
                 }
                 .padding()
             }
@@ -208,7 +205,7 @@ struct RoomInfoView: View {
                 }
 
                 // Camera button - tappable to change image (any member)
-                if !viewModel.isUploadingAvatar && isMember {
+                if !viewModel.isUploadingAvatar && viewModel.isMember {
                     VStack {
                         Spacer()
                         HStack {
@@ -307,7 +304,7 @@ struct RoomInfoView: View {
                         .fontWeight(.bold)
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
 
-                    if isMember {
+                    if viewModel.isMember {
                         Button {
                             editedName = viewModel.room.name
                             isEditingName = true
@@ -344,7 +341,7 @@ struct RoomInfoView: View {
                     
                     Spacer()
                     
-                    if !isEditingDescription && isMember {
+                    if !isEditingDescription && viewModel.isMember {
                         Button {
                             editedDescription = viewModel.room.description ?? ""
                             isEditingDescription = true
@@ -438,7 +435,7 @@ struct RoomInfoView: View {
                         .font(.subheadline)
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
 
-                    if isMember {
+                    if viewModel.isMember {
                         Button {
                             pendingVisibilityValue = !viewModel.room.isPrivate
                             showVisibilityAlert = true
@@ -508,7 +505,7 @@ struct RoomInfoView: View {
                                         .italic()
                                 }
 
-                                if isMember {
+                                if viewModel.isMember {
                                     Button {
                                         // Pre-select current lifetime in picker
                                         if let lifetime = viewModel.room.messageLifetime, lifetime > 0 {
@@ -569,6 +566,110 @@ struct RoomInfoView: View {
             }
         }
     }
+
+    private var securitySection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Security")
+                .font(.headline)
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                .padding(.horizontal)
+
+            VStack(spacing: 0) {
+                HStack {
+                    Label("Password Protection", systemImage: "lock.fill")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(viewModel.room.hasPassword ? "Enabled" : "Disabled")
+                        .font(.subheadline)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                }
+                .padding()
+
+                if viewModel.isCreator {
+                    Divider().padding(.leading, 44)
+
+                    if isEditingPassword {
+                        VStack(spacing: 12) {
+                            SecureField("New password", text: $editedPassword)
+                                .textFieldStyle(.plain)
+                                .padding(12)
+                                .background(selectedTheme.colors(for: colorScheme).background)
+                                .cornerRadius(10)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(selectedTheme.colors(for: colorScheme).accent.opacity(0.3), lineWidth: 1)
+                                )
+
+                            HStack(spacing: 16) {
+                                Button("Cancel") {
+                                    isEditingPassword = false
+                                    editedPassword = ""
+                                }
+                                .font(.subheadline)
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+
+                                Spacer()
+
+                                Button {
+                                    Task {
+                                        await viewModel.updateRoomPassword(editedPassword)
+                                        isEditingPassword = false
+                                        editedPassword = ""
+                                    }
+                                } label: {
+                                    Text("Save Password")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 8)
+                                        .background(
+                                            Capsule()
+                                                .fill(selectedTheme.colors(for: colorScheme).accent)
+                                        )
+                                }
+                                .disabled(editedPassword.isEmpty)
+                                .opacity(editedPassword.isEmpty ? 0.6 : 1)
+                            }
+                        }
+                        .padding()
+                    } else {
+                        HStack(spacing: 16) {
+                            Button {
+                                editedPassword = ""
+                                isEditingPassword = true
+                            } label: {
+                                Label(viewModel.room.hasPassword ? "Change Password" : "Set Password", systemImage: "key.fill")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                            }
+
+                            if viewModel.room.hasPassword {
+                                Spacer()
+                                Button(role: .destructive) {
+                                    showRemovePasswordAlert = true
+                                } label: {
+                                    Label("Remove", systemImage: "lock.open.fill")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
+                                }
+                            }
+                        }
+                        .padding()
+                    }
+                }
+            }
+            .background(selectedTheme.colors(for: colorScheme).cardBackground)
+            .cornerRadius(12)
+        }
+        .alert("Remove Room Password", isPresented: $showRemovePasswordAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Remove", role: .destructive) {
+                Task { await viewModel.updateRoomPassword(nil) }
+            }
+        } message: {
+            Text("Are you sure you want to remove the password? Anyone will be able to join the room.")
+        }
+    }
     
     private var membersSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -593,15 +694,14 @@ struct RoomInfoView: View {
                         MemberRowView(
                             member: member,
                             isCreator: member.id == viewModel.room.createdBy,
-                            isCurrentUser: member.id == currentUserId,
-                            canRemove: isCreator && member.id != currentUserId,
+                            isCurrentUser: member.id == viewModel.currentUserId,
+                            canRemove: viewModel.isCreator && member.id != viewModel.currentUserId,
                             onRemove: {
                                 Task {
                                     await viewModel.removeMember(member.id)
                                 }
                             }
-                        )
-                        
+                        )                        
                         if member.id != viewModel.members.last?.id {
                             Divider()
                                 .padding(.leading, 60)

@@ -323,9 +323,9 @@ struct SearchView: View {
         }
         .sheet(item: $passwordPromptRoom) { room in
             RoomPasswordSheet(
-                room: room,
+                roomName: room.name,
                 submit: { password in
-                    await submitPasswordJoin(for: room, password: password)
+                    await joinRoom(room, password: password)
                 }
             )
         }
@@ -356,14 +356,10 @@ struct SearchView: View {
         }
     }
 
-    private func submitPasswordJoin(for room: ChatRoom, password: String) async -> String? {
-        await joinRoom(room, password: password)
-    }
-
     @discardableResult
     private func joinRoom(_ room: ChatRoom, password: String?) async -> String? {
         let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
-        let passwordHash = password.map(sha256)
+        let passwordHash = password.map { SecurityUtils.sha256($0) }
 
         do {
             try await ConvexChatAPI.shared.joinRoom(roomId: room.id, userId: userId, passwordHash: passwordHash)
@@ -387,12 +383,6 @@ struct SearchView: View {
             }
             return message
         }
-    }
-
-    private func sha256(_ input: String) -> String {
-        let data = Data(input.utf8)
-        let hash = SHA256.hash(data: data)
-        return hash.compactMap { String(format: "%02x", $0) }.joined()
     }
 
     private func startDirectConversation(with user: ChatUser, roomType: RoomType, messageLifetime: TimeInterval?) async {
@@ -575,130 +565,6 @@ private struct SearchRoomInfoSheet: View {
                 Capsule()
                     .fill(tint.opacity(0.12))
             )
-    }
-}
-
-private struct RoomPasswordSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let room: ChatRoom
-    let submit: (String) async -> String?
-
-    @State private var password = ""
-    @State private var errorMessage: String?
-    @State private var isSubmitting = false
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(room.name)
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .lineLimit(2)
-
-                    HStack(spacing: 8) {
-                        passwordTag
-                        Text("\(room.resolvedMemberCount) member" + (room.resolvedMemberCount == 1 ? "" : "s"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Text("This room requires a password before you can join.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                SecureField("Room password", text: $password)
-                    .textFieldStyle(.plain)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Color.secondary.opacity(0.08))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(Color.secondary.opacity(0.14), lineWidth: 1)
-                    )
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-
-                Button {
-                    Task {
-                        await handleSubmit()
-                    }
-                } label: {
-                    if isSubmitting {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Text("Join Room")
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.white)
-                .padding(.vertical, 13)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.blue.opacity(0.95), Color.cyan.opacity(0.85)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                )
-                .shadow(color: Color.blue.opacity(0.18), radius: 12, y: 6)
-                .disabled(isSubmitting || password.isEmpty)
-                .opacity(isSubmitting || password.isEmpty ? 0.6 : 1)
-
-                Spacer()
-            }
-            .padding()
-            .navigationTitle("Enter Password")
-            #if canImport(UIKit)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                    .disabled(isSubmitting)
-                }
-            }
-        }
-        #if os(macOS)
-        .frame(minWidth: 420, idealWidth: 460, minHeight: 220, idealHeight: 240)
-        #endif
-    }
-
-    private func handleSubmit() async {
-        isSubmitting = true
-        errorMessage = nil
-        let result = await submit(password)
-        isSubmitting = false
-        errorMessage = result
-    }
-
-    private var passwordTag: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 10, weight: .bold))
-            Text("Protected")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-        }
-        .foregroundStyle(.blue)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
-        .background(
-            Capsule()
-                .fill(Color.blue.opacity(0.12))
-        )
     }
 }
 

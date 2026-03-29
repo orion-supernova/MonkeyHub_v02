@@ -23,6 +23,7 @@ struct ContentView: View {
     @State private var selectedSection: ChatListViewModel.Section = .chats
     @State private var directStartFriend: ChatUser?
     @State private var previewRequest: FriendRequest?
+    @State private var passwordPromptRoom: ChatRoom?
 
     // MARK: - Keyboard Navigation (macOS)
     @State private var selectedRoomIndex: Int? = nil
@@ -42,15 +43,17 @@ struct ContentView: View {
         await viewModel.refreshRooms()
     }
 
-    private func createRoom(type: RoomType, messageLifetime: TimeInterval?) async {
+    private func createRoom(type: RoomType, messageLifetime: TimeInterval?, password: String?) async {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+        let passwordHash = password.map { SecurityUtils.sha256($0) }
         do {
             let roomId = try await ConvexChatAPI.shared.createRoom(
                 name: newRoomName,
                 userId: userId,
                 isPrivate: true,
                 type: type,
-                messageLifetime: messageLifetime
+                messageLifetime: messageLifetime,
+                passwordHash: passwordHash
             )
             let room = ChatRoom(
                 id: roomId,
@@ -59,7 +62,8 @@ struct ContentView: View {
                 participants: [userId],
                 memberCount: 1,
                 type: type,
-                messageLifetime: messageLifetime
+                messageLifetime: messageLifetime,
+                hasPassword: passwordHash != nil
             )
             viewModel.addRoomOptimistically(room)
             isShowingNewRoomSheet = false
@@ -94,6 +98,33 @@ struct ContentView: View {
         }
     }
 
+@discardableResult
+private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String? {
+    let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+    let passwordHash = password.map { SecurityUtils.sha256($0) }
+    do {
+        try await ConvexChatAPI.shared.joinRoom(roomId: room.id, userId: userId, passwordHash: passwordHash)
+        isShowingJoinRoomSheet = false
+        passwordPromptRoom = nil
+        // Refresh to get full room data (participants etc)
+        await viewModel.refreshRooms()
+        // Open the joined room
+        if let joinedRoom = viewModel.myRooms.first(where: { $0.id == room.id }) {
+            navigationState.path.append(joinedRoom)
+        }
+        return nil
+    } catch {
+        let message = friendlyErrorMessage(error)
+        if message.contains("ROOM_PASSWORD_REQUIRED") {
+            passwordPromptRoom = room
+            return "Password required."
+        } else if message.contains("ROOM_PASSWORD_INVALID") {
+            return "Wrong room password."
+        } else {
+            return message
+        }
+    }
+}
     private func deleteRoomCompletely(_ room: ChatRoom) async {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         viewModel.removeRoomOptimistically(room.id)
@@ -187,13 +218,11 @@ struct ContentView: View {
                                 // Title and room count
                                 HStack {
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(selectedSection == .chats ? "Chat Rooms" : selectedSection.rawValue)
-                                            .font(
-                                                .system(
-                                                    size: verticalSizeClass == .compact ? 28 : 34,
-                                                    weight: .bold
-                                                )
-                                            )
+                                        let title = selectedSection == .chats ? "Chat Rooms" : selectedSection.rawValue
+                                        let titleSize = verticalSizeClass == .compact ? CGFloat(28) : CGFloat(34)
+                                        
+                                        Text(title)
+                                            .font(.system(size: titleSize, weight: .bold))
                                             .foregroundStyle(
                                                 selectedTheme.colors(for: colorScheme).text)
 
@@ -527,6 +556,14 @@ struct ContentView: View {
                         Task {
                             await joinRoom(room)
                         }
+                    }
+                )
+            }
+            .sheet(item: $passwordPromptRoom) { room in
+                RoomPasswordSheet(
+                    roomName: room.name,
+                    submit: { password in
+                        await joinRoom(room, password: password)
                     }
                 )
             }
@@ -970,12 +1007,17 @@ struct EnhancedNewRoomSheet: View {
     @Binding var roomName: String
     @State private var selectedType: RoomType = .regular
     @State private var messageLifetime: TimeInterval = 30  // 30 seconds default
-    let createRoom: (RoomType, TimeInterval?) async -> Void
+    let createRoom: (RoomType, TimeInterval?, String?) async -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @State private var animateContent = false
     @State private var selectedOptionId: TimeInterval?
     @Namespace private var animation
     @FocusState private var isRoomNameFocused: Bool
+
+    // Password Protection
+    @State private var isProtected = false
+    @State private var roomPassword = ""
+
     @State private var keyboardHeight: CGFloat = 0
     @State private var scrollID = UUID()  // For scroll anchor
     @Environment(\.colorScheme) private var colorScheme
@@ -1148,6 +1190,46 @@ struct EnhancedNewRoomSheet: View {
                         .opacity(animateContent ? 1 : 0)
                         .offset(y: animateContent ? 0 : 20)
 
+                        // Password Protection toggle and input
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Label("Protect with Password", systemImage: "lock.shield")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                                Spacer()
+                                Toggle("", isOn: $isProtected)
+                                    .labelsHidden()
+                                    .tint(selectedTheme.colors(for: colorScheme).accent)
+                            }
+                            .padding()
+                            .background(selectedTheme.colors(for: colorScheme).cardBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                            if isProtected {
+                                SecureField("Enter room password", text: $roomPassword)
+                                    .textFieldStyle(.plain)
+                                    .padding()
+                                    .background(selectedTheme.colors(for: colorScheme).cardBackground)
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .strokeBorder(
+                                                roomPassword.isEmpty
+                                                    ? selectedTheme.colors(for: colorScheme)
+                                                        .textSecondary
+                                                        .opacity(0.1)
+                                                    : selectedTheme.colors(for: colorScheme).accent
+                                                        .opacity(0.2),
+                                                lineWidth: 1
+                                            )
+                                    )
+                                    .transition(.move(edge: .top).combined(with: .opacity))
+                            }
+                        }
+                        .opacity(animateContent ? 1 : 0)
+                        .offset(y: animateContent ? 0 : 20)
+
                         // Create button with enhanced animation
                         Button {
                             // Add haptic feedback
@@ -1159,7 +1241,8 @@ struct EnhancedNewRoomSheet: View {
                             Task {
                                 await createRoom(
                                     selectedType,
-                                    selectedType == .secret ? messageLifetime : nil
+                                    selectedType == .secret ? messageLifetime : nil,
+                                    isProtected ? roomPassword : nil
                                 )
                             }
                         } label: {
@@ -1351,8 +1434,8 @@ struct JoinRoomSheet: View {
                                             )
 
                                         Image(
-                                            systemName: room.type == .regular
-                                                ? "bubble.left" : "lock.shield"
+                                            systemName: room.hasPassword ? "lock.fill" : (room.type == .regular
+                                                ? "bubble.left" : "lock.shield")
                                         )
                                         .font(.title3.bold())
                                         .foregroundStyle(
@@ -1362,10 +1445,18 @@ struct JoinRoomSheet: View {
 
                                     // Room info
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(room.name)
-                                            .font(.headline)
-                                            .foregroundStyle(
-                                                selectedTheme.colors(for: colorScheme).textPrimary)
+                                        HStack {
+                                            Text(room.name)
+                                                .font(.headline)
+                                                .foregroundStyle(
+                                                    selectedTheme.colors(for: colorScheme).textPrimary)
+                                            
+                                            if room.hasPassword {
+                                                Image(systemName: "key.fill")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                                            }
+                                        }
 
                                         HStack {
                                             Image(systemName: "person.2.fill")

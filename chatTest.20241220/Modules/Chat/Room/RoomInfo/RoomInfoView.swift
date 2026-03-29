@@ -1,0 +1,842 @@
+import SwiftUI
+
+struct RoomInfoView: View {
+    @StateObject private var viewModel: RoomInfoViewModel
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @State private var showImagePicker = false
+    @State private var selectedImage: PlatformImage?
+    @State private var roomAvatarImage: PlatformImage?
+    @State private var isLoadingRoomAvatar = false
+    @State private var showVisibilityAlert = false
+    @State private var pendingVisibilityValue: Bool = false
+    @State private var isEditingName = false
+    @State private var editedName = ""
+    @State private var isEditingDescription = false
+    @State private var editedDescription = ""
+    @State private var showFullscreenAvatar = false
+    @State private var showDeleteRoomAlert = false
+    @State private var isDeleting = false
+    @State private var isEditingMessageLifetime = false
+    @State private var selectedLifetimeIndex = 1  // default: 30s
+    @Namespace private var avatarNamespace
+
+    private let lifetimeOptions: [(label: String, seconds: TimeInterval)] = [
+        ("10s",  10),
+        ("30s",  30),
+        ("1m",   60),
+        ("5m",   300),
+        ("10m",  600),
+        ("30m",  1800),
+        ("1hr",  3600),
+    ]
+
+    private let currentUserId: String
+
+    private var isCreator: Bool {
+        viewModel.room.createdBy == currentUserId
+    }
+
+    private var isMember: Bool { true } // always true — you can only open this view if you're in the room
+
+    init(room: ChatRoom) {
+        self._viewModel = StateObject(wrappedValue: RoomInfoViewModel(room: room))
+        self.currentUserId = UserDefaults.standard.string(forKey: "userId") ?? ""
+    }
+    
+    var body: some View {
+        navigationStack
+            #if os(macOS)
+            .frame(minWidth: 820, minHeight: 680)
+            .frame(idealWidth: 900, idealHeight: 740)
+            #endif
+            .overlay {
+                if showFullscreenAvatar, let avatarImage = roomAvatarImage {
+                    ZoomableAvatarOverlay(
+                        image: avatarImage,
+                        namespace: avatarNamespace,
+                        isPresented: $showFullscreenAvatar
+                    )
+                }
+            }
+    }
+
+    private var navigationStack: some View {
+        stackWithSheets
+            .alert("Change Room Visibility", isPresented: $showVisibilityAlert) {
+                Button("Cancel", role: .cancel) {}
+                Button(pendingVisibilityValue ? "Make Private" : "Make Public") {
+                    Task { await viewModel.updateRoomPrivacy(pendingVisibilityValue) }
+                }
+            } message: {
+                Text(pendingVisibilityValue
+                    ? "This will make the room private. Only members can see and join this room."
+                    : "This will make the room public. Anyone can search and join this room.")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RoomWasDeleted"))) { notification in
+                if let roomId = notification.userInfo?["roomId"] as? String, roomId == viewModel.room.id {
+                    dismiss()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UserRemovedFromRoom"))) { notification in
+                if let roomId = notification.userInfo?["roomId"] as? String, roomId == viewModel.room.id {
+                    dismiss()
+                }
+            }
+    }
+
+    private var stackWithSheets: some View {
+        baseNavigationStack
+            .onAppear { viewModel.startSubscriptions() }
+            .onDisappear { viewModel.stopSubscriptions() }
+            .task(id: viewModel.room.avatarStorageId) {
+                roomAvatarImage = nil
+                guard let storageId = viewModel.room.avatarStorageId else {
+                    isLoadingRoomAvatar = false
+                    return
+                }
+                isLoadingRoomAvatar = true
+                if let image = await ConvexFileCacheService.shared.image(for: storageId) {
+                    roomAvatarImage = image
+                }
+                isLoadingRoomAvatar = false
+            }
+            .sheet(isPresented: $showImagePicker) { ImagePicker(image: $selectedImage) }
+            .onChange(of: selectedImage) { newImage in
+                if let image = newImage {
+                    Task {
+                        await viewModel.updateRoomAvatar(image)
+                        selectedImage = nil
+                    }
+                }
+            }
+    }
+
+    private var baseNavigationStack: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    avatarSection
+                    roomInfoSection
+                    membersSection
+                    if isCreator { actionsSection }
+                }
+                .padding()
+            }
+            .refreshable {
+                viewModel.stopSubscriptions()
+                viewModel.startSubscriptions()
+            }
+            .background(selectedTheme.colors(for: colorScheme).background)
+            .navigationTitle("Room Info")
+            #if canImport(UIKit)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar { doneToolbarItem }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var doneToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: {
+            #if canImport(UIKit)
+            return .navigationBarTrailing
+            #else
+            return .automatic
+            #endif
+        }()) {
+            Button("Done") { dismiss() }
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                #if os(macOS)
+                .buttonStyle(.plain)
+                .focusable(false)
+                #endif
+        }
+    }
+    
+    private var avatarSection: some View {
+        VStack(spacing: 12) {
+            ZStack {
+                // Avatar image - tappable for fullscreen (when image exists)
+                Group {
+                    if let avatarImage = roomAvatarImage {
+                        Image(platformImage: avatarImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 120, height: 120)
+                            .clipShape(Circle())
+                            .matchedGeometryEffect(id: "roomAvatar", in: avatarNamespace, isSource: !showFullscreenAvatar)
+                            .onTapGesture {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                    showFullscreenAvatar = true
+                                }
+                            }
+                    } else {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: selectedTheme.colors(for: colorScheme).primary,
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 120, height: 120)
+                            .overlay {
+                                if isLoadingRoomAvatar {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(1.5)
+                                } else {
+                                    Text(String(viewModel.room.name.prefix(2)).uppercased())
+                                        .font(.system(size: 48, weight: .bold))
+                                        .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                                }
+                            }
+                    }
+                }
+
+                // Loading indicator overlay - only when uploading avatar
+                if viewModel.isUploadingAvatar {
+                    Circle()
+                        .fill(Color.black.opacity(0.5))
+                        .frame(width: 120, height: 120)
+
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(1.5)
+                }
+
+                // Camera button - tappable to change image (any member)
+                if !viewModel.isUploadingAvatar && isMember {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Button {
+                                showImagePicker = true
+                            } label: {
+                                Image(systemName: "camera.circle.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(.white)
+                                    .background(
+                                        Circle()
+                                            .fill(selectedTheme.colors(for: colorScheme).accent)
+                                            .frame(width: 32, height: 32)
+                                    )
+                            }
+                            #if os(macOS)
+                            .buttonStyle(.plain)
+                            .focusable(false)
+                            #endif
+                            .contentShape(Circle())
+                            .offset(x: -8, y: -8)
+                        }
+                    }
+                    .frame(width: 120, height: 120)
+                }
+            }
+            
+            if isEditingName {
+                VStack(spacing: 12) {
+                    TextField("Room Name", text: $editedName, axis: .vertical)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(1...5)
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(selectedTheme.colors(for: colorScheme).accent.opacity(0.3), lineWidth: 1)
+                        )
+
+                    HStack(spacing: 16) {
+                        Button {
+                            isEditingName = false
+                            editedName = viewModel.room.name
+                        } label: {
+                            Text("Cancel")
+                                .font(.subheadline)
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 10)
+                                .background(
+                                    Capsule()
+                                        .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+                                )
+                        }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        #endif
+                        .contentShape(RoundedRectangle(cornerRadius: 12))
+
+                        Button {
+                            Task {
+                                await viewModel.updateRoomName(editedName)
+                                isEditingName = false
+                            }
+                        } label: {
+                            Text("Save")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 10)
+                                .background(
+                                    Capsule()
+                                        .fill(selectedTheme.colors(for: colorScheme).accent)
+                                )
+                        }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        #endif
+                        .contentShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+                .padding(.horizontal)
+            } else {
+                HStack {
+                    Text(viewModel.room.name)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+
+                    if isMember {
+                        Button {
+                            editedName = viewModel.room.name
+                            isEditingName = true
+                        } label: {
+                            Image(systemName: "pencil.circle.fill")
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                        }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        #endif
+                        .contentShape(Circle())
+                    }
+                }
+            }
+            
+            HStack(spacing: 4) {
+                Image(systemName: "person.2.fill")
+                    .font(.caption)
+                Text("\(viewModel.room.resolvedMemberCount) members")
+                    .font(.subheadline)
+            }
+            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+        }
+    }
+    
+    private var roomInfoSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Description", systemImage: "text.alignleft")
+                        .font(.headline)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                    
+                    Spacer()
+                    
+                    if !isEditingDescription && isMember {
+                        Button {
+                            editedDescription = viewModel.room.description ?? ""
+                            isEditingDescription = true
+                        } label: {
+                            Image(systemName: "pencil.circle.fill")
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                        }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        #endif
+                        .contentShape(Circle())
+                    }
+                }
+                
+                if isEditingDescription {
+                    VStack(spacing: 8) {
+                        TextEditor(text: $editedDescription)
+                            .frame(minHeight: 100)
+                            .padding(8)
+                            .background(selectedTheme.colors(for: colorScheme).background)
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(selectedTheme.colors(for: colorScheme).accent.opacity(0.3), lineWidth: 1)
+                            )
+                        
+                        HStack {
+                            Button {
+                                isEditingDescription = false
+                                editedDescription = viewModel.room.description ?? ""
+                            } label: {
+                                Text("Cancel")
+                                    .font(.subheadline)
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Button {
+                                Task {
+                                    await viewModel.updateRoomDescription(editedDescription)
+                                    isEditingDescription = false
+                                }
+                            } label: {
+                                Text("Save")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                            }
+                        }
+                    }
+                } else {
+                    if let description = viewModel.room.description, !description.isEmpty {
+                        Text(description)
+                            .font(.body)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                    } else {
+                        Text("No description")
+                            .font(.body)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.5))
+                            .italic()
+                    }
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selectedTheme.colors(for: colorScheme).cardBackground)
+            .cornerRadius(12)
+            
+            HStack {
+                Label("Type", systemImage: "shield.fill")
+                    .font(.subheadline)
+                Spacer()
+                Text(viewModel.room.type.rawValue)
+                    .font(.subheadline)
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+            }
+            .padding()
+            .background(selectedTheme.colors(for: colorScheme).cardBackground)
+            .cornerRadius(12)
+            
+            HStack {
+                Label("Visibility", systemImage: viewModel.room.isPrivate ? "lock.fill" : "globe")
+                    .font(.subheadline)
+                
+                Spacer()
+                
+                HStack(spacing: 8) {
+                    Text(viewModel.room.isPrivate ? "Private" : "Public")
+                        .font(.subheadline)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+
+                    if isMember {
+                        Button {
+                            pendingVisibilityValue = !viewModel.room.isPrivate
+                            showVisibilityAlert = true
+                        } label: {
+                            Text(viewModel.room.isPrivate ? "Make Public" : "Make Private")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(selectedTheme.colors(for: colorScheme).accent.opacity(0.1))
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                                .cornerRadius(8)
+                        }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        #endif
+                        .contentShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+            .padding()
+            .background(selectedTheme.colors(for: colorScheme).cardBackground)
+            .cornerRadius(12)
+            
+            HStack {
+                Label("Created", systemImage: "calendar")
+                    .font(.subheadline)
+                Spacer()
+                Text(viewModel.room.createdAt, style: .date)
+                    .font(.subheadline)
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+            }
+            .padding()
+            .background(selectedTheme.colors(for: colorScheme).cardBackground)
+            .cornerRadius(12)
+
+            // Message lifetime row — only for Chamber of Secrets rooms
+            if viewModel.room.type == .secret {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("Message Lifetime", systemImage: "timer")
+                            .font(.subheadline)
+
+                        Spacer()
+
+                        if isEditingMessageLifetime {
+                            Button("Cancel") {
+                                isEditingMessageLifetime = false
+                            }
+                            .font(.caption)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                            #if os(macOS)
+                            .buttonStyle(.plain)
+                            .focusable(false)
+                            #endif
+                        } else {
+                            HStack(spacing: 8) {
+                                if let lifetime = viewModel.room.messageLifetime, lifetime > 0 {
+                                    Text(formatLifetime(lifetime))
+                                        .font(.subheadline)
+                                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                                } else {
+                                    Text("Not set")
+                                        .font(.subheadline)
+                                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.5))
+                                        .italic()
+                                }
+
+                                if isMember {
+                                    Button {
+                                        // Pre-select current lifetime in picker
+                                        if let lifetime = viewModel.room.messageLifetime, lifetime > 0 {
+                                            let idx = lifetimeOptions.firstIndex { $0.seconds == lifetime } ?? 1
+                                            selectedLifetimeIndex = idx
+                                        }
+                                        isEditingMessageLifetime = true
+                                    } label: {
+                                        Image(systemName: "pencil.circle.fill")
+                                            .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                                    }
+                                    #if os(macOS)
+                                    .buttonStyle(.plain)
+                                    .focusable(false)
+                                    #endif
+                                    .contentShape(Circle())
+                                }
+                            }
+                        }
+                    }
+
+                    if isEditingMessageLifetime {
+                        VStack(spacing: 12) {
+                            Picker("Message Lifetime", selection: $selectedLifetimeIndex) {
+                                ForEach(lifetimeOptions.indices, id: \.self) { idx in
+                                    Text(lifetimeOptions[idx].label).tag(idx)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+
+                            Button {
+                                let chosen = lifetimeOptions[selectedLifetimeIndex].seconds
+                                isEditingMessageLifetime = false
+                                Task { await viewModel.updateMessageLifetime(chosen) }
+                            } label: {
+                                Text("Save")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .background(
+                                        Capsule()
+                                            .fill(selectedTheme.colors(for: colorScheme).accent)
+                                    )
+                            }
+                            #if os(macOS)
+                            .buttonStyle(.plain)
+                            .focusable(false)
+                            #endif
+                            .contentShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(selectedTheme.colors(for: colorScheme).cardBackground)
+                .cornerRadius(12)
+            }
+        }
+    }
+    
+    private var membersSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Members")
+                .font(.headline)
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                .padding(.horizontal)
+            
+            if viewModel.isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding()
+            } else if viewModel.members.isEmpty {
+                Text("No members found")
+                    .font(.subheadline)
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(viewModel.members) { member in
+                        MemberRowView(
+                            member: member,
+                            isCreator: member.id == viewModel.room.createdBy,
+                            isCurrentUser: member.id == currentUserId,
+                            canRemove: isCreator && member.id != currentUserId,
+                            onRemove: {
+                                Task {
+                                    await viewModel.removeMember(member.id)
+                                }
+                            }
+                        )
+                        
+                        if member.id != viewModel.members.last?.id {
+                            Divider()
+                                .padding(.leading, 60)
+                        }
+                    }
+                }
+                .background(selectedTheme.colors(for: colorScheme).cardBackground)
+                .cornerRadius(12)
+            }
+        }
+    }
+    
+    private var actionsSection: some View {
+        VStack(spacing: 12) {
+            Button(role: .destructive) {
+                showDeleteRoomAlert = true
+            } label: {
+                HStack {
+                    if isDeleting {
+                        ProgressView()
+                            .tint(selectedTheme.colors(for: colorScheme).destructive)
+                    }
+                    Label("Delete Room", systemImage: "trash.fill")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
+                .cornerRadius(12)
+            }
+            #if os(macOS)
+            .buttonStyle(.plain)
+            .focusable(false)
+            #endif
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+            .disabled(isDeleting)
+        }
+        .alert("Delete Room", isPresented: $showDeleteRoomAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task {
+                    await deleteRoom()
+                }
+            }
+        } message: {
+            Text("Are you sure you want to delete \"\(viewModel.room.name)\"? This will permanently delete the room and all its messages. This action cannot be undone.")
+        }
+    }
+
+    private func deleteRoom() async {
+        isDeleting = true
+        do {
+            let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+            try await ConvexChatAPI.shared.deleteRoom(roomId: viewModel.room.id, userId: userId)
+            // Remove from local list
+            ChatRepository.shared.removeRoomOptimistically(viewModel.room.id)
+            // Dismiss this view
+            await MainActor.run {
+                dismiss()
+            }
+            // Navigate back to room list
+            NavigationStateManager.shared.path.removeLast(NavigationStateManager.shared.path.count)
+        } catch {
+            isDeleting = false
+            AlertManager.shared.showAlert(title: "Error", message: friendlyErrorMessage(error, fallback: "Failed to delete room. Please try again."))
+        }
+    }
+}
+
+struct MemberRowView: View {
+    let member: ChatUser
+    let isCreator: Bool
+    let isCurrentUser: Bool
+    let canRemove: Bool
+    let onRemove: () -> Void
+    
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @State private var avatarImage: PlatformImage?
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Group {
+                if let avatarImage = avatarImage {
+                    Image(platformImage: avatarImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 44, height: 44)
+                        .clipShape(Circle())
+                } else {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: selectedTheme.colors(for: colorScheme).primary,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 44, height: 44)
+                        .overlay(
+                            Text(member.displayInitial)
+                                .font(.headline)
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                        )
+                }
+            }
+            .task(id: member.avatarStorageId) {
+                avatarImage = nil
+                guard let storageId = member.avatarStorageId else { return }
+                if let image = await ConvexFileCacheService.shared.image(for: storageId) {
+                    avatarImage = image
+                }
+            }
+            
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(member.displayName)
+                        .font(.body)
+                        .fontWeight(.medium)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                    
+                    if isCreator {
+                        Image(systemName: "crown.fill")
+                            .font(.caption2)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                    }
+                    
+                    if isCurrentUser {
+                        Text("(You)")
+                            .font(.caption)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                    }
+                }
+                
+                if !member.username.isEmpty {
+                    Text("@\(member.username)")
+                        .font(.caption)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                }
+                
+                if !member.email.isEmpty {
+                    Text(member.email)
+                        .font(.caption2)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.8))
+                }
+            }
+            
+            Spacer()
+            
+            if canRemove {
+                Button(role: .destructive) {
+                    onRemove()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
+                }
+                #if os(macOS)
+                .buttonStyle(.plain)
+                .focusable(false)
+                #endif
+                .contentShape(Circle())
+            }
+        }
+        .padding()
+    }
+    
+}
+
+// MARK: - Zoomable Avatar Overlay
+private struct ZoomableAvatarOverlay: View {
+    let image: PlatformImage
+    let namespace: Namespace.ID
+    @Binding var isPresented: Bool
+
+    @State private var backgroundOpacity: Double = 0
+    @State private var dragOffset: CGSize = .zero
+    @State private var scale: CGFloat = 1
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // Background
+                Color.black
+                    .opacity(backgroundOpacity)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        dismissWithAnimation()
+                    }
+
+                // Zoomed image
+                Image(platformImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .matchedGeometryEffect(id: "roomAvatar", in: namespace, isSource: isPresented)
+                    .scaleEffect(scale)
+                    .offset(dragOffset)
+                    .gesture(dragGesture)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                backgroundOpacity = 1
+            }
+        }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                dragOffset = value.translation
+                let progress = min(abs(value.translation.height) / 300, 1)
+                backgroundOpacity = 1 - (progress * 0.5)
+                scale = 1 - (progress * 0.15)
+            }
+            .onEnded { value in
+                let threshold: CGFloat = 100
+                if abs(value.translation.height) > threshold ||
+                   abs(value.predictedEndTranslation.height) > threshold * 2 {
+                    dismissWithAnimation()
+                } else {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        dragOffset = .zero
+                        backgroundOpacity = 1
+                        scale = 1
+                    }
+                }
+            }
+    }
+
+    private func dismissWithAnimation() {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            backgroundOpacity = 0
+            isPresented = false
+        }
+    }
+}

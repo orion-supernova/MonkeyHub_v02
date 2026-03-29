@@ -48,6 +48,8 @@ struct UserRow: View {
     let selectUser: (ChatUser) async -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
+    @State private var avatarImage: PlatformImage?
+    @State private var isLoadingAvatar = false
 
     var body: some View {
         Button {
@@ -66,56 +68,75 @@ struct UserRow: View {
             .overlay(cardBorder)
         }
         .buttonStyle(.plain)
+        .task(id: user.avatarStorageId) {
+            avatarImage = nil
+            guard let storageId = user.avatarStorageId else { return }
+            isLoadingAvatar = true
+            if let image = await ConvexFileCacheService.shared.image(for: storageId) {
+                avatarImage = image
+            }
+            isLoadingAvatar = false
+        }
     }
 
     private var userAvatar: some View {
         ZStack {
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: selectedTheme.colors(for: colorScheme).primary,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+            if let image = avatarImage {
+                Image(platformImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 44, height: 44)
+                    .clipShape(Circle())
+            } else {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: selectedTheme.colors(for: colorScheme).primary,
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
-                )
-
-            Text(user.name.prefix(1).uppercased())
-                .font(.title3.bold())
-                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                    .frame(width: 44, height: 44)
+                    .overlay {
+                        if isLoadingAvatar {
+                            ProgressView()
+                                .tint(selectedTheme.colors(for: colorScheme).text)
+                                .scaleEffect(0.8)
+                        } else {
+                            Text(user.displayInitial)
+                                .font(.title3.bold())
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                        }
+                    }
+            }
         }
         .frame(width: 44, height: 44)
+        .shadow(color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.2), radius: 4, y: 2)
     }
 
     private var userInfo: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(user.name)
+            Text(user.displayName)
                 .font(.headline)
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
 
-            Text("Tap to start chatting")
+            Text(statusSubtitle)
                 .font(.caption)
-                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                .foregroundStyle(statusColor)
         }
     }
 
     private var messageIcon: some View {
-        Image(systemName: "message.circle.fill")
-            .font(.title3)
-            .foregroundStyle(
-                LinearGradient(
-                    colors: [
-                        selectedTheme.colors(for: colorScheme).accent,
-                        selectedTheme.colors(for: colorScheme).accent.opacity(0.8),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .shadow(
-                color: selectedTheme.colors(for: colorScheme).accent.opacity(0.3),
-                radius: 4,
-                y: 2
-            )
+        HStack(spacing: 6) {
+            Image(systemName: statusIcon)
+                .font(.caption.bold())
+            Text(user.friendshipStatus.actionLabel)
+                .font(.caption.bold())
+        }
+        .foregroundStyle(statusColor)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(statusColor.opacity(0.12), in: Capsule())
     }
 
     private var cardBackground: some View {
@@ -143,6 +164,43 @@ struct UserRow: View {
                 ),
                 lineWidth: 1
             )
+    }
+
+    private var statusSubtitle: String {
+        switch user.friendshipStatus {
+        case .none:
+            return "Send a friend request — optionally include a message."
+        case .friend:
+            return "Choose Regular Room or Chamber of Secrets."
+        case .outgoingPending:
+            return "Friend request already sent."
+        case .incomingPending:
+            return "This user already sent you a request."
+        }
+    }
+
+    private var statusIcon: String {
+        switch user.friendshipStatus {
+        case .none:
+            return "paperplane.fill"
+        case .friend:
+            return "bubble.left.and.bubble.right.fill"
+        case .outgoingPending:
+            return "clock.fill"
+        case .incomingPending:
+            return "person.badge.plus"
+        }
+    }
+
+    private var statusColor: Color {
+        switch user.friendshipStatus {
+        case .none:
+            return selectedTheme.colors(for: colorScheme).accent
+        case .friend:
+            return .green
+        case .outgoingPending, .incomingPending:
+            return .orange
+        }
     }
 }
 

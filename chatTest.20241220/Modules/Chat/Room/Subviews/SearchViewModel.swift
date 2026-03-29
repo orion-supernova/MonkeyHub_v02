@@ -1,92 +1,20 @@
-import CloudKit
-import Combine
+import Foundation
 import SwiftUI
+import Combine
 
 @MainActor
 class SearchViewModel: ObservableObject {
     @Published var searchText = ""
-    @Published private(set) var users: [ChatUser] = []
-    @Published private(set) var rooms: [ChatRoom] = []
-    @Published private(set) var isSearching = false
-    @Published private(set) var errorMessage: String?
-
-    private let cloudKit: CloudKitManager
-    private var cancellables = Set<AnyCancellable>()
-
-    init(cloudKit: CloudKitManager = .shared) {
-        self.cloudKit = cloudKit
-    }
-
-    // Manual search trigger for use with the search button
-    func search() async {
-        await performSearch(query: searchText)
-    }
-
-    // Perform the actual search operation
-    func performSearch(query: String) async {
-        guard !query.isEmpty && query.count >= 2 else {
-            rooms = []
-            users = []
-            errorMessage = query.isEmpty ? nil : "Search term must be at least 2 characters"
-            return
-        }
-
-        isSearching = true
-        errorMessage = nil
-
-        do {
-            switch searchMode {
-            case .rooms:
-                rooms = try await cloudKit.searchRooms(matching: query)
-                print("🔍 Found \(rooms.count) rooms:")
-                rooms.forEach { room in
-                    print("  • \(room.name) (\(room.participants.count) participants)")
-                }
-                users = []
-            case .users:
-                users = try await searchUsers(matching: query)
-                print("🔍 Found \(users.count) users:")
-                users.forEach { user in
-                    print("  • \(user.name) (\(user.email))")
-                }
-                rooms = []
-            }
-        } catch let error as CKError {
-            rooms = []
-            users = []
-
-            // Print raw CloudKit error details
-            print("⚠️ SEARCH ERROR: \(error.code.rawValue)")
-            print("📝 Error description: \(error.localizedDescription)")
-
-            // Print server message if available
-            if let serverMessage = error.errorUserInfo["CKErrorDescription"] as? String {
-                print("🔍 SERVER MESSAGE: \(serverMessage)")
-            }
-
-            // Print the full error info for debugging
-            print("📊 Full error details: \(error)")
-
-            // Use direct server error message or fallback to localized description
-            errorMessage =
-                error.errorUserInfo["CKErrorDescription"] as? String ?? error.localizedDescription
-        } catch {
-            rooms = []
-            users = []
-            print("❓ UNEXPECTED ERROR: \(error)")
-            errorMessage = error.localizedDescription
-        }
-
-        isSearching = false
-    }
-
-    private func searchUsers(matching query: String) async throws -> [ChatUser] {
-        // Use CloudKit predicates to search on the server instead of fetching all users
-        return try await cloudKit.searchUsers(matching: query)
-    }
-
-    // Current search mode
     @Published var searchMode: SearchMode = .rooms
+    @Published private(set) var rooms: [ChatRoom] = []
+    @Published private(set) var users: [ChatUser] = []
+    @Published private(set) var isSearching = false
+    @Published var errorMessage: String?
+    @Published private(set) var joinedRoomIds: Set<String> = []
+
+    private let convexAPI = ConvexChatAPI.shared
+    private var searchCancellable: AnyCancellable?
+    private var currentSearchTask: Task<Void, Never>?
 
     enum SearchMode: String, CaseIterable {
         case rooms = "Rooms"
@@ -94,30 +22,108 @@ class SearchViewModel: ObservableObject {
 
         var icon: String {
             switch self {
-            case .rooms: return "bubble.left.and.bubble.right.fill"
-            case .users: return "person.2.fill"
+            case .rooms: return "bubble.left.and.bubble.right"
+            case .users: return "person.2"
             }
         }
     }
 
-    // Change search mode and clear previous results
-    func setSearchMode(_ mode: SearchMode) {
-        guard searchMode != mode else { return }
-        searchMode = mode
-        users = []
-        rooms = []
+    init() {
+        // Search fires 300ms after the user stops typing. Any new keystroke resets the timer,
+        // and any in-flight search task from a previous term is cancelled before the new one starts.
+        searchCancellable = $searchText
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.scheduleSearch()
+            }
     }
 
-    // Clear search results and text
+    deinit {
+        currentSearchTask?.cancel()
+    }
+
+    // MARK: - Public Interface
+
+    func setSearchMode(_ mode: SearchMode) {
+        searchMode = mode
+        clearResults()
+        if !searchText.isEmpty {
+            scheduleSearch()
+        }
+    }
+
     func clearSearch() {
         searchText = ""
-        users = []
-        rooms = []
+        clearResults()
         errorMessage = nil
     }
 
-    // Add method to clear error message
     func clearErrorMessage() {
         errorMessage = nil
+    }
+
+    /// Called by the view on disappear. Cancels any in-flight search task and tears down
+    /// the text subscription so no further work runs after the sheet is dismissed.
+    func cleanup() {
+        currentSearchTask?.cancel()
+        currentSearchTask = nil
+        searchCancellable = nil
+    }
+
+    func isRoomJoined(_ room: ChatRoom) -> Bool {
+        joinedRoomIds.contains(room.id)
+    }
+
+    // MARK: - Private
+
+    private func scheduleSearch() {
+        // Cancel the previous task before starting a new one. This prevents concurrent
+        // searches from piling up when the user types quickly, and ensures a cancelled
+        // task releases its strong `self` reference so the ViewModel can deinit cleanly.
+        currentSearchTask?.cancel()
+        currentSearchTask = Task { await search() }
+    }
+
+    private func search() async {
+        guard !searchText.isEmpty else { clearResults(); return }
+
+        isSearching = true
+        errorMessage = nil
+        defer { isSearching = false }
+
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+
+        do {
+            switch searchMode {
+            case .rooms:
+                let allPublic = try await convexAPI.fetchPublicRooms()
+                guard !Task.isCancelled else { return }
+
+                let joinedIdsFromRepository = Set(ChatRepository.shared.rooms.map(\.id))
+                if joinedIdsFromRepository.isEmpty {
+                    let joinedRooms = try await convexAPI.fetchUserRooms(userId: userId)
+                    guard !Task.isCancelled else { return }
+                    joinedRoomIds = Set(joinedRooms.map(\.id))
+                } else {
+                    joinedRoomIds = joinedIdsFromRepository
+                }
+
+                rooms = allPublic.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+
+            case .users:
+                let result = try await convexAPI.searchUsers(query: searchText, currentUserId: userId)
+                guard !Task.isCancelled else { return }
+                users = result
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            errorMessage = "Search failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func clearResults() {
+        rooms = []
+        users = []
+        joinedRoomIds = []
     }
 }

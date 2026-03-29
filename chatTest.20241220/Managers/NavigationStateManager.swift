@@ -13,6 +13,7 @@ class NavigationStateManager: ObservableObject {
     @Published var currentScreen: Screen = .home
     @Published var currentRoomId: String? = nil  // Track active chatroom for notification suppression
     @Published var path = NavigationPath()
+    @Published var pendingRoomId: String? = nil  // Stores roomId from notification tap before rooms finish loading
 
     private init() {}
 
@@ -22,6 +23,26 @@ class NavigationStateManager: ObservableObject {
             object: nil,
             userInfo: ["roomId": id]
         )
+    }
+
+    func navigateToRoom(_ room: ChatRoom) {
+        NotificationCenter.default.post(
+            name: NSNotification.Name("OpenChatRoom"),
+            object: nil,
+            userInfo: ["room": room]
+        )
+    }
+
+    func navigateToDraftChat(_ draft: DraftDirectChatSession) {
+        NotificationCenter.default.post(
+            name: NSNotification.Name("OpenDraftChat"),
+            object: nil,
+            userInfo: ["draft": draft]
+        )
+    }
+
+    func resetToRoot() {
+        path = NavigationPath()
     }
 
     var shouldShowFloatingMenu: Bool {

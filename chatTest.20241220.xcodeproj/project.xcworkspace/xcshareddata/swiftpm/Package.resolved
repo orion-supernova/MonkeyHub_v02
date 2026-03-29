@@ -1,0 +1,24 @@
+{
+  "originHash" : "6a7172a3e415e5f509b61c2e2c7b9667a929b3415b799e0aa34b7a87e37dd9cd",
+  "pins" : [
+    {
+      "identity" : "convex-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/get-convex/convex-swift.git",
+      "state" : {
+        "revision" : "125b71b2f8725931a5b0e8252f0799ef2adad120",
+        "version" : "0.8.1"
+      }
+    },
+    {
+      "identity" : "onesignal-ios-sdk",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/OneSignal/OneSignal-iOS-SDK.git",
+      "state" : {
+        "revision" : "d21c96dfc34dfffc94875adb965de25f62c99eb0",
+        "version" : "5.5.0"
+      }
+    }
+  ],
+  "version" : 3
+}

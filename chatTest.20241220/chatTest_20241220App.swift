@@ -5,70 +5,43 @@
 //  Created by muratcankoc on 20/12/2024.
 //
 
-import CloudKit
 import SwiftUI
 
 @main
 struct chatTest_20241220App: App {
-    @StateObject private var cloudKit = CloudKitManager.shared
-    
-    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
+    @StateObject private var auth = ConvexAuthService.shared
+
+    #if canImport(UIKit)
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var uiAppDelegate
+    #endif
+
+    init() {
+        // Restore theme from Keychain so it survives reinstalls.
+        // @AppStorage uses UserDefaults which is wiped on fresh install,
+        // but Keychain persists. Seed UserDefaults if it hasn't been set yet.
+        if UserDefaults.standard.string(forKey: "selectedTheme") == nil,
+           let saved = KeychainService.get("selectedTheme") {
+            UserDefaults.standard.set(saved, forKey: "selectedTheme")
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
-            // The view that checks for iCloud status and shows different views
             MainView()
-                .environmentObject(cloudKit)
-                .onReceive(
-                    NotificationCenter.default.publisher(
-                        for: UIApplication.didBecomeActiveNotification)
-                ) { _ in
-                    // Trigger the initialization of CloudKit whenever the app becomes active
-                    Task {
-                        await cloudKit.initialize()
-                    }
-                }
+                .environmentObject(auth)
                 .withAlertManager()
         }
     }
 }
 
 struct MainView: View {
-    @EnvironmentObject var cloudKit: CloudKitManager
+    @EnvironmentObject var auth: ConvexAuthService
 
     var body: some View {
-        if !cloudKit.isInitialized {
-            LoadingView()
+        if auth.isAuthenticated {
+            BaseView()
         } else {
-            switch cloudKit.iCloudStatus {
-            case .available:
-                let isLocallyAuthenticated = userDefaults.string(forKey: userIdUserDefaultsKey) != nil
-                
-                if cloudKit.isAuthenticated || isLocallyAuthenticated {
-                    BaseView()
-                        .onAppear {
-                            if !cloudKit.isAuthenticated {
-                                cloudKit.isAuthenticated = true
-                            }
-                        }
-                } else {
-                    LoginView()
-                }
-            case .noAccount:
-                ICloudErrorView(message: "Please sign in to iCloud in Settings")
-            case .restricted:
-                ICloudErrorView(message: "iCloud access is restricted")
-            case .noInternet:
-                ICloudErrorView(message: "Please check your internet connection")
-            case .error(let error):
-                ICloudErrorView(message: error.localizedDescription)
-            case .unknown:
-                LoadingView()
-            case .temporarilyUnavailable:
-                ICloudErrorView(
-                    message: "iCloud is temporarily unavailable. Please try again later"
-                )
-            }
+            LoginView()
         }
     }
 }

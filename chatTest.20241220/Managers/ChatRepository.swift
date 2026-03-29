@@ -1,10 +1,10 @@
-import Foundation
 import Combine
-import CloudKit
+import Foundation
 import SwiftUI
 
-/// A robust Single Source of Truth (SSOT) responsible for all Chat Data.
-/// Manages the authoritative list of rooms, active messages, and handles incoming push data.
+/// Single Source of Truth for all chat data.
+/// Real-time updates arrive via ConvexSubscriptionManager.
+/// Local disk cache is used only for fast bootstrap; Convex remains authoritative.
 @MainActor
 class ChatRepository: ObservableObject {
     static let shared = ChatRepository()
@@ -13,337 +13,490 @@ class ChatRepository: ObservableObject {
     @Published var rooms: [ChatRoom] = []
     @Published var activeRoomMessages: [ChatMessage] = []
     @Published var unreadCounts: [String: Int] = [:]
+    @Published var roomListTyping: [String: [String]] = [:]  // roomId → [typer names]
+    @Published var friends: [ChatUser] = []
+    @Published var incomingRequests: [FriendRequest] = []
+    @Published var outgoingRequests: [FriendRequest] = []
+    @Published var activeRequestMessages: [FriendRequestMessage] = []
 
-    // MARK: - Internal Dependencies
-    private let cloudKit = CloudKitManager.shared
+    // MARK: - Dependencies
+    private let convexAPI = ConvexChatAPI.shared
     private let persistence = MessagePersistenceService.shared
-    private let userIdUserDefaultsKey = "userId"
     private var activeRoomId: String?
+    private var activeRequestId: String?
+    private var hasPerformedInitialRoomFetch = false
 
     private init() {
         rooms = persistence.loadRooms()
         unreadCounts = persistence.loadUnreadCounts()
-        // Initialize badge on start
         updateGlobalBadge()
     }
 
+    // MARK: - Subscription Callbacks (called by ConvexSubscriptionManager)
+
+    func handleFriendsUpdate(_ updatedFriends: [ChatUser]) {
+        withAnimation {
+            friends = updatedFriends.sorted {
+                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            }
+        }
+        NotificationCenter.default.post(name: .friendRequestsUpdated, object: nil)
+    }
+
+    func handleIncomingRequestsUpdate(_ updatedRequests: [FriendRequest]) {
+        withAnimation {
+            incomingRequests = updatedRequests.sorted { $0.createdAt > $1.createdAt }
+        }
+        updateGlobalBadge()
+        NotificationCenter.default.post(name: .friendRequestsUpdated, object: nil)
+    }
+
+    func handleOutgoingRequestsUpdate(_ updatedRequests: [FriendRequest]) {
+        withAnimation {
+            outgoingRequests = updatedRequests.sorted { $0.createdAt > $1.createdAt }
+        }
+        NotificationCenter.default.post(name: .friendRequestsUpdated, object: nil)
+    }
+
+    func handleRequestMessagesUpdate(_ messages: [FriendRequestMessage], for requestId: String) {
+        guard requestId == activeRequestId else { return }
+        withAnimation {
+            activeRequestMessages = messages.sorted { $0.createdAt < $1.createdAt }
+        }
+    }
+
+    func setActiveRequest(_ requestId: String?) {
+        activeRequestId = requestId
+        if let requestId {
+            ConvexSubscriptionManager.shared.subscribeToRequestMessages(requestId)
+        } else {
+            ConvexSubscriptionManager.shared.unsubscribeFromRequestMessages()
+            activeRequestMessages = []
+        }
+    }
+
+    /// Called when Convex room list subscription delivers updated rooms.
+    func handleRoomsUpdate(_ updatedRooms: [ChatRoom]) {
+        let mergedRooms = mergeCachedRoomData(into: updatedRooms)
+
+        if !rooms.isEmpty {
+            // Rooms that disappeared were deleted or user was removed — notify open views.
+            let removedIds = Set(rooms.map { $0.id }).subtracting(mergedRooms.map { $0.id })
+            for roomId in removedIds {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("RoomWasDeleted"),
+                    object: nil,
+                    userInfo: ["roomId": roomId]
+                )
+            }
+
+            // Increment unread counts for rooms that received a new message
+            // while the user is not in that room (Convex subscription-driven).
+            let previousById = Dictionary(uniqueKeysWithValues: rooms.map { ($0.id, $0) })
+            for updated in mergedRooms {
+                guard updated.id != activeRoomId,
+                      let previous = previousById[updated.id],
+                      let newTime = updated.lastMessageDate else { continue }
+                // oldTime nil means the room had no messages before — treat first message as new.
+                let isNew = previous.lastMessageDate.map { newTime > $0 } ?? true
+                if isNew { unreadCounts[updated.id, default: 0] += 1 }
+            }
+        }
+        hasPerformedInitialRoomFetch = true
+        withAnimation { rooms = mergedRooms }
+        reconcileUnreadCounts()
+        updateGlobalBadge()
+        persistRoomState()
+    }
+
+    /// Called when the typing-for-user subscription delivers updated data.
+    func handleRoomListTypingUpdate(_ typingMap: [String: [String]]) {
+        roomListTyping = typingMap
+    }
+
+    /// Called when Convex messages subscription delivers updated message list.
+    /// The list is COMPLETE — Convex is authoritative.
+    func handleMessagesSubscriptionUpdate(_ serverMessages: [ChatMessage], for roomId: String) {
+        guard roomId == activeRoomId else { return }
+
+        let serverIds = Set(serverMessages.map { $0.id })
+        // For text messages: match by senderId+content
+        let serverTextKeys = Set(
+            serverMessages.filter { $0.mediaStorageId == nil }
+                .map { "\($0.senderId)|\($0.content)" }
+        )
+        // For media messages: match by storageId (more accurate — avoids "📷 Photo" key collisions)
+        let serverStorageIds = Set(serverMessages.compactMap { $0.mediaStorageId })
+
+        // Preserve local assetURLs from confirmed pending messages so sender
+        // keeps seeing their image after the server message replaces the optimistic.
+        var storageIdToAssetURL: [String: URL] = [:]
+
+        let unconfirmed = activeRoomMessages.filter { pending in
+            guard pending.status == .pending || pending.status == .error else { return false }
+            guard !serverIds.contains(pending.id) else { return false }
+            if pending.status == .pending {
+                if let storageId = pending.mediaStorageId {
+                    // Media: confirmed when server has same storageId
+                    if serverStorageIds.contains(storageId) {
+                        if let assetURL = pending.assetURL { storageIdToAssetURL[storageId] = assetURL }
+                        return false
+                    }
+                } else if serverTextKeys.contains("\(pending.senderId)|\(pending.content)") {
+                    // Text: confirmed when server has same sender+content
+                    return false
+                }
+            }
+            return true
+        }
+
+        // Apply preserved assetURLs to the matching server messages
+        var merged: [ChatMessage] = serverMessages.map { msg in
+            guard let storageId = msg.mediaStorageId,
+                  let assetURL = storageIdToAssetURL[storageId],
+                  msg.assetURL == nil else { return msg }
+            var m = msg
+            m.assetURL = assetURL
+            return m
+        }
+        merged.append(contentsOf: unconfirmed)
+        merged.sort { $0.timestamp < $1.timestamp }
+
+        activeRoomMessages = merged
+        persistMessages(for: roomId)
+    }
+
+    // MARK: - Optimistic Helpers for Media Sending
+
+    /// Insert a pending message immediately (before upload completes) so the UI shows feedback.
+    func insertOptimistic(_ message: ChatMessage) {
+        var pending = message
+        pending.status = .pending
+        upsertMessage(pending, in: message.roomId)
+    }
+
+    /// Mark an optimistic message as failed (e.g. upload error).
+    func failOptimistic(id: String, in roomId: String) {
+        guard roomId == activeRoomId,
+              let idx = activeRoomMessages.firstIndex(where: { $0.id == id }) else { return }
+        activeRoomMessages[idx].status = .error
+    }
+
+    // MARK: - Unread / Badge Helpers
+
+    private func reconcileUnreadCounts() {
+        let validIds = Set(rooms.map { $0.id })
+        for id in unreadCounts.keys where !validIds.contains(id) {
+            unreadCounts.removeValue(forKey: id)
+        }
+    }
+
     private func updateGlobalBadge() {
-        let total = unreadCounts.values.reduce(0, +)
+        let validIds = Set(rooms.map { $0.id })
+        let roomUnreads = unreadCounts.filter { validIds.contains($0.key) }.values.reduce(0, +)
+        let total = roomUnreads + incomingRequests.count
         BadgeManager.shared.updateBadge(count: total)
-        
-        // Persist
+    }
+
+    // MARK: - Room Management
+
+    func ensureRoomsLoaded() async {
+        guard !hasPerformedInitialRoomFetch else { return }
+
+        guard rooms.isEmpty else {
+            hasPerformedInitialRoomFetch = true
+            return
+        }
+        await fetchRooms(force: true)
+    }
+
+    func fetchRooms(force: Bool = false) async {
+        if !force, !rooms.isEmpty {
+            hasPerformedInitialRoomFetch = true
+            return
+        }
+
+        guard let userId = userDefaults.string(forKey: userIdUserDefaultsKey) else { return }
+        do {
+            let fetched = try await convexAPI.fetchUserRooms(userId: userId)
+            let mergedRooms = mergeCachedRoomData(into: fetched)
+            hasPerformedInitialRoomFetch = true
+            withAnimation { rooms = mergedRooms }
+            reconcileUnreadCounts()
+            updateGlobalBadge()
+            persistRoomState()
+        } catch {
+            AppLogger.shared.logError("ChatRepository.fetchRooms", error)
+        }
+    }
+
+    func addRoomOptimistically(_ room: ChatRoom) {
+        guard !rooms.contains(where: { $0.id == room.id }) else { return }
+        withAnimation { rooms.insert(room, at: 0) }
+        persistRoomState()
+    }
+
+    func removeRoomOptimistically(_ roomId: String) {
+        withAnimation { rooms.removeAll { $0.id == roomId } }
+        unreadCounts.removeValue(forKey: roomId)
+        updateGlobalBadge()
+        persistRoomState()
+    }
+
+    func markRoomAsRead(roomId: String) {
+        unreadCounts[roomId] = 0
+        updateGlobalBadge()
+        persistUnreadCounts()
+    }
+
+    /// Clears the active room only if it still matches the expected roomId.
+    /// Safe to call from deinit Tasks where a new room may already be active.
+    func clearIfActive(_ roomId: String) {
+        guard activeRoomId == roomId else { return }
+        setActiveRoom(nil)
+    }
+
+    func setActiveRoom(_ roomId: String?) {
+        activeRoomId = roomId
+        if let roomId {
+            ConvexSubscriptionManager.shared.subscribeToRoom(roomId)
+            // Defer @Published mutations — setActiveRoom is called from ChatRoomViewModel.init
+            // which runs during @StateObject creation (a view update). Publishing synchronously
+            // here would trigger "Publishing from within view updates" warnings.
+            let cachedMessages = hydrateCachedMessages(persistence.loadMessages(for: roomId))
+            Task { [weak self] in
+                self?.markRoomAsRead(roomId: roomId)
+                self?.activeRoomMessages = cachedMessages
+            }
+        } else {
+            ConvexSubscriptionManager.shared.unsubscribeFromCurrentRoom()
+            Task { [weak self] in
+                self?.activeRoomMessages = []
+            }
+        }
+    }
+
+    // MARK: - Message Management
+
+    func fetchMessages(for roomId: String, forceFullSync: Bool = false) async {
+        guard roomId == activeRoomId else { return }
+        do {
+            let messages: [ChatMessage]
+            let cached = activeRoomMessages.filter { $0.status != .pending }
+            let latestTimestamp = cached.map { $0.timestamp }.max()
+
+            if forceFullSync || latestTimestamp == nil {
+                messages = try await convexAPI.fetchMessages(roomId: roomId, limit: 100)
+            } else {
+                let since = latestTimestamp!.addingTimeInterval(-120)
+                messages = try await convexAPI.fetchMessagesSince(roomId: roomId, since: since)
+            }
+
+            if !messages.isEmpty {
+                upsertMessages(messages, in: roomId)
+            }
+        } catch {
+            AppLogger.shared.logError("ChatRepository.fetchMessages", error)
+        }
+    }
+
+    func fetchOlderMessages(for roomId: String) async -> Int {
+        guard roomId == activeRoomId, !activeRoomMessages.isEmpty else { return 0 }
+        let oldest = activeRoomMessages.first { $0.status != .pending }
+        guard let oldestDate = oldest?.timestamp else { return 0 }
+        do {
+            let older = try await convexAPI.fetchMessagesBefore(roomId: roomId, before: oldestDate, limit: 30)
+            guard !older.isEmpty else { return 0 }
+            upsertMessages(older, in: roomId)
+            return older.count
+        } catch {
+            AppLogger.shared.logError("ChatRepository.fetchOlderMessages", error)
+            return 0
+        }
+    }
+
+    func sendMessage(_ message: ChatMessage) async {
+        guard let userId = userDefaults.string(forKey: userIdUserDefaultsKey) else { return }
+
+        // Optimistic update
+        var pending = message
+        pending.status = .pending
+        upsertMessage(pending, in: message.roomId)
+
+        do {
+            _ = try await convexAPI.sendMessage(
+                roomId: message.roomId,
+                userId: userId,
+                content: message.content,
+                type: message.type,
+                senderName: message.senderName,
+                mediaStorageId: message.mediaStorageId
+            )
+            // Don't remove optimistic here — handleMessagesSubscriptionUpdate will
+            // drop it atomically when the server confirms the same content.
+            updateLocalRoom(for: message)
+        } catch {
+            AppLogger.shared.logError("ChatRepository.sendMessage", error)
+            var errorMessage = message
+            errorMessage.status = .error
+            upsertMessage(errorMessage, in: message.roomId)
+        }
+    }
+
+    func deleteMessage(_ messageId: String, in roomId: String) async {
+        guard let userId = userDefaults.string(forKey: userIdUserDefaultsKey) else { return }
+
+        if roomId == activeRoomId {
+            withAnimation { activeRoomMessages.removeAll { $0.id == messageId } }
+            persistMessages(for: roomId)
+        }
+        do {
+            try await convexAPI.deleteMessage(messageId: messageId, userId: userId)
+        } catch {
+            AppLogger.shared.logError("ChatRepository.deleteMessage", error)
+            if roomId == activeRoomId { await fetchMessages(for: roomId) }
+        }
+    }
+
+    // MARK: - Push Notification Handling (background wake only)
+
+    func handleIncomingPush(_ userInfo: [AnyHashable: Any]) {
+        guard let roomId = NotificationRouter.shared.extractRoomId(from: userInfo) else { return }
+        let senderId = userInfo["senderId"] as? String ?? ""
+        let currentUserId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+
+        if activeRoomId != roomId && senderId != currentUserId {
+            unreadCounts[roomId, default: 0] += 1
+            updateGlobalBadge()
+            persistUnreadCounts()
+        }
+
+        if let content = userInfo["content"] as? String,
+           let index = rooms.firstIndex(where: { $0.id == roomId }) {
+            var updated = rooms[index]
+            updated.lastMessage = content
+            updated.lastMessageDate = Date()
+            withAnimation {
+                rooms[index] = updated
+                let r = rooms.remove(at: index)
+                rooms.insert(r, at: 0)
+            }
+            persistRoomState()
+        } else if !rooms.contains(where: { $0.id == roomId }) {
+            Task { await fetchRooms(force: true) }
+        }
+    }
+
+    // MARK: - Room Deleted / Removed Notification
+
+    func handleRoomDeleted(roomId: String) {
+        withAnimation {
+            rooms.removeAll { $0.id == roomId }
+            unreadCounts.removeValue(forKey: roomId)
+            updateGlobalBadge()
+        }
+        persistRoomState()
+        NotificationCenter.default.post(
+            name: NSNotification.Name("RoomWasDeleted"),
+            object: nil,
+            userInfo: ["roomId": roomId]
+        )
+    }
+
+    // MARK: - Private Helpers
+
+    private func upsertMessage(_ message: ChatMessage, in roomId: String) {
+        guard roomId == activeRoomId else { return }
+        if let idx = activeRoomMessages.firstIndex(where: { $0.id == message.id }) {
+            var updated = message
+            if updated.reactions.isEmpty { updated.reactions = activeRoomMessages[idx].reactions }
+            activeRoomMessages[idx] = updated
+        } else {
+            activeRoomMessages.append(message)
+        }
+        activeRoomMessages.sort { $0.timestamp < $1.timestamp }
+        persistMessages(for: roomId)
+    }
+
+    private func upsertMessages(_ messages: [ChatMessage], in roomId: String) {
+        guard roomId == activeRoomId else { return }
+        for message in messages {
+            if let idx = activeRoomMessages.firstIndex(where: { $0.id == message.id }) {
+                var updated = message
+                if updated.reactions.isEmpty { updated.reactions = activeRoomMessages[idx].reactions }
+                activeRoomMessages[idx] = updated
+            } else {
+                activeRoomMessages.append(message)
+            }
+        }
+        activeRoomMessages.sort { $0.timestamp < $1.timestamp }
+        persistMessages(for: roomId)
+    }
+
+    private func updateLocalRoom(for message: ChatMessage) {
+        guard let idx = rooms.firstIndex(where: { $0.id == message.roomId }) else { return }
+        var updated = rooms[idx]
+        updated.lastMessage = message.content
+        updated.lastMessageDate = message.timestamp
+        withAnimation {
+            rooms[idx] = updated
+            let r = rooms.remove(at: idx)
+            rooms.insert(r, at: 0)
+        }
+        persistRoomState()
+    }
+
+    private func mergeCachedRoomData(into incomingRooms: [ChatRoom]) -> [ChatRoom] {
+        let previousById = Dictionary(uniqueKeysWithValues: rooms.map { ($0.id, $0) })
+
+        return incomingRooms.map { room in
+            var mergedRoom = room
+
+            if let previous = previousById[room.id],
+               previous.avatarStorageId == room.avatarStorageId {
+                mergedRoom.avatarURL = previous.avatarURL
+            }
+
+            if mergedRoom.avatarURL == nil,
+               let cachedAvatarURL = ConvexFileCacheService.shared.cachedLocalFileURL(for: room.avatarStorageId) {
+                mergedRoom.avatarURL = cachedAvatarURL
+            }
+
+            return mergedRoom
+        }
+    }
+
+    private func hydrateCachedMessages(_ cachedMessages: [ChatMessage]) -> [ChatMessage] {
+        cachedMessages.map { message in
+            guard message.assetURL == nil,
+                  let storageId = message.mediaStorageId,
+                  let cachedURL = ConvexFileCacheService.shared.cachedLocalFileURL(for: storageId) else {
+                return message
+            }
+
+            var hydrated = message
+            hydrated.assetURL = cachedURL
+            return hydrated
+        }
+    }
+
+    private func persistRoomState() {
+        Task {
+            await persistence.saveRooms(rooms)
+            await persistence.saveUnreadCounts(unreadCounts)
+        }
+    }
+
+    private func persistUnreadCounts() {
         Task {
             await persistence.saveUnreadCounts(unreadCounts)
         }
     }
-    
-    // MARK: - Single Source of Truth for Messages
 
-    /// Upserts a message into the active room's message list with deduplication
-    /// This is the ONLY method that should modify activeRoomMessages
-    /// - Parameters:
-    ///   - message: The message to insert or update
-    ///   - roomId: The room ID this message belongs to
-    ///   - saveToisk: Whether to persist to disk after update
-    private func upsertMessage(_ message: ChatMessage, in roomId: String, saveToDisk: Bool = true) {
-        guard roomId == activeRoomId else { return }
-
-        // Check if message already exists
-        if let existingIndex = activeRoomMessages.firstIndex(where: { $0.id == message.id }) {
-            // Update existing message (e.g., status change from pending -> sent)
-            activeRoomMessages[existingIndex] = message
-            print("🔄 ChatRepository: Updated existing message \(message.id)")
-        } else {
-            // Insert new message at the beginning (newest first)
-            activeRoomMessages.insert(message, at: 0)
-            print("➕ ChatRepository: Inserted new message \(message.id)")
-        }
-
-        if saveToDisk {
-            Task {
-                await persistence.saveMessages(activeRoomMessages, for: roomId)
-            }
-        }
-    }
-
-    /// Batch upsert multiple messages (used for fetching from CloudKit)
-    private func upsertMessages(_ messages: [ChatMessage], in roomId: String, saveToDisk: Bool = true) {
-        guard roomId == activeRoomId else { return }
-
-        for message in messages {
-            // Check if message already exists
-            if let existingIndex = activeRoomMessages.firstIndex(where: { $0.id == message.id }) {
-                activeRoomMessages[existingIndex] = message
-            } else {
-                // Find correct insertion position to maintain chronological order
-                let insertIndex = activeRoomMessages.firstIndex { $0.timestamp < message.timestamp } ?? activeRoomMessages.count
-                activeRoomMessages.insert(message, at: insertIndex)
-            }
-        }
-
-        print("🔄 ChatRepository: Upserted \(messages.count) messages")
-
-        if saveToDisk {
-            Task {
-                await persistence.saveMessages(activeRoomMessages, for: roomId)
-            }
-        }
-    }
-
-
-    // MARK: - Room Management
-    
-    func fetchRooms() async {
-        do {
-            let fetchedRooms = try await cloudKit.fetchChatRooms()
-            self.rooms = fetchedRooms
-            Task {
-                await persistence.saveRooms(fetchedRooms)
-            }
-            print("✅ ChatRepository: Fetched \(fetchedRooms.count) rooms")
-        } catch {
-            print("❌ ChatRepository: Failed to fetch rooms: \(error)")
-        }
-    }
-
-    func setActiveRoom(_ roomId: String?) {
-        self.activeRoomId = roomId
-        if let roomId = roomId {
-            // Clear unread count
-            unreadCounts[roomId] = 0
-            updateGlobalBadge()
-            // Load cached messages immediately
-            let cachedMessages = persistence.loadMessages(for: roomId)
-            self.activeRoomMessages = cachedMessages
-        } else {
-            // Exiting a room
-            self.activeRoomMessages = []
-        }
-    }
-    
-    // MARK: - Message Management
-    
-    func fetchMessages(for roomId: String) async {
-        guard roomId == activeRoomId else { return }
-
-        do {
-            let messages = try await cloudKit.fetchRecentMessages(for: roomId, limit: 30)
-            if self.activeRoomId == roomId {
-                // Preserve pending messages
-                let pendingMessages = self.activeRoomMessages.filter { $0.status == .pending }
-
-                // Clear and re-populate with fetched messages (limit to newest batch + pending)
-                self.activeRoomMessages = []
-
-                withAnimation {
-                    upsertMessages(messages, in: roomId, saveToDisk: false)
-
-                    // Re-add pending messages
-                    for pending in pendingMessages {
-                        if !self.activeRoomMessages.contains(where: { $0.id == pending.id }) {
-                            upsertMessage(pending, in: roomId, saveToDisk: false)
-                        }
-                    }
-                }
-
-                await persistence.saveMessages(activeRoomMessages, for: roomId)
-            }
-        } catch {
-            print("❌ ChatRepository: Failed to fetch messages for room \(roomId): \(error)")
-        }
-    }
-
-    func fetchOlderMessages(for roomId: String) async {
-        guard roomId == activeRoomId, !activeRoomMessages.isEmpty else { return }
-
-        // Get the oldest message timestamp (messages are sorted newest first)
-        let oldestMessage = activeRoomMessages.last { $0.status != .pending }
-        guard let oldestDate = oldestMessage?.timestamp else { return }
-
-        print("📡 ChatRepository: Fetching messages before \(oldestDate)")
-
-        do {
-            let olderMessages = try await cloudKit.fetchRecentMessages(for: roomId, before: oldestDate, limit: 30)
-            guard !olderMessages.isEmpty else { 
-                print("🏁 ChatRepository: No older messages found")
-                return 
-            }
-
-            if self.activeRoomId == roomId {
-                withAnimation {
-                    upsertMessages(olderMessages, in: roomId, saveToDisk: true)
-                }
-            }
-        } catch {
-            print("❌ ChatRepository: Failed to fetch older messages for room \(roomId): \(error)")
-        }
-    }
-    
-    func sendMessage(_ message: ChatMessage) async {
-        // Optimistic update: Add message as pending
-        var pendingMessage = message
-        pendingMessage.status = .pending
-
-        withAnimation {
-            upsertMessage(pendingMessage, in: message.roomId)
-        }
-
-        // Use CloudKit manager to actually send
-        do {
-            try await cloudKit.sendMessage(message)
-
-            // Success: Update status to sent
-            var sentMessage = message
-            sentMessage.status = .sent
-            withAnimation {
-                upsertMessage(sentMessage, in: message.roomId)
-            }
-
-            // Update the room's last message locally too
-            updateLocalRoom(for: message)
-        } catch {
-            print("❌ ChatRepository: Failed to send message: \(error)")
-            // Error: Update status
-            var errorMessage = message
-            errorMessage.status = .error
-            withAnimation {
-                upsertMessage(errorMessage, in: message.roomId)
-            }
-        }
-    }
-    
-    // MARK: - Notification Handling (Data Pipeline)
-
-    /// Called by AppDelegate when a remote notification allows us to process data.
-    /// Deduplication is handled by AppDelegate before calling this.
-    func handleIncomingNotification(_ userInfo: [AnyHashable: Any]) {
-        guard let cloudKitNotification = CKNotification(fromRemoteNotificationDictionary: userInfo) as? CKQueryNotification,
-              let recordFields = cloudKitNotification.recordFields,
-              let roomId = recordFields[ChatMessage.roomIdKey] as? String,
-              let recordID = cloudKitNotification.recordID
-        else { return }
-
-        print("📥 ChatRepository: Processing incoming message for Room \(roomId)")
-
-        // Extract data for room update
-        let content = recordFields[ChatMessage.contentKey] as? String ?? "New Message"
-        let senderId = recordFields[ChatMessage.senderIdKey] as? String ?? "unknown"
-        let timestamp = Date() // Approximate
-
-        // Update unread count for any room (new or existing)
-        let currentUserId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
-        if activeRoomId != roomId && senderId != currentUserId {
-            unreadCounts[roomId, default: 0] += 1
-            updateGlobalBadge()
-        }
-
-        // 1. Update Room List (Lobby)
-        if let index = rooms.firstIndex(where: { $0.id == roomId }) {
-            var updatedRoom = rooms[index]
-            updatedRoom.lastMessage = content
-            updatedRoom.lastMessageDate = timestamp
-
-            withAnimation {
-                rooms[index] = updatedRoom
-                // Move to top
-                let r = rooms.remove(at: index)
-                rooms.insert(r, at: 0)
-            }
-
-            Task {
-                await persistence.saveRooms(rooms)
-            }
-        } else {
-            // New room? Fetch all rooms to discover it
-            Task { await fetchRooms() }
-        }
-
-        // 2. Update Active Room Messages (if valid)
-        // CRITICAL FIX: Fetch the full message from CloudKit instead of reconstructing
-        if activeRoomId == roomId {
-            Task {
-                do {
-                    // Fetch the complete message record from CloudKit
-                    let record = try await cloudKit.database.record(for: recordID)
-                    let fullMessage = try ChatMessage(from: record)
-
-                    await MainActor.run {
-                        withAnimation {
-                            // Use upsertMessage for proper deduplication
-                            upsertMessage(fullMessage, in: roomId)
-                        }
-                    }
-
-                    print("✅ ChatRepository: Fetched and inserted full message with type: \(fullMessage.type)")
-                } catch {
-                    print("❌ ChatRepository: Failed to fetch full message from CloudKit: \(error)")
-                    // Fallback: Use reconstructed message from notification payload
-                    let senderName = recordFields[ChatMessage.senderNameKey] as? String ?? "Unknown"
-                    let typeRaw = recordFields[ChatMessage.typeKey] as? String ?? "text"
-                    let messageType = MessageType(rawValue: typeRaw) ?? .text
-
-                    let fallbackMessage = ChatMessage(
-                        id: recordID.recordName,
-                        senderId: senderId,
-                        senderName: senderName,
-                        content: content,
-                        type: messageType,
-                        timestamp: timestamp,
-                        roomId: roomId,
-                        assetURL: nil  // Asset URL not available in notification payload
-                    )
-
-                    await MainActor.run {
-                        withAnimation {
-                            upsertMessage(fallbackMessage, in: roomId)
-                        }
-                    }
-
-                    print("⚠️ ChatRepository: Using fallback message with type: \(messageType)")
-                }
-            }
-        }
-    }
-    
-    private func updateLocalRoom(for message: ChatMessage) {
-        if let index = rooms.firstIndex(where: { $0.id == message.roomId }) {
-            var updatedRoom = rooms[index]
-            updatedRoom.lastMessage = message.content
-            updatedRoom.lastMessageDate = message.timestamp
-
-            withAnimation {
-                rooms[index] = updatedRoom
-                let r = rooms.remove(at: index)
-                rooms.insert(r, at: 0)
-            }
-
-            Task {
-                await persistence.saveRooms(rooms)
-            }
-        }
-    }
-    
-    func deleteMessage(_ messageId: String, in roomId: String) async {
-        // Optimistic UI update
-        if roomId == activeRoomId {
-            withAnimation {
-                activeRoomMessages.removeAll { $0.id == messageId }
-            }
-
-            Task {
-                await persistence.saveMessages(activeRoomMessages, for: roomId)
-            }
-        }
-
-        do {
-            try await cloudKit.deleteChatMessage(messageId)
-            print("✅ ChatRepository: Deleted message \(messageId)")
-        } catch {
-            print("❌ ChatRepository: Failed to delete message: \(error)")
-            // Revert optimism? Would need to fetch again to be safe.
-            if roomId == activeRoomId {
-               await fetchMessages(for: roomId)
-            }
+    private func persistMessages(for roomId: String) {
+        let persistedMessages = hydrateCachedMessages(activeRoomMessages.filter { $0.roomId == roomId })
+        Task {
+            await persistence.saveMessages(persistedMessages, for: roomId)
         }
     }
 }

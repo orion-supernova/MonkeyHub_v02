@@ -1,10 +1,17 @@
 import SwiftUI
+
+#if canImport(UIKit)
 import UIKit
 
 struct ZoomableScrollView<Content: View>: UIViewRepresentable {
     private var content: Content
+    private var onZoomScaleChanged: ((CGFloat) -> Void)?
 
-    init(@ViewBuilder content: () -> Content) {
+    init(
+        onZoomScaleChanged: ((CGFloat) -> Void)? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.onZoomScaleChanged = onZoomScaleChanged
         self.content = content()
     }
 
@@ -17,6 +24,7 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
         scrollView.showsVerticalScrollIndicator = false
         scrollView.bouncesZoom = true
         scrollView.backgroundColor = .clear
+        scrollView.contentInsetAdjustmentBehavior = .never
 
         // Create a hosting controller for the SwiftUI content
         let hostingController = UIHostingController(rootView: content)
@@ -39,6 +47,7 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
         ])
 
         context.coordinator.hostingController = hostingController
+        context.coordinator.onZoomScaleChanged = onZoomScaleChanged
 
         // Double tap gesture
         let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
@@ -50,6 +59,7 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIScrollView, context: Context) {
         context.coordinator.hostingController?.rootView = content
+        context.coordinator.onZoomScaleChanged = onZoomScaleChanged
     }
 
     func makeCoordinator() -> Coordinator {
@@ -58,6 +68,7 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
 
     class Coordinator: NSObject, UIScrollViewDelegate {
         var hostingController: UIHostingController<Content>?
+        var onZoomScaleChanged: ((CGFloat) -> Void)?
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? {
             return hostingController?.view
@@ -65,6 +76,11 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
             centerContentView(scrollView)
+            onZoomScaleChanged?(scrollView.zoomScale)
+        }
+
+        func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+            onZoomScaleChanged?(scale)
         }
 
         private func centerContentView(_ scrollView: UIScrollView) {
@@ -104,3 +120,18 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
         }
     }
 }
+#else
+struct ZoomableScrollView<Content: View>: View {
+    private var content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        ScrollView([.horizontal, .vertical]) {
+            content
+        }
+    }
+}
+#endif

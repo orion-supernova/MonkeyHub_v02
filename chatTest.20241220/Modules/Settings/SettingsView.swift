@@ -3,7 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var cloudKit = CloudKitManager.shared
     @State private var showingSignOutAlert = false
     @State private var animateContent = false
     @State private var isShowingThemeSheet = false
@@ -14,17 +13,36 @@ struct SettingsView: View {
     @State private var editingUsername = ""
     @State private var editingEmail = ""
     @State private var isImagePickerPresented = false
-    @State private var selectedImage: UIImage?
+    @State private var selectedImage: PlatformImage?
+    @State private var profileAvatarImage: PlatformImage?
+    @State private var isLoadingAvatar = false
     @StateObject private var navigationState = NavigationStateManager.shared
-
-    private var headerHeight: CGFloat {
-        let screenHeight = UIScreen.main.bounds.height
-        return screenHeight * 0.4  // 40% of screen height
-    }
+    @State private var showingMigrationSheet = false
+    @State private var showingEnvironmentAlert = false
+    @State private var showingClearDataAlert = false
+    @State private var showingForceReloginAlert = false
+    @State private var selectedExportFile: URL?
 
     private func signOut() async {
-        userDefaults.set(nil, forKey: userIdUserDefaultsKey)
-        cloudKit.isAuthenticated = false
+        ConvexAuthService.shared.signOut()
+    }
+
+    private func forceRelogin() async {
+        clearAllLocalData()
+        ConvexAuthService.shared.signOut()
+        AlertManager.shared.showAlert(
+            title: "Success",
+            message: "All data cleared. You will be redirected to login."
+        )
+    }
+
+    private func clearAllLocalData() {
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        guard let files = try? fm.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil) else { return }
+        for file in files where file.lastPathComponent.hasPrefix("cached_") {
+            try? fm.removeItem(at: file)
+        }
     }
 
     private var themeSection: some View {
@@ -37,6 +55,42 @@ struct SettingsView: View {
                 ThemeRowContent()
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    private var developerSection: some View {
+        SettingsSection(title: "DEVELOPER TOOLS") {
+            VStack(spacing: 16) {
+                Button {
+                    showingMigrationSheet = true
+                } label: {
+                    SettingsRow(
+                        icon: "arrow.up.arrow.down.circle",
+                        title: "Data Migration",
+                        color: selectedTheme.colors(for: colorScheme).accent
+                    )
+                }
+
+                Button {
+                    showingClearDataAlert = true
+                } label: {
+                    SettingsRow(
+                        icon: "trash.circle",
+                        title: "Clear Local Data",
+                        color: selectedTheme.colors(for: colorScheme).destructive
+                    )
+                }
+
+                Button {
+                    showingForceReloginAlert = true
+                } label: {
+                    SettingsRow(
+                        icon: "arrow.clockwise.circle",
+                        title: "Force Re-login",
+                        color: Color.orange
+                    )
+                }
+            }
         }
     }
 
@@ -72,8 +126,11 @@ struct SettingsView: View {
         isLoadingUser = true
         defer { isLoadingUser = false }
 
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+        guard !userId.isEmpty else { return }
+
         do {
-            currentUser = try await CloudKitManager.shared.fetchCurrentUser()
+            currentUser = try await ConvexChatAPI.shared.fetchUser(userId: userId)
         } catch {
             AlertManager.shared.showAlert(
                 title: "Error",
@@ -82,27 +139,37 @@ struct SettingsView: View {
         }
     }
 
+    private func loadAvatarIfNeeded() async {
+        guard profileAvatarImage == nil,
+              let storageId = currentUser?.avatarStorageId else { return }
+        isLoadingAvatar = true
+        defer { isLoadingAvatar = false }
+        if let image = await ConvexFileCacheService.shared.image(for: storageId) {
+            profileAvatarImage = image
+        } else {
+            print("⚠️ SettingsView: could not load avatar for \(storageId)")
+        }
+    }
+
     private var profileSection: some View {
         VStack(spacing: 24) {
-            // Profile Picture with edit button
             ZStack {
-                if let selectedImage = selectedImage {
-                    Image(uiImage: selectedImage)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 100, height: 100)
-                        .clipShape(Circle())
-                        .shadow(
-                            color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
-                            radius: 10,
-                            y: 5
+                if isLoadingAvatar {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: selectedTheme.colors(for: colorScheme).primary,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                } else if let avatarAsset = currentUser?.avatarAsset,
-                    let avatarUrl = avatarAsset.fileURL,
-                    let imageData = try? Data(contentsOf: avatarUrl),
-                    let image = UIImage(data: imageData)
-                {
-                    Image(uiImage: image)
+                        .frame(width: 100, height: 100)
+                        .overlay {
+                            ProgressView()
+                                .tint(selectedTheme.colors(for: colorScheme).text)
+                        }
+                } else if let profileAvatarImage = profileAvatarImage {
+                    Image(platformImage: profileAvatarImage)
                         .resizable()
                         .scaledToFill()
                         .frame(width: 100, height: 100)
@@ -137,13 +204,12 @@ struct SettingsView: View {
                         )
                         .frame(width: 100, height: 100)
                         .overlay {
-                            Text(currentUser?.name.prefix(1).uppercased() ?? "?")
+                            Text((currentUser?.displayInitial) ?? "?")
                                 .font(.title.bold())
                                 .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
                         }
                 }
 
-                // Edit button
                 Button {
                     isImagePickerPresented = true
                 } label: {
@@ -159,10 +225,8 @@ struct SettingsView: View {
                 .offset(x: 32, y: 32)
             }
 
-            // User Info with edit button
             VStack(spacing: 8) {
                 if isEditingProfile {
-                    // Edit mode
                     VStack(spacing: 16) {
                         ProfileTextField(
                             title: "Name",
@@ -182,7 +246,6 @@ struct SettingsView: View {
                             icon: "envelope.fill"
                         )
 
-                        // Save/Cancel buttons
                         HStack(spacing: 16) {
                             Button(role: .cancel) {
                                 isEditingProfile = false
@@ -242,7 +305,6 @@ struct SettingsView: View {
                     }
                     .padding(.horizontal)
                 } else {
-                    // Display mode
                     if isLoadingUser {
                         VStack(spacing: 8) {
                             ShimmerView()
@@ -254,19 +316,18 @@ struct SettingsView: View {
                         }
                     } else {
                         VStack(spacing: 8) {
-                            Text(currentUser?.name ?? "Unknown")
+                            Text(currentUser?.displayName ?? "Unknown")
                                 .font(.title2.bold())
 
-                            Text(
-                                currentUser?.username.isEmpty == true
-                                    ? "No username" : "@\(currentUser?.username ?? "")"
-                            )
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-
-                            Text(currentUser?.email ?? "No email")
-                                .font(.footnote)
+                            Text(currentUser.map { "@\($0.username)" } ?? "No username")
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
+
+                            if let email = currentUser?.email, !email.isEmpty {
+                                Text(email)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         Button {
@@ -297,77 +358,79 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $isImagePickerPresented) {
             ImagePicker(image: $selectedImage)
-                .onChange(of: selectedImage) { _ in
-                    if selectedImage != nil {
-                        Task {
-                            await handleImageSelection()
-                        }
-                    }
+        }
+        .onChange(of: selectedImage) { newImage in
+            if let image = newImage {
+                Task {
+                    await handleImageSelection()
                 }
+            }
         }
     }
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .top) {
-                // Header background
-                LinearGradient(
-                    colors: selectedTheme.colors(for: colorScheme).headerBackground,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
-                .frame(height: headerHeight)
+            GeometryReader { geometry in
+                ZStack(alignment: .top) {
+                    let headerHeight = geometry.size.height * 0.4
+                    
+                    LinearGradient(
+                        colors: selectedTheme.colors(for: colorScheme).headerBackground,
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .ignoresSafeArea()
+                    .frame(height: headerHeight)
 
-                ScrollView {
-                    VStack(spacing: 0) {
-                        // Profile Section
-                        profileSection
-                            .padding(.top, 40)
-                            .padding(.bottom, 32)
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            profileSection
+                                .padding(.top, 40)
+                                .padding(.bottom, 32)
 
-                        // Settings Sections
-                        VStack(spacing: 24) {
-                            themeSection
-                            accountSection
-                        }
-                        .padding(.horizontal, 16)
-                        .background(
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 32)
-                                    .fill(selectedTheme.colors(for: colorScheme).background)
-                                    .shadow(
-                                        color: selectedTheme.colors(for: colorScheme).primary[0]
-                                            .opacity(0.2),
-                                        radius: 32,
-                                        y: -16
-                                    )
-
-                                VStack(spacing: 0) {
-                                    LinearGradient(
-                                        colors: [
-                                            selectedTheme.colors(for: colorScheme).background,
-                                            selectedTheme.colors(for: colorScheme).background
-                                                .opacity(0),
-                                        ],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                    .frame(height: 40)
-                                    .offset(y: -20)
-
-                                    Rectangle()
-                                        .fill(selectedTheme.colors(for: colorScheme).background)
-                                }
-                                .mask(RoundedRectangle(cornerRadius: 32))
+                            VStack(spacing: 24) {
+                                themeSection
+                                developerSection
+                                accountSection
                             }
-                        )
-                        .mask(RoundedRectangle(cornerRadius: 32))
-                        .offset(y: -60)
-                        .padding(.top, 60)
+                            .padding(.horizontal, 16)
+                            .background(
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 32)
+                                        .fill(selectedTheme.colors(for: colorScheme).background)
+                                        .shadow(
+                                            color: selectedTheme.colors(for: colorScheme).primary[0]
+                                                .opacity(0.2),
+                                            radius: 32,
+                                            y: -16
+                                        )
+
+                                    VStack(spacing: 0) {
+                                        LinearGradient(
+                                            colors: [
+                                                selectedTheme.colors(for: colorScheme).background,
+                                                selectedTheme.colors(for: colorScheme).background
+                                                    .opacity(0),
+                                            ],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                        .frame(height: 40)
+                                        .offset(y: -20)
+
+                                        Rectangle()
+                                            .fill(selectedTheme.colors(for: colorScheme).background)
+                                    }
+                                    .mask(RoundedRectangle(cornerRadius: 32))
+                                }
+                            )
+                            .mask(RoundedRectangle(cornerRadius: 32))
+                            .offset(y: -60)
+                            .padding(.top, 60)
+                        }
                     }
+                    .scrollIndicators(.hidden)
                 }
-                .scrollIndicators(.hidden)
             }
             .background(selectedTheme.colors(for: colorScheme).background)
             .alert("Sign Out", isPresented: $showingSignOutAlert) {
@@ -388,14 +451,41 @@ struct SettingsView: View {
         .sheet(isPresented: $isShowingThemeSheet) {
             ThemeSelectionSheet(isShowingSheet: $isShowingThemeSheet)
         }
+        .sheet(isPresented: $showingMigrationSheet) {
+            DataMigrationSheet(selectedExportFile: $selectedExportFile)
+                .interactiveDismissDisabled(true)
+        }
+        .alert("Clear Local Data", isPresented: $showingClearDataAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear All", role: .destructive) {
+                clearAllLocalData()
+                AlertManager.shared.showAlert(
+                    title: "Success",
+                    message: "All local data has been cleared. Please restart the app."
+                )
+            }
+        } message: {
+            Text("This will delete all cached rooms, messages, and user data from your device. This action cannot be undone.")
+        }
+        .alert("Force Re-login", isPresented: $showingForceReloginAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Re-login", role: .destructive) {
+                Task {
+                    await forceRelogin()
+                }
+            }
+        } message: {
+            Text("This will clear all local data and authentication state, forcing you to sign in again.")
+        }
         .task {
             await loadCurrentUser()
+            await loadAvatarIfNeeded()
         }
         .withAlertManager()
     }
 
     private func startEditing() {
-        editingName = currentUser?.name ?? ""
+        editingName = currentUser?.displayName ?? ""
         editingUsername = currentUser?.username ?? ""
         editingEmail = currentUser?.email ?? ""
         isEditingProfile = true
@@ -403,88 +493,84 @@ struct SettingsView: View {
 
     private func saveProfileChanges() async {
         guard let existingUser = currentUser else { return }
-
-        let updatedUser = ChatUser(
-            from: existingUser,
-            name: editingName,
-            username: editingUsername,
-            email: editingEmail
-        )
+        isLoadingUser = true
 
         do {
-            // Save to CloudKit
-            try await CloudKitManager.shared.updateUser(updatedUser)
-
-            // Close edit mode
-            await MainActor.run {
-                isEditingProfile = false
-                // Clear current user to show loading state
-                currentUser = nil
-                isLoadingUser = true
-            }
-
-            // Add a small delay to ensure CloudKit sync
-            try await Task.sleep(nanoseconds: 500_000_000)  // 0.5 seconds
-
-            // Fetch fresh data
-            let freshUser = try await CloudKitManager.shared.fetchCurrentUser()
-
-            // Update UI on main thread
-            await MainActor.run {
-                withAnimation {
-                    self.currentUser = freshUser
-                    self.isLoadingUser = false
-                }
-            }
-
-            // Show success message
-            AlertManager.shared.showAlert(
-                title: "Success",
-                message: "Profile updated successfully"
+            try await ConvexChatAPI.shared.updateUserProfile(
+                userId: existingUser.id,
+                name: editingName,
+                email: editingEmail.isEmpty ? nil : editingEmail,
+                bio: existingUser.bio
             )
+            isEditingProfile = false
+            currentUser = ChatUser(
+                id: existingUser.id,
+                name: editingName,
+                username: editingUsername,
+                email: editingEmail,
+                avatarStorageId: existingUser.avatarStorageId,
+                bio: existingUser.bio
+            )
+            AlertManager.shared.showAlert(title: "Success", message: "Profile updated successfully")
         } catch {
-            await MainActor.run {
-                isLoadingUser = false
-            }
-            AlertManager.shared.showAlert(
-                title: "Error",
-                message: "Failed to update profile: \(error.localizedDescription)"
-            )
+            AlertManager.shared.showAlert(title: "Error", message: "Failed to update profile: \(error.localizedDescription)")
         }
+        isLoadingUser = false
     }
 
     private func handleImageSelection() async {
         guard let image = selectedImage, let user = currentUser else { return }
+        guard let data = image.toData() else {
+            AlertManager.shared.showAlert(title: "Error", message: "Could not convert image to JPEG data")
+            selectedImage = nil
+            return
+        }
+        selectedImage = nil
+        isLoadingAvatar = true
+        defer { isLoadingAvatar = false }
 
         do {
-            isLoadingUser = true
-            try await CloudKitManager.shared.updateUserProfilePicture(user, image: image)
-
-            // Fetch updated user data
-            let freshUser = try await CloudKitManager.shared.fetchCurrentUser()
-
-            await MainActor.run {
-                withAnimation {
-                    self.currentUser = freshUser
-                    self.isLoadingUser = false
-                }
+            // Delete old avatar from storage before uploading the new one
+            if let oldStorageId = user.avatarStorageId {
+                do { try await ConvexChatAPI.shared.deleteFile(storageId: oldStorageId) }
+                catch { print("⚠️ Could not delete old avatar \(oldStorageId): \(error)") }
             }
-
-            AlertManager.shared.showAlert(
-                title: "Success",
-                message: "Profile picture updated successfully"
+            let storageId = try await ConvexChatAPI.shared.uploadFile(data: data, mimeType: "image/jpeg")
+            if let localURL = saveAvatarToLocalCache(data: data) {
+                ConvexFileCacheService.shared.replaceCachedFile(storageId: storageId, with: localURL)
+            }
+            try await ConvexChatAPI.shared.updateUserAvatar(userId: user.id, storageId: storageId)
+            // Update in-memory user so the next replacement knows the current storageId
+            currentUser = ChatUser(
+                id: user.id, name: user.name, username: user.username,
+                email: user.email, avatarStorageId: storageId, bio: user.bio
             )
+            profileAvatarImage = image
+            AlertManager.shared.showAlert(title: "Success", message: "Profile picture updated successfully")
         } catch {
-            await MainActor.run {
-                isLoadingUser = false
-            }
-            AlertManager.shared.showAlert(
-                title: "Error",
-                message: "Failed to update profile picture: \(error.localizedDescription)"
-            )
+            AlertManager.shared.showAlert(title: "Error", message: "Failed to update profile picture: \(error.localizedDescription)")
+        }
+    }
+
+    private func saveAvatarToLocalCache(data: Data) -> URL? {
+        let fileManager = FileManager.default
+        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let assetsDirectory = documentsDirectory.appendingPathComponent("ChatAssets", isDirectory: true)
+        if !fileManager.fileExists(atPath: assetsDirectory.path) {
+            try? fileManager.createDirectory(at: assetsDirectory, withIntermediateDirectories: true)
+        }
+
+        let fileURL = assetsDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        do {
+            try data.write(to: fileURL, options: .atomic)
+            return fileURL
+        } catch {
+            return nil
         }
     }
 }
+
+// ... existing code ...
 
 // Supporting Views
 struct SettingsSection<Content: View>: View {
@@ -604,14 +690,12 @@ private func themeIcon(for theme: AppTheme) -> String {
     }
 }
 
-// Add a separate view for theme row content
 private struct ThemeRowContent: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme: ColorScheme
 
     var body: some View {
         HStack {
-            // Theme icon
             Image(systemName: themeIcon(for: selectedTheme))
                 .font(.headline)
                 .foregroundStyle(
@@ -619,7 +703,6 @@ private struct ThemeRowContent: View {
                 )
                 .frame(width: 32)
 
-            // Theme info
             VStack(alignment: .leading, spacing: 2) {
                 Text("Theme")
                     .font(.headline)
@@ -706,7 +789,6 @@ struct ShimmerView: View {
     }
 }
 
-// Add this helper view
 private struct ProfileTextField: View {
     let title: String
     @Binding var text: String
@@ -722,10 +804,14 @@ private struct ProfileTextField: View {
 
             TextField(title, text: $text)
                 .textFieldStyle(.plain)
+                #if canImport(UIKit)
                 .textInputAutocapitalization(.never)
+                #endif
                 .autocorrectionDisabled()
+                #if canImport(UIKit)
                 .autocapitalization(.none)
                 .keyboardType(icon == "at" || icon == "envelope.fill" ? .emailAddress : .default)
+                #endif
         }
         .padding()
         .background(
@@ -738,6 +824,222 @@ private struct ProfileTextField: View {
                     selectedTheme.colors(for: colorScheme).accent.opacity(0.2),
                     lineWidth: 1
                 )
+        )
+    }
+}
+
+// Data Migration Sheet
+struct DataMigrationSheet: View {
+    @Binding var selectedExportFile: URL?
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
+
+    @State private var availableExports: [URL] = []
+    @State private var showingExportsBrowser: Bool = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Data Migration")
+                            .font(.title2.bold())
+                        Text("Manage locally cached data export files.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("EXPORT DATA")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal)
+
+                        Text("Data export is not available in this version.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding()
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+                            )
+                            .padding(.horizontal)
+                    }
+
+                    if !availableExports.isEmpty {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("EXPORT FILES")
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal)
+
+                            List {
+                                ForEach(availableExports, id: \.self) { exportFile in
+                                    Button {
+                                        selectedExportFile = exportFile
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: "doc.fill")
+                                                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(exportFile.lastPathComponent)
+                                                    .font(.caption.bold())
+                                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+                                                HStack(spacing: 6) {
+                                                    Text(formatFileDate(exportFile))
+                                                    Text("•")
+                                                    Text(formatFileSize(exportFile))
+                                                }
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                            }
+                                            Spacer()
+                                            if selectedExportFile == exportFile {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                                            }
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .listRowBackground(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(selectedExportFile == exportFile
+                                                ? selectedTheme.colors(for: colorScheme).accent.opacity(0.1)
+                                                : selectedTheme.colors(for: colorScheme).cardBackground)
+                                            .padding(.vertical, 4)
+                                    )
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                        Button(role: .destructive) {
+                                            deleteExportFile(exportFile)
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
+                                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                        Button {
+                                            showingExportsBrowser = true
+                                        } label: {
+                                            Label("Browse", systemImage: "folder")
+                                        }
+                                    }
+                                }
+                            }
+                            .frame(height: CGFloat(availableExports.count) * 80)
+                            .listStyle(.plain)
+                            .scrollDisabled(true)
+                        }
+                    }
+                }
+                .padding(.vertical)
+            }
+            .background(selectedTheme.colors(for: colorScheme).background)
+            #if canImport(UIKit)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: {
+                    #if canImport(UIKit)
+                    return .navigationBarTrailing
+                    #else
+                    return .automatic
+                    #endif
+                }()) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear {
+                scanForExportFiles()
+            }
+            .sheet(isPresented: $showingExportsBrowser) {
+                ExportsBrowserView()
+            }
+        }
+    }
+
+    private func scanForExportFiles() {
+        let fileManager = FileManager.default
+        let documentsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+
+        guard let contents = try? fileManager.contentsOfDirectory(at: documentsPath, includingPropertiesForKeys: [.creationDateKey]) else {
+            availableExports = []
+            return
+        }
+
+        availableExports = contents
+            .filter { $0.lastPathComponent.hasPrefix("migration_export_") && $0.pathExtension == "json" }
+            .sorted { file1, file2 in
+                let date1 = (try? file1.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
+                let date2 = (try? file2.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
+                return date1 > date2
+            }
+    }
+
+    private func formatFileDate(_ url: URL) -> String {
+        guard let creationDate = try? url.resourceValues(forKeys: [.creationDateKey]).creationDate else {
+            return "Unknown date"
+        }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: creationDate)
+    }
+
+    private func formatFileSize(_ url: URL) -> String {
+        guard let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              fileSize > 0 else { return "0 B" }
+        let bytes = Double(fileSize)
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        let idx = min(Int(log2(bytes) / 10.0), units.count - 1)
+        let size = bytes / pow(1024, Double(idx))
+        let formatter = NumberFormatter()
+        formatter.maximumFractionDigits = size < 10 ? 2 : 1
+        formatter.minimumFractionDigits = 0
+        let sizeString = formatter.string(from: NSNumber(value: size)) ?? String(format: "%.1f", size)
+        return "\(sizeString) \(units[idx])"
+    }
+
+    private func deleteExportFile(_ url: URL) {
+        do {
+            try FileManager.default.removeItem(at: url)
+            if selectedExportFile == url { selectedExportFile = nil }
+            scanForExportFiles()
+            AlertManager.shared.showAlert(title: "Deleted", message: "Export file deleted successfully")
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: "Failed to delete file: \(error.localizedDescription)")
+        }
+    }
+}
+
+// Stat Card
+struct StatCard: View {
+    let title: String
+    let value: String
+    let icon: String
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+            Text(value)
+                .font(.title3.bold())
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(selectedTheme.colors(for: colorScheme).cardBackground)
         )
     }
 }

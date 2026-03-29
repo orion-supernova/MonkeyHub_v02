@@ -5,12 +5,10 @@
 //  Created by muratcankoc on 20/12/2024.
 //
 
-import CloudKit
 import SwiftUI
 
 struct ContentView: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
-    @StateObject private var cloudKit = CloudKitManager.shared
     @StateObject private var viewModel = ChatListViewModel()
     @State private var isShowingNewRoomSheet = false
     @State private var newRoomName = ""
@@ -22,37 +20,87 @@ struct ContentView: View {
     @State private var availableRooms: [ChatRoom] = []
     @State private var isShowingSearchView = false
     @StateObject private var navigationState = NavigationStateManager.shared
+    @State private var selectedSection: ChatListViewModel.Section = .chats
+    @State private var directStartFriend: ChatUser?
+    @State private var previewRequest: FriendRequest?
+
+    // MARK: - Keyboard Navigation (macOS)
+    @State private var selectedRoomIndex: Int? = nil
+    @FocusState private var isContentFocused: Bool
+
+    // MARK: - Leave Room State
+    @State private var showingLeaveRoomAlert = false
+    @State private var showingDeleteRoomAlert = false
+    @State private var roomToLeave: ChatRoom?
 
     // MARK: - Room Operations
     private func loadData() async {
         await viewModel.loadRooms()
     }
 
+    private func refreshData() async {
+        await viewModel.refreshRooms()
+    }
+
     private func createRoom(type: RoomType, messageLifetime: TimeInterval?) async {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-        let room = ChatRoom(
-            name: newRoomName,
-            createdBy: userId,
-            participants: [userId],
-            type: type,
-            messageLifetime: messageLifetime
-        )
-
         do {
-            try await cloudKit.createChatRoom(room)
-            await loadData()
+            let roomId = try await ConvexChatAPI.shared.createRoom(
+                name: newRoomName,
+                userId: userId,
+                isPrivate: true,
+                type: type,
+                messageLifetime: messageLifetime
+            )
+            let room = ChatRoom(
+                id: roomId,
+                name: newRoomName,
+                createdBy: userId,
+                participants: [userId],
+                memberCount: 1,
+                type: type,
+                messageLifetime: messageLifetime
+            )
+            viewModel.addRoomOptimistically(room)
             isShowingNewRoomSheet = false
             newRoomName = ""
-        } catch let error {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            navigationState.path.append(room)
+        } catch {
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
 
+    private func initiateLeaveRoom(_ room: ChatRoom) {
+        roomToLeave = room
+        let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
+        let isLastUser = room.participants.count == 1 && room.participants.contains(userId)
+
+        if isLastUser {
+            showingDeleteRoomAlert = true
+        } else {
+            showingLeaveRoomAlert = true
+        }
+    }
+
     private func leaveRoom(_ room: ChatRoom) async {
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+        viewModel.removeRoomOptimistically(room.id)
         do {
-            try await cloudKit.leaveRoom(room)
-            await loadData()
-        } catch let error {
+            try await ConvexChatAPI.shared.leaveRoom(roomId: room.id, userId: userId)
+        } catch {
+            viewModel.addRoomOptimistically(room)
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+        }
+    }
+
+    private func deleteRoomCompletely(_ room: ChatRoom) async {
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+        viewModel.removeRoomOptimistically(room.id)
+        do {
+            try await ConvexChatAPI.shared.deleteRoom(roomId: room.id, userId: userId)
+        } catch {
+            viewModel.addRoomOptimistically(room)
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
@@ -74,12 +122,43 @@ struct ContentView: View {
         }
     }
 
+    #if os(macOS)
+    private var columnCount: Int { gridColumns.count }
+
+    private func handleMoveCommand(_ direction: MoveCommandDirection) {
+        let roomCount = viewModel.myRooms.count
+        guard roomCount > 0 else { return }
+
+        guard let current = selectedRoomIndex else {
+            selectedRoomIndex = 0
+            return
+        }
+
+        var newIndex = current
+        switch direction {
+        case .left:
+            newIndex = max(current - 1, 0)
+        case .right:
+            newIndex = min(current + 1, roomCount - 1)
+        case .up:
+            let candidate = current - columnCount
+            if candidate >= 0 { newIndex = candidate }
+        case .down:
+            let candidate = current + columnCount
+            if candidate < roomCount { newIndex = candidate }
+        @unknown default:
+            break
+        }
+        selectedRoomIndex = newIndex
+    }
+    #endif
+
     private var headerHeight: CGFloat {
         switch verticalSizeClass {
         case .compact:
-            return 200  // Landscape mode
+            return 240  // Landscape mode
         default:
-            return 260  // Portrait mode
+            return 320  // Portrait mode
         }
     }
 
@@ -108,7 +187,7 @@ struct ContentView: View {
                                 // Title and room count
                                 HStack {
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text("Chat Rooms")
+                                        Text(selectedSection == .chats ? "Chat Rooms" : selectedSection.rawValue)
                                             .font(
                                                 .system(
                                                     size: verticalSizeClass == .compact ? 28 : 34,
@@ -119,7 +198,7 @@ struct ContentView: View {
                                                 selectedTheme.colors(for: colorScheme).text)
 
                                         Text(
-                                            "\(viewModel.myRooms.count) Active Room\(viewModel.myRooms.count == 1 ? "" : "s")"
+                                            sectionSummary
                                         )
                                         .font(.subheadline)
                                         .foregroundStyle(
@@ -167,6 +246,10 @@ struct ContentView: View {
                                                     lineWidth: 1
                                                 )
                                         )
+#if os(macOS)
+                                        .buttonStyle(.plain)
+                                        .contentShape(RoundedRectangle(cornerRadius: 16))
+#endif
                                     }
 
                                     // Search button
@@ -204,16 +287,21 @@ struct ContentView: View {
                                                     lineWidth: 1
                                                 )
                                         )
+#if os(macOS)
+                                        .buttonStyle(.plain)
+                                        .contentShape(RoundedRectangle(cornerRadius: 16))
+#endif
                                     }
                                 }
-                                .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
+
+                                sectionSelector
                             }
                             .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
-                            .padding(.bottom, verticalSizeClass == .compact ? 16 : 24)
+                            .padding(.bottom, verticalSizeClass == .compact ? 36 : 44)
 
-                            // Rooms list
+                            // Main content
                             LazyVStack(spacing: 16) {
-                                if viewModel.myRooms.isEmpty {
+                                if selectedSection == .chats && viewModel.myRooms.isEmpty {
                                     if viewModel.isLoading {
                                         VStack(spacing: 16) {
                                             ProgressView()
@@ -253,7 +341,7 @@ struct ContentView: View {
                                         .frame(maxWidth: .infinity)
                                         .padding(40)
                                     }
-                                } else {
+                                } else if selectedSection == .chats {
                                     VStack(spacing: 24) {
                                         // Section header
                                         HStack {
@@ -277,12 +365,15 @@ struct ContentView: View {
 
                                         // Rooms grid
                                         LazyVGrid(columns: gridColumns, spacing: 16) {
-                                            ForEach(viewModel.myRooms) { room in
+                                            ForEach(Array(viewModel.myRooms.enumerated()), id: \.element.id) { index, room in
                                                 NavigationLink(value: room) {
-                                                    EnhancedRoomCard(room: room, unreadCount: viewModel.unreadCounts[room.id] ?? 0) {
-                                                        Task {
-//                                                            await leaveRoom(room)
-                                                        }
+                                                    EnhancedRoomCard(
+                                                        room: room,
+                                                        unreadCount: viewModel.unreadCounts[room.id] ?? 0,
+                                                        typingText: viewModel.typingText(for: room.id),
+                                                        isSelected: selectedRoomIndex == index
+                                                    ) {
+                                                        initiateLeaveRoom(room)
                                                     }
                                                 }
                                                 .buttonStyle(.plain)
@@ -291,8 +382,43 @@ struct ContentView: View {
                                         .padding(
                                             .horizontal, horizontalSizeClass == .regular ? 32 : 16)
                                     }
+                                } else {
+                                    ConnectionsPanelView(
+                                        friends: viewModel.friends,
+                                        incomingRequests: viewModel.incomingRequests,
+                                        outgoingRequests: viewModel.outgoingRequests,
+                                        selectedSection: selectedSection,
+                                        startFriendChat: { friend in
+                                            directStartFriend = friend
+                                        },
+                                        removeFriend: { friend in
+                                            Task { await viewModel.removeFriend(friend) }
+                                        },
+                                        approveRequest: { request in
+                                            Task { await viewModel.approve(request) }
+                                        },
+                                        rejectRequest: { request in
+                                            Task { await viewModel.reject(request) }
+                                        },
+                                        cancelRequest: { request in
+                                            Task { await viewModel.cancelRequest(request) }
+                                        },
+                                        previewRequest: { request in
+                                            previewRequest = request
+                                        },
+                                        openOutgoingRequest: { request in
+                                            navigationState.path.append(
+                                                DraftDirectChatSession(
+                                                    user: request.user,
+                                                    roomType: request.roomType,
+                                                    messageLifetime: request.messageLifetime,
+                                                    requestId: request.id
+                                                )
+                                            )
+                                        }
+                                    )
                                 }
-                            }
+                        }
                             .padding(.top, 16)
                             .background(
                                 ZStack {
@@ -325,14 +451,67 @@ struct ContentView: View {
                         viewModel.clearUnread(for: room.id)
                     }
             }
+            .navigationDestination(for: DraftDirectChatSession.self) { draft in
+                FriendRequestDraftView(session: draft)
+            }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenChatRoom"))) { notification in
-                if let roomId = notification.userInfo?["roomId"] as? String {
+                // Handle room object passed directly (for newly joined rooms from search)
+                if let room = notification.userInfo?["room"] as? ChatRoom {
+                    // Add to local list if not present, then navigate
+                    if !viewModel.myRooms.contains(where: { $0.id == room.id }) {
+                        viewModel.addRoomOptimistically(room)
+                    }
+                    navigationState.path.append(room)
+                }
+                // Handle room ID (for existing rooms already in myRooms)
+                else if let roomId = notification.userInfo?["roomId"] as? String {
                     if let room = viewModel.myRooms.first(where: { $0.id == roomId }) {
-                        navigationState.path.append(room)
+                        // Don't double-push if already navigated to this room
+                        if navigationState.currentRoomId != roomId {
+                            navigationState.path.append(room)
+                        }
+                    } else {
+                        // Rooms not loaded yet (cold launch) — retry when they arrive
+                        navigationState.pendingRoomId = roomId
                     }
                 }
             }
+            .onChange(of: viewModel.myRooms) { _, rooms in
+                guard let pendingId = navigationState.pendingRoomId,
+                      let room = rooms.first(where: { $0.id == pendingId }) else { return }
+                navigationState.pendingRoomId = nil
+                navigationState.path.append(room)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenDraftChat"))) { notification in
+                if let draft = notification.userInfo?["draft"] as? DraftDirectChatSession {
+                    navigationState.path.append(draft)
+                }
+            }
             .background(selectedTheme.colors(for: colorScheme).background)
+            #if os(macOS)
+            .focused($isContentFocused)
+            .focusEffectDisabled()
+            .onAppear { isContentFocused = true }
+            .onMoveCommand { direction in
+                handleMoveCommand(direction)
+            }
+            .onExitCommand {
+                selectedRoomIndex = nil
+            }
+            .onKeyPress(.return) {
+                if let index = selectedRoomIndex, index < viewModel.myRooms.count {
+                    navigationState.path.append(viewModel.myRooms[index])
+                    selectedRoomIndex = nil
+                    return .handled
+                }
+                return .ignored
+            }
+            .onChange(of: viewModel.myRooms.count) { _, newCount in
+                if let index = selectedRoomIndex, index >= newCount {
+                    selectedRoomIndex = newCount > 0 ? newCount - 1 : nil
+                }
+            }
+            #endif
             .sheet(isPresented: $isShowingNewRoomSheet) {
                 EnhancedNewRoomSheet(
                     isShowingSheet: $isShowingNewRoomSheet,
@@ -361,15 +540,39 @@ struct ContentView: View {
 //                    }
 //                )
 //            }
-            .sheet(isPresented: $isShowingSearchView) {
+            .sheet(isPresented: $isShowingSearchView, onDismiss: {
+                // Refresh room list after search sheet is dismissed (in case user joined a room)
+                Task {
+                    await loadData()
+                }
+            }) {
                 SearchView()
+            }
+            .sheet(item: $previewRequest) { request in
+                FriendRequestPreviewView(
+                    request: request,
+                    approve: {
+                        await viewModel.approve(request)
+                    },
+                    reject: {
+                        await viewModel.reject(request)
+                    }
+                )
+            }
+            .sheet(item: $directStartFriend) { friend in
+                DirectRoomConfigurationSheet(
+                    user: friend,
+                    actionTitle: "Open Chat"
+                ) { roomType, messageLifetime in
+                    await startFriendConversation(with: friend, roomType: roomType, messageLifetime: messageLifetime)
+                }
             }
         }
         .task {
             await loadData()
         }
         .refreshable {
-            await loadData()
+            await refreshData()
         }
         .alert("Sign Out", isPresented: $showingSignOutAlert) {
             Button("Cancel", role: .cancel) {}
@@ -381,52 +584,44 @@ struct ContentView: View {
         } message: {
             Text("Are you sure you want to sign out?")
         }
-    }
-
-    private func isUserExistOnDatabase() -> Bool {
-        // Get the user ID from UserDefaults
-        guard let userId = userDefaults.string(forKey: userIdUserDefaultsKey) else {
-            // If no user ID is stored in UserDefaults, return false
-            return false
-        }
-
-        // Reference to the CloudKit database
-        let database = cloudKit.database
-
-        // Create a predicate to search for the user by their ID
-        let predicate = NSPredicate(format: "id == %@", userId)
-        let query = CKQuery(recordType: "ChatUser", predicate: predicate)
-
-        // Perform the query asynchronously
-        let semaphore = DispatchSemaphore(value: 0)
-        var userExists = false
-
-        database.fetch(withQuery: query) { result in
-            switch result {
-            case .success(let matchResults):
-                let results = matchResults.matchResults
-                guard !results.isEmpty else {
-                    userExists = false
-                    semaphore.signal()
-                    return
-                }
-                userExists = true
-            case .failure(let error):
-                print(error.localizedDescription)
-                userExists = false
+        .alert("Leave Room", isPresented: $showingLeaveRoomAlert) {
+            Button("Cancel", role: .cancel) {
+                roomToLeave = nil
             }
-            // Signal semaphore to continue execution
-            semaphore.signal()
+            Button("Leave", role: .destructive) {
+                if let room = roomToLeave {
+                    Task {
+                        await leaveRoom(room)
+                        roomToLeave = nil
+                    }
+                }
+            }
+        } message: {
+            Text("Are you sure you want to leave this room?")
         }
-        // Wait for the async CloudKit query to finish
-        semaphore.wait()
-
-        return userExists
+        .alert("Delete Room", isPresented: $showingDeleteRoomAlert) {
+            Button("Cancel", role: .cancel) {
+                roomToLeave = nil
+            }
+            Button("Delete", role: .destructive) {
+                if let room = roomToLeave {
+                    Task {
+                        await deleteRoomCompletely(room)
+                        roomToLeave = nil
+                    }
+                }
+            }
+        } message: {
+            if let room = roomToLeave {
+                Text("You are the only member of \"\(room.name)\". Leaving will permanently delete this room and all its messages. This action cannot be undone.")
+            } else {
+                Text("This room will be permanently deleted.")
+            }
+        }
     }
 
     private func signOut() async {
-        userDefaults.set(nil, forKey: userIdUserDefaultsKey)
-        cloudKit.isAuthenticated = false
+        ConvexAuthService.shared.signOut()
     }
 
     private func themeIcon(for theme: AppTheme) -> String {
@@ -445,38 +640,124 @@ struct ContentView: View {
     }
 
     private func joinRoom(_ room: ChatRoom) async {
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
         do {
-            try await cloudKit.joinRoom(room)
+            try await ConvexChatAPI.shared.joinRoom(roomId: room.id, userId: userId)
             await loadData()
             isShowingJoinRoomSheet = false
-        } catch let error {
+        } catch {
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
 
     private func loadAvailableRooms() async {
         do {
-            availableRooms = try await cloudKit.fetchAvailableRooms()
-        } catch let error {
+            availableRooms = try await ConvexChatAPI.shared.fetchPublicRooms()
+        } catch {
             AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
         }
     }
 
     private func createPrivateRoom(with friend: ChatUser) async {
         let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-        let room = ChatRoom(
-            name: "Chat with \(friend.name)",
-            createdBy: userId,
-            participants: [userId, friend.id],
-            type: .regular,
-            messageLifetime: nil
-        )
+        do {
+            let roomId = try await ConvexChatAPI.shared.getOrCreateDM(
+                userId: userId,
+                friendId: friend.id,
+                roomType: .regular,
+                messageLifetime: nil
+            )
+            let room = ChatRoom(
+                id: roomId,
+                name: "Chat with \(friend.displayName)",
+                createdBy: userId,
+                participants: [userId, friend.id],
+                memberCount: 2
+            )
+            viewModel.addRoomOptimistically(room)
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+        }
+    }
+
+    private var sectionSummary: String {
+        switch selectedSection {
+        case .chats:
+            return "\(viewModel.myRooms.count) Active Room\(viewModel.myRooms.count == 1 ? "" : "s")"
+        case .friends:
+            return "\(viewModel.friends.count) Friend\(viewModel.friends.count == 1 ? "" : "s")"
+        case .requests:
+            return "\(viewModel.totalPendingRequestCount) Pending Request\(viewModel.totalPendingRequestCount == 1 ? "" : "s")"
+        }
+    }
+
+    private var sectionSelector: some View {
+        HStack(spacing: 0) {
+            ForEach(ChatListViewModel.Section.allCases, id: \.self) { section in
+                Button {
+                    withAnimation(.spring(duration: 0.25)) {
+                        selectedSection = section
+                    }
+                } label: {
+                    VStack(spacing: 6) {
+                        Label(section.rawValue, systemImage: section.icon)
+                            .font(.subheadline.bold())
+                        if section == .requests && viewModel.totalPendingRequestCount > 0 {
+                            Text("\(viewModel.totalPendingRequestCount)")
+                                .font(.caption.bold())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.orange.opacity(0.18), in: Capsule())
+                        }
+                    }
+                    .foregroundStyle(
+                        selectedSection == section
+                            ? selectedTheme.colors(for: colorScheme).text
+                            : selectedTheme.colors(for: colorScheme).text.opacity(0.6)
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(
+                        selectedSection == section
+                            ? selectedTheme.colors(for: colorScheme).headerOverlay
+                            : Color.clear
+                    )
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(selectedTheme.colors(for: colorScheme).headerOverlay.opacity(0.6))
+        .clipShape(Capsule())
+    }
+
+    private func startFriendConversation(with friend: ChatUser, roomType: RoomType, messageLifetime: TimeInterval?) async {
+        let userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
 
         do {
-            try await cloudKit.createChatRoom(room)
-            await loadData()
-        } catch let error {
-            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+            let roomId = try await ConvexChatAPI.shared.getOrCreateDM(
+                userId: userId,
+                friendId: friend.id,
+                roomType: roomType,
+                messageLifetime: messageLifetime
+            )
+            let room = ChatRoom(
+                id: roomId,
+                name: "Chat with \(friend.displayName)",
+                createdBy: userId,
+                participants: [userId, friend.id],
+                memberCount: 2,
+                isPrivate: true,
+                type: roomType,
+                messageLifetime: messageLifetime
+            )
+            if !viewModel.myRooms.contains(where: { $0.id == room.id }) {
+                viewModel.addRoomOptimistically(room)
+            }
+            navigationState.path.append(room)
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: AppLogger.shared.friendlyError(error))
         }
     }
 }
@@ -484,97 +765,203 @@ struct ContentView: View {
 struct EnhancedRoomCard: View {
     let room: ChatRoom
     let unreadCount: Int
+    let typingText: String?
+    var isSelected: Bool = false
     let action: () -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
+    @State private var roomAvatarImage: PlatformImage?
+    @State private var isLoadingAvatar = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header with room avatar and leave button
+        VStack(alignment: .leading, spacing: 12) {
+            // 1. Header Row
             HStack {
-                // Room avatar
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: selectedTheme.colors(for: colorScheme).primary,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-
-                    Text(room.name.prefix(1).uppercased())
-                        .font(.title3.bold())
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-                }
-                .frame(width: 44, height: 44)
-                .shadow(
-                    color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
-                    radius: 5, y: 2)
-
+                avatarView
                 Spacer()
-
-                // Header right side (Badges + Action)
-                HStack(spacing: 8) {
-                    if unreadCount > 0 {
-                        Text("\(unreadCount)")
-                            .font(.caption2.bold())
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.red)
-                            .clipShape(Capsule())
-                            .shadow(color: .red.opacity(0.3), radius: 3)
-                    }
-
-                    // Leave button
-                    Button(action: action) {
-                        Image(systemName: "door.left.hand.open")
-                            .font(.headline)
-                            .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
-                            .frame(width: 32, height: 32)
-                            .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))
-                            .clipShape(Circle())
-                    }
-                }
+                headerButtons
             }
-
-            // Room info
+            .frame(height: 40)
+            
+            // 2. Name & Message area
             VStack(alignment: .leading, spacing: 4) {
                 Text(room.name)
                     .font(.headline)
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
                     .lineLimit(1)
-
-                if let lastMessage = room.lastMessage {
-                    Text(lastMessage)
-                        .font(.caption)
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                        .lineLimit(2)
+                
+                Group {
+                    if let typing = typingText {
+                        HStack(spacing: 4) {
+                            Image(systemName: "ellipsis.bubble").imageScale(.small)
+                            Text(typing)
+                        }
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                        
+                    } else if room.type == .secret {
+                        // PRIVATE ROOM LOGIC
+                        if let sentAt = room.lastMessageDate,
+                           let lifetime = room.messageLifetime,
+                           sentAt.addingTimeInterval(lifetime) > Date() {
+                            
+                            let expiresAt = sentAt.addingTimeInterval(lifetime)
+                            TimelineView(.periodic(from: .now, by: 1.0)) { context in
+                                let remaining = max(0, expiresAt.timeIntervalSince(context.date))
+                                HStack(spacing: 4) {
+                                    Image(systemName: "clock.arrow.2.circlepath")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.secondary)
+                                    Text("Expires in \(formatCountdown(remaining))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        } else {
+                            Text("No recent activity")
+                                .font(.caption)
+                                .foregroundStyle(.secondary.opacity(0.6))
+                        }
+                        
+                    } else if let lastMessage = room.lastMessage {
+                        Text(lastMessage)
+                            .font(.caption)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                        
+                    } else {
+                        Text("No messages yet")
+                            .font(.caption)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.6))
+                    }
                 }
-
+                .lineLimit(1)
+                .frame(height: 20)
+            }
+            
+            // 3. Footer Row
+            HStack(alignment: .center, spacing: 4) {
                 HStack(spacing: 4) {
                     Image(systemName: "person.2.fill")
                         .imageScale(.small)
-                    Text("\(room.participants.count)")
+                    Text("\(room.resolvedMemberCount)")
                 }
                 .font(.caption2)
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                .padding(.top, 4)
+                
+                Spacer()
+                
+                HStack(spacing: 6) {
+                    if room.type == .secret {
+                        privateBadge
+                    }
+                    
+                    if room.hasPassword {
+                        passwordBadge
+                    }
+                }
             }
+            .frame(height: 24)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(selectedTheme.colors(for: colorScheme).cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(
-            color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.1), radius: 8, y: 4
-        )
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 4)
         .overlay(
             RoundedRectangle(cornerRadius: 20)
                 .strokeBorder(
-                    selectedTheme.colors(for: colorScheme).accent.opacity(0.1), lineWidth: 1)
+                    isSelected
+                        ? selectedTheme.colors(for: colorScheme).accent
+                        : .primary.opacity(0.05),
+                    lineWidth: isSelected ? 2 : 1)
         )
+        .scaleEffect(isSelected ? 1.02 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
+    }
+
+    // MARK: - Subcomponents
+
+    private var privateBadge: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "key.fill")
+                .font(.system(size: 8))
+            Text("Secret")
+                .font(.system(size: 10, weight: .bold))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(.secondary.opacity(0.1)))
+        .foregroundStyle(.secondary)
+    }
+
+    private var passwordBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "lock.fill").font(.system(size: 8))
+            Text("Locked").font(.system(size: 10, weight: .bold))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(Color.indigo.opacity(0.1)))
+        .foregroundStyle(Color.indigo)
+    }
+
+    private var avatarView: some View {
+        Group {
+            if let avatarImage = roomAvatarImage {
+                Image(platformImage: avatarImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    Circle().fill(LinearGradient(colors: selectedTheme.colors(for: colorScheme).primary, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    if isLoadingAvatar {
+                        ProgressView().tint(.white).scaleEffect(0.7)
+                    } else {
+                        Text(room.name.prefix(1).uppercased())
+                            .font(.headline.bold())
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
+        }
+        .frame(width: 40, height: 40)
+        .clipShape(Circle())
+        .task(id: room.avatarStorageId) {
+            roomAvatarImage = nil
+            guard let storageId = room.avatarStorageId else { isLoadingAvatar = false; return }
+            isLoadingAvatar = true
+            if let image = await ConvexFileCacheService.shared.image(for: storageId) { roomAvatarImage = image }
+            isLoadingAvatar = false
+        }
+    }
+
+    private var headerButtons: some View {
+        HStack(spacing: 8) {
+            if unreadCount > 0 {
+                Text("\(unreadCount)")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.red)
+                    .clipShape(Capsule())
+            }
+            Button(action: action) {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
+                    .frame(width: 28, height: 28)
+                    .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func formatCountdown(_ seconds: TimeInterval) -> String {
+        let s = Int(seconds)
+        if s >= 3600 { return "\(s / 3600)h \((s % 3600) / 60)m" }
+        else if s >= 60 { return "\(s / 60)m \(s % 60)s" }
+        else { return "\(s)s" }
     }
 }
 
@@ -582,7 +969,7 @@ struct EnhancedNewRoomSheet: View {
     @Binding var isShowingSheet: Bool
     @Binding var roomName: String
     @State private var selectedType: RoomType = .regular
-    @State private var messageLifetime: TimeInterval = 300  // 5 minutes default
+    @State private var messageLifetime: TimeInterval = 30  // 30 seconds default
     let createRoom: (RoomType, TimeInterval?) async -> Void
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @State private var animateContent = false
@@ -594,10 +981,13 @@ struct EnhancedNewRoomSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private let lifetimeOptions: [(String, TimeInterval)] = [
+        ("10 seconds", 10),
+        ("30 seconds", 30),
+        ("1 minute", 60),
         ("5 minutes", 300),
+        ("10 minutes", 600),
+        ("30 minutes", 1800),
         ("1 hour", 3600),
-        ("24 hours", 86400),
-        ("7 days", 604800),
     ]
 
     var body: some View {
@@ -636,110 +1026,12 @@ struct EnhancedNewRoomSheet: View {
 
                             VStack(spacing: 16) {
                                 ForEach([RoomType.regular, .secret], id: \.self) { type in
-                                    Button {
-                                        withAnimation(.spring(duration: 0.5, bounce: 0.3)) {
-                                            selectedType = type
-                                        }
-                                    } label: {
-                                        HStack(spacing: 16) {
-                                            // Room type icon
-                                            ZStack {
-                                                Circle()
-                                                    .fill(
-                                                        LinearGradient(
-                                                            colors: selectedType == type
-                                                                ? selectedTheme.colors(
-                                                                    for: colorScheme
-                                                                )
-                                                                .primary
-                                                                : [
-                                                                    selectedTheme.colors(
-                                                                        for: colorScheme
-                                                                    ).cardBackground
-                                                                ],
-                                                            startPoint: .topLeading,
-                                                            endPoint: .bottomTrailing
-                                                        )
-                                                    )
-                                                    .frame(width: 44, height: 44)
-                                                    .shadow(
-                                                        color: selectedType == type
-                                                            ? selectedTheme.colors(for: colorScheme)
-                                                                .primary[0].opacity(
-                                                                    0.3)
-                                                            : .clear,
-                                                        radius: 5, y: 2
-                                                    )
-
-                                                Image(
-                                                    systemName: type == .regular
-                                                        ? "bubble.left.circle.fill"
-                                                        : "lock.shield.fill"
-                                                )
-                                                .font(.title3)
-                                                .foregroundStyle(
-                                                    selectedType == type
-                                                        ? selectedTheme.colors(for: colorScheme)
-                                                            .text
-                                                        : selectedTheme.colors(for: colorScheme)
-                                                            .textSecondary
-                                                )
-                                            }
-
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text(
-                                                    type == .regular
-                                                        ? "Regular Room" : "Chamber of Secrets"
-                                                )
-                                                .font(.headline)
-                                                .foregroundStyle(
-                                                    selectedTheme.colors(for: colorScheme)
-                                                        .textPrimary)
-
-                                                Text(
-                                                    type == .regular
-                                                        ? "Standard chat room with permanent messages"
-                                                        : "Secret room with self-destructing messages"
-                                                )
-                                                .font(.caption)
-                                                .foregroundStyle(
-                                                    selectedTheme.colors(for: colorScheme)
-                                                        .textSecondary
-                                                )
-                                                .lineLimit(2)
-                                            }
-
-                                            Spacer()
-
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .foregroundStyle(
-                                                    selectedTheme.colors(for: colorScheme).accent
-                                                )
-                                                .opacity(selectedType == type ? 1 : 0)
-                                        }
-                                        .padding()
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 16)
-                                                .fill(
-                                                    selectedTheme.colors(for: colorScheme)
-                                                        .cardBackground)
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 16)
-                                                .strokeBorder(
-                                                    selectedType == type
-                                                        ? selectedTheme.colors(for: colorScheme)
-                                                            .accent
-                                                        : selectedTheme.colors(for: colorScheme)
-                                                            .textSecondary.opacity(
-                                                                0.1),
-                                                    lineWidth: selectedType == type ? 1.5 : 1
-                                                )
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    .opacity(animateContent ? 1 : 0)
-                                    .offset(y: animateContent ? 0 : 20)
+                                    RoomTypeButton(
+                                        type: type,
+                                        selectedType: $selectedType,
+                                        selectedTheme: selectedTheme,
+                                        animateContent: animateContent
+                                    )
                                 }
                             }
                         }
@@ -859,8 +1151,10 @@ struct EnhancedNewRoomSheet: View {
                         // Create button with enhanced animation
                         Button {
                             // Add haptic feedback
+                        #if canImport(UIKit)
                             let impactMed = UIImpactFeedbackGenerator(style: .medium)
                             impactMed.impactOccurred()
+                        #endif
 
                             Task {
                                 await createRoom(
@@ -870,13 +1164,16 @@ struct EnhancedNewRoomSheet: View {
                             }
                         } label: {
                             HStack(spacing: 12) {
-                                Image(
-                                    systemName: selectedType == .regular
-                                        ? "plus.circle.fill" : "lock.shield.fill"
-                                )
-                                .transition(.scale.combined(with: .opacity))
-
-                                Text("Create \(selectedType == .regular ? "Room" : "Secret Room")")
+                                if selectedType == .secret {
+                                    Image(systemName: "flame.fill")
+                                        .symbolEffect(.variableColor.cumulative.hideInactiveLayers.nonReversing, options: .repeat(.continuous))
+                                        .transition(.scale.combined(with: .opacity))
+                                    Text("Create Secret Room")
+                                } else {
+                                    Image(systemName: "plus.circle.fill")
+                                        .transition(.scale.combined(with: .opacity))
+                                    Text("Create Room")
+                                }
                             }
                             .font(.headline)
                             .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
@@ -884,15 +1181,18 @@ struct EnhancedNewRoomSheet: View {
                             .padding()
                             .background(
                                 LinearGradient(
-                                    colors: selectedTheme.colors(for: colorScheme).primary,
+                                    colors: selectedType == .secret
+                                        ? [Color.orange, Color.red]
+                                        : selectedTheme.colors(for: colorScheme).primary,
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
                             )
                             .clipShape(RoundedRectangle(cornerRadius: 16))
                             .shadow(
-                                color: selectedTheme.colors(for: colorScheme).primary[0].opacity(
-                                    0.3),
+                                color: selectedType == .secret
+                                    ? Color.orange.opacity(0.4)
+                                    : selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
                                 radius: 5, y: 2
                             )
                             .scaleEffect(roomName.isEmpty ? 0.98 : 1)
@@ -900,6 +1200,11 @@ struct EnhancedNewRoomSheet: View {
                         .disabled(roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .opacity(animateContent ? 1 : 0)
                         .offset(y: animateContent ? 0 : 20)
+#if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+#endif
+                        .contentShape(RoundedRectangle(cornerRadius: 16))
                     }
                     .padding(20)
                     .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 20 : 16)
@@ -912,7 +1217,9 @@ struct EnhancedNewRoomSheet: View {
                     }
                 }
                 .background(selectedTheme.colors(for: colorScheme).background)
+                #if canImport(UIKit)
                 .navigationBarTitleDisplayMode(.inline)
+                #endif
                 .toolbar {
                     ToolbarItemGroup(placement: .keyboard) {
                         Spacer()
@@ -929,7 +1236,13 @@ struct EnhancedNewRoomSheet: View {
                     }
 
                     // Add close button
-                    ToolbarItem(placement: .navigationBarTrailing) {
+                    ToolbarItem(placement: {
+                        #if canImport(UIKit)
+                        return .navigationBarTrailing
+                        #else
+                        return .automatic
+                        #endif
+                    }()) {
                         Button {
                             isShowingSheet = false
                         } label: {
@@ -939,6 +1252,11 @@ struct EnhancedNewRoomSheet: View {
                                 .foregroundStyle(
                                     selectedTheme.colors(for: colorScheme).textSecondary)
                         }
+#if os(macOS)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+#endif
+                        .contentShape(Circle())
                     }
                 }
             }
@@ -948,17 +1266,23 @@ struct EnhancedNewRoomSheet: View {
                 }
             }
             .onChange(of: selectedType) { _, _ in
+                #if canImport(UIKit)
                 let impactLight = UIImpactFeedbackGenerator(style: .light)
                 impactLight.impactOccurred()
+                #endif
             }
         }
+        #if os(macOS)
+        .frame(minWidth: 500, idealWidth: 560, minHeight: 500, idealHeight: selectedType == .secret ? 760 : 620)
+        #else
         .presentationDetents([
-            .height(selectedType == .secret ? 760 : 620),
+            .height(selectedType == .secret ? 900 : 620),
             .large,
         ])
         .presentationDragIndicator(.visible)
         .presentationBackground(selectedTheme.colors(for: colorScheme).background)
         .interactiveDismissDisabled()
+        #endif
     }
 }
 
@@ -1046,7 +1370,7 @@ struct JoinRoomSheet: View {
                                         HStack {
                                             Image(systemName: "person.2.fill")
                                                 .imageScale(.small)
-                                            Text("\(room.participants.count) members")
+                                            Text("\(room.resolvedMemberCount) members")
                                         }
                                         .font(.caption)
                                         .foregroundStyle(
@@ -1086,4 +1410,102 @@ struct JoinRoomSheet: View {
 
 #Preview {
     ContentView()
+}
+
+struct RoomTypeButton: View {
+    let type: RoomType
+    @Binding var selectedType: RoomType
+    let selectedTheme: AppTheme
+    let animateContent: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Button {
+            withAnimation(.spring(duration: 0.5, bounce: 0.3)) {
+                selectedType = type
+            }
+        } label: {
+            HStack(spacing: 16) {
+                // Room type icon
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: selectedType == type
+                                    ? selectedTheme.colors(for: colorScheme).primary
+                                    : [selectedTheme.colors(for: colorScheme).cardBackground],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 44, height: 44)
+                        .shadow(
+                            color: selectedType == type
+                                ? selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3)
+                                : .clear,
+                            radius: 5, y: 2
+                        )
+
+                    Image(
+                        systemName: type == .regular
+                            ? "bubble.left.circle.fill"
+                            : "lock.shield.fill"
+                    )
+                    .font(.title3)
+                    .foregroundStyle(
+                        selectedType == type
+                            ? selectedTheme.colors(for: colorScheme).text
+                            : selectedTheme.colors(for: colorScheme).textSecondary
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(
+                        type == .regular
+                            ? "Regular Room" : "Chamber of Secrets"
+                    )
+                    .font(.headline)
+                    .foregroundStyle(
+                        selectedTheme.colors(for: colorScheme).textPrimary
+                    )
+
+                    Text(
+                        type == .regular
+                            ? "Standard chat room with permanent messages"
+                            : "Secret room with self-destructing messages"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(
+                        selectedTheme.colors(for: colorScheme).textSecondary
+                    )
+                    .lineLimit(2)
+                }
+
+                Spacer()
+
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(
+                        selectedTheme.colors(for: colorScheme).accent
+                    )
+                    .opacity(selectedType == type ? 1 : 0)
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(
+                        selectedType == type
+                            ? selectedTheme.colors(for: colorScheme).accent
+                            : selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.1),
+                        lineWidth: selectedType == type ? 1.5 : 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .opacity(animateContent ? 1 : 0)
+        .offset(y: animateContent ? 0 : 20)
+    }
 }

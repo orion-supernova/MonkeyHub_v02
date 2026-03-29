@@ -1,3 +1,4 @@
+#if canImport(UIKit)
 import SwiftUI
 import AVFoundation
 import UIKit
@@ -528,3 +529,22 @@ extension UIImage {
         return flippedImage ?? self
     }
 }
+#else
+import SwiftUI
+
+struct CameraEditorView: View {
+    @Binding var isPresented: Bool
+    // Note: We use a generic type here or common type if possible, but for MacOS we'll just skip the logic.
+    // In a real multiplatform app, we'd use a platform-agnostic image type.
+    var onImageCaptured: (Any) -> Void 
+
+    var body: some View {
+        VStack {
+            Text("Camera is not available on native macOS builds.")
+            Text("Please run as 'Designed for iPad' to use camera features.")
+            Button("Close") { isPresented = false }
+        }
+        .padding()
+    }
+}
+#endif

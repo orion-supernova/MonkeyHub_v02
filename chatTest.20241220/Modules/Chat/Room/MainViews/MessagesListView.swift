@@ -1,81 +1,241 @@
 import SwiftUI
 import Combine
 
-#if canImport(UIKit)
-import UIKit
-#endif
-
 struct MessagesListView: View {
     let viewModel: ChatRoomViewModel
     let isLoading: Bool
     let onImageTapped: (URL) -> Void
+    let imageZoomNamespace: Namespace.ID
+    let topInset: CGFloat
+    let bottomInset: CGFloat
+    
+    @State private var activeReactionPickerMessageId: String?
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @State private var showScrollToBottom = false
+    @State private var scrollToBottom = false
+
+    private var currentUserId: String {
+        UserDefaults.standard.string(forKey: "userId") ?? ""
+    }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 8) {
-                ForEach(viewModel.messages) { message in
-                    MessageView(
-                        message: message,
-                        onImageTapped: onImageTapped,
-                        onDelete: {
-                            Task {
-                                await viewModel.deleteMessage(message.id)
-                            }
+        ZStack {
+            // 1. DIMMING LAYER — sits behind the scroll view,
+            // visible through the scroll view's clear background.
+            // This dims the background gradient WITHOUT covering the picker.
+            if activeReactionPickerMessageId != nil {
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+
+            // 2. THE MAIN SCROLLVIEW (always on top of dimming)
+            UIKitScrollView(
+                content: messagesContent,
+                firstItemId: viewModel.messages.first?.id,
+                itemCount: viewModel.messages.count,
+                topInset: topInset,
+                bottomInset: bottomInset,
+                scrollToBottom: $scrollToBottom,
+                onNearTop: {
+                    if !viewModel.isFetchingOlderMessages {
+                        Task { await viewModel.loadOlderMessages() }
+                    }
+                },
+                onAtBottomChanged: { isAtBottom in
+                    showScrollToBottom = !isAtBottom
+                }
+            )
+            .background(Color.clear)
+            // When no messages, pass touches through so the empty state and
+            // input bar behind this scroll view remain fully interactive.
+            .allowsHitTesting(!viewModel.messages.isEmpty)
+            .zIndex(1)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            scrollDownButton
+        }
+        .onAppear { }
+    }
+
+    private func dismissPicker() {
+        withAnimation(.smooth(duration: 0.2)) {
+            activeReactionPickerMessageId = nil
+        }
+    }
+
+    // MessagesListView.swift
+
+    private var messagesContent: some View {
+        
+        LazyVStack(spacing: 8) {
+            Color.clear
+                .frame(height: 55)
+                .listRowSeparator(.hidden)
+                .contentShape(Rectangle())
+            
+            if viewModel.isFetchingOlderMessages {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.vertical, 8)
+            }
+
+            ForEach(viewModel.messages) { message in
+                let isActive = activeReactionPickerMessageId == message.id
+                let pickerIsOpen = activeReactionPickerMessageId != nil
+
+                MessageRow(
+                    message: message,
+                    currentUserId: currentUserId,
+                    isCurrentUser: message.senderId == currentUserId,
+                    onImageTapped: onImageTapped,
+                    onDelete: { Task { await viewModel.deleteMessage(message.id) } },
+                    onResend: { Task { await viewModel.sendMessage(message.content) } },
+                    isReactionPickerActive: isActive,
+                    onRequestReactionPicker: {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            activeReactionPickerMessageId = (activeReactionPickerMessageId == message.id) ? nil : message.id
                         }
-                    )
-                    .padding(.horizontal)
-                    .id(message.id)
-                    .rotationEffect(.degrees(180)) // Un-flip the message content
-                    .onAppear {
-                        // Trigger pagination when reaching the visual top (internal last element)
-                        if let last = viewModel.messages.last, last.id == message.id {
-                            Task {
-                                await viewModel.loadOlderMessages()
-                            }
-                        }
+                    },
+                    imageZoomNamespace: imageZoomNamespace
+                )
+                .zIndex(isActive ? 1000 : 1)
+                .opacity(pickerIsOpen && !isActive ? 0.4 : 1.0)
+                .overlay {
+                    if pickerIsOpen && !isActive {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { dismissPicker() }
                     }
                 }
+            }
 
-                // Pagination Loader (at the visual top, internal end)
-                if viewModel.isFetchingOlderMessages {
-                    ProgressView()
-                        .padding()
-                        .rotationEffect(.degrees(180))
+            if let typingText = viewModel.typingText {
+                TypingIndicatorView(text: typingText)
+                    .padding(.horizontal)
+                    .padding(.top, 4)
+            }
+
+            // BOTTOM CLEARANCE:
+            // Protects the "Chamber of Secrets" timer and provides
+            // breathing room above the input bar.
+            Color.clear
+                .frame(height: 55)
+                .listRowSeparator(.hidden)
+                .contentShape(Rectangle())
+                .onTapGesture { dismissPicker() }
+        }
+    }
+
+    private var scrollDownButton: some View {
+        Button {
+            scrollToBottom = true
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 38, height: 38)
+                .background(.ultraThinMaterial)
+                .clipShape(Circle())
+                .shadow(color: .black.opacity(0.1), radius: 4)
+        }
+        .padding(.trailing, 20)
+        .padding(.bottom, 100)
+        .opacity(showScrollToBottom ? 1 : 0)
+        .scaleEffect(showScrollToBottom ? 1 : 0.5)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showScrollToBottom)
+    }
+}
+
+// MARK: - Optimized Message Row
+struct MessageRow: View, Equatable {
+    let message: ChatMessage
+    let currentUserId: String
+    let isCurrentUser: Bool
+    let onImageTapped: (URL) -> Void
+    let onDelete: () -> Void
+    let onResend: () -> Void
+    let isReactionPickerActive: Bool
+    let onRequestReactionPicker: () -> Void
+    let imageZoomNamespace: Namespace.ID
+
+    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool {
+        lhs.message.id == rhs.message.id &&
+        lhs.message.status == rhs.message.status &&
+        lhs.message.reactions.count == rhs.message.reactions.count &&
+        lhs.isReactionPickerActive == rhs.isReactionPickerActive
+    }
+
+    var body: some View {
+        MessageView(
+            message: message,
+            currentUserId: currentUserId,
+            isCurrentUser: isCurrentUser,
+            onImageTapped: onImageTapped,
+            onDelete: onDelete,
+            onRequestReactionPicker: onRequestReactionPicker,
+            isReactionPickerActive: isReactionPickerActive,
+            onResend: onResend,
+            imageZoomNamespace: imageZoomNamespace
+        )
+        .id(message.id)
+        .padding(.horizontal)
+    }
+}
+
+// MARK: - Typing Indicator View (Fixed Animation)
+struct TypingIndicatorView: View {
+    let text: String
+    @State private var isAnimating = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                ForEach(0..<3) { index in
+                    Circle()
+                        .fill(Color.secondary.opacity(0.6))
+                        .frame(width: 6, height: 6)
+                        .scaleEffect(isAnimating ? 1.0 : 0.5)
+                        .opacity(isAnimating ? 1.0 : 0.3)
+                        .animation(
+                            .easeInOut(duration: 0.6)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.2),
+                            value: isAnimating
+                        )
                 }
             }
-            .padding(.vertical)
-        }
-        .rotationEffect(.degrees(180)) // Flip the entire scroll view
-        .background(Color(uiColor: .systemBackground))
-        .scrollDismissesKeyboard(.interactively)
-        .onTapGesture {
-            hideKeyboard()
-        }
-    }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
-    private func hideKeyboard() {
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil,
-            from: nil,
-            for: nil
-        )
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+        }
+        .onAppear {
+            isAnimating = true
+        }
     }
 }
 
-// MARK: - Keyboard Height Publisher
-extension Publishers {
-    static var keyboardHeight: AnyPublisher<CGFloat, Never> {
-        let willShow = NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
-            .map { notification -> CGFloat in
-                (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect)?.height ?? 0
-            }
+// MARK: - Syncing Indicator View (Loading new messages)
+struct SyncingIndicatorView: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
 
-        let willHide = NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
-            .map { _ -> CGFloat in 0 }
-
-        return Publishers.Merge(willShow, willHide)
-            .eraseToAnyPublisher()
+            Text("Syncing...")
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .transition(.opacity.combined(with: .scale(scale: 0.9)))
     }
 }
-

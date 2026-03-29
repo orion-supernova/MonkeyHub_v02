@@ -1,4 +1,3 @@
-import CloudKit
 import Foundation
 
 enum MessageType: String, Codable {
@@ -7,6 +6,7 @@ enum MessageType: String, Codable {
     case video
     case url
     case audio
+    case system
 }
 
 enum MessageStatus: String, Codable {
@@ -23,19 +23,23 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     let type: MessageType
     let timestamp: Date
     let roomId: String
-    let assetURL: URL?
+    var mediaStorageId: String?     // Convex storage ID for media assets
+    var assetURL: URL?              // Local cached URL (not persisted as absolute path)
     var status: MessageStatus
+    var reactions: [MessageReaction]
+    var expiresAt: Date?            // Non-nil for Chamber of Secrets messages
 
-    // CloudKit record keys
-    static let recordType = "ChatMessage"
-    static let idKey = "id"
-    static let senderIdKey = "senderId"
-    static let senderNameKey = "senderName"
-    static let contentKey = "content"
-    static let typeKey = "type"
-    static let timestampKey = "timestamp"
-    static let roomIdKey = "roomId"
-    static let assetKey = "asset"
+    static let systemSenderId = "system"
+    static let systemSenderName = "System"
+
+    // MARK: - Codable Strategy
+    // Store filename only (not absolute URL) so it survives sandbox UUID rotation.
+    enum CodingKeys: String, CodingKey {
+        case id, senderId, senderName, content, type, timestamp, roomId
+        case mediaStorageId, status, reactions
+        case assetFileName
+        case expiresAt
+    }
 
     init(
         id: String = UUID().uuidString,
@@ -45,8 +49,11 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         type: MessageType,
         timestamp: Date = Date(),
         roomId: String,
+        mediaStorageId: String? = nil,
         assetURL: URL? = nil,
-        status: MessageStatus = .sent
+        status: MessageStatus = .sent,
+        reactions: [MessageReaction] = [],
+        expiresAt: Date? = nil
     ) {
         self.id = id
         self.senderId = senderId
@@ -55,64 +62,64 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         self.type = type
         self.timestamp = timestamp
         self.roomId = roomId
+        self.mediaStorageId = mediaStorageId
         self.assetURL = assetURL
         self.status = status
+        self.reactions = reactions
+        self.expiresAt = expiresAt
     }
 
-    /// Initialize from CloudKit record
-    ///
-    /// - Parameter record: The CloudKit record to parse
-    /// - Throws: CloudKitError.invalidRecord if required fields are missing
-    init(from record: CKRecord) throws {
-        guard let id = record[ChatMessage.idKey] as? String,
-            let senderId = record[ChatMessage.senderIdKey] as? String,
-            let senderName = record[ChatMessage.senderNameKey] as? String,
-            let content = record[ChatMessage.contentKey] as? String,
-            let typeRaw = record[ChatMessage.typeKey] as? String,
-            let type = MessageType(rawValue: typeRaw),
-            let timestamp = record[ChatMessage.timestampKey] as? Date,
-            let roomId = record[ChatMessage.roomIdKey] as? String
-        else {
-            throw CloudKitError.invalidRecord
-        }
+    // MARK: - Codable
 
-        self.id = id
-        self.senderId = senderId
-        self.senderName = senderName
-        self.content = content
-        self.type = type
-        self.timestamp = timestamp
-        self.roomId = roomId
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        senderId = try c.decode(String.self, forKey: .senderId)
+        senderName = try c.decode(String.self, forKey: .senderName)
+        content = try c.decode(String.self, forKey: .content)
+        type = try c.decode(MessageType.self, forKey: .type)
+        timestamp = try c.decode(Date.self, forKey: .timestamp)
+        roomId = try c.decode(String.self, forKey: .roomId)
+        status = try c.decode(MessageStatus.self, forKey: .status)
+        reactions = try c.decodeIfPresent([MessageReaction].self, forKey: .reactions) ?? []
+        mediaStorageId = try c.decodeIfPresent(String.self, forKey: .mediaStorageId)
+        expiresAt = try c.decodeIfPresent(Date.self, forKey: .expiresAt)
 
-        if let asset = record[ChatMessage.assetKey] as? CKAsset {
-            self.assetURL = AssetPersistenceService.shared.persistAsset(asset)
-        } else {
-            self.assetURL = nil
-        }
-        
-        self.status = .sent
+        // Re-base local asset URL from filename only
+        let fileName = try c.decodeIfPresent(String.self, forKey: .assetFileName)
+        assetURL = AssetPersistenceService.shared.getURL(for: fileName)
     }
 
-    func toRecord() -> CKRecord {
-        let recordID = CKRecord.ID(recordName: id)
-        let record = CKRecord(recordType: ChatMessage.recordType, recordID: recordID)
-        
-        record[ChatMessage.idKey] = id
-        record[ChatMessage.senderIdKey] = senderId
-        record[ChatMessage.senderNameKey] = senderName
-        record[ChatMessage.contentKey] = content
-        record[ChatMessage.typeKey] = type.rawValue
-        record[ChatMessage.timestampKey] = timestamp
-        record[ChatMessage.roomIdKey] = roomId
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(senderId, forKey: .senderId)
+        try c.encode(senderName, forKey: .senderName)
+        try c.encode(content, forKey: .content)
+        try c.encode(type, forKey: .type)
+        try c.encode(timestamp, forKey: .timestamp)
+        try c.encode(roomId, forKey: .roomId)
+        try c.encode(status, forKey: .status)
+        try c.encode(reactions, forKey: .reactions)
+        try c.encodeIfPresent(mediaStorageId, forKey: .mediaStorageId)
+        try c.encodeIfPresent(expiresAt, forKey: .expiresAt)
+        // Persist filename only, not absolute URL
+        try c.encodeIfPresent(assetURL?.lastPathComponent, forKey: .assetFileName)
+    }
 
-        if let url = assetURL {
-            record[ChatMessage.assetKey] = CKAsset(fileURL: url)
-        }
+    // MARK: - Helpers
 
-        return record
+    func groupedReactions() -> [ReactionGroup] {
+        Dictionary(grouping: reactions, by: { $0.emoji })
+            .map { ReactionGroup(emoji: $0.key, reactions: $0.value) }
+            .sorted { $0.reactions.first?.timestamp ?? Date() < $1.reactions.first?.timestamp ?? Date() }
     }
 
     static func == (lhs: ChatMessage, rhs: ChatMessage) -> Bool {
-        lhs.id == rhs.id
+        lhs.id == rhs.id &&
+        lhs.status == rhs.status &&
+        lhs.reactions.count == rhs.reactions.count &&
+        lhs.assetURL == rhs.assetURL &&
+        lhs.expiresAt == rhs.expiresAt
     }
 }

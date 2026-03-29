@@ -165,10 +165,18 @@ struct VoiceRecorderView: View {
     }
 
     private func startRecording() {
+        #if canImport(UIKit)
         let recordingSession = AVAudioSession.sharedInstance()
         do {
             try recordingSession.setCategory(.playAndRecord, mode: .default)
             try recordingSession.setActive(true)
+        } catch {
+            print("Failed to configure audio session: \(error)")
+            return
+        }
+        #endif
+        
+        do {
             let audioFilename = getDocumentsDirectory().appendingPathComponent("\(UUID().uuidString).m4a")
             recordedAudioURL = nil
             let settings = [

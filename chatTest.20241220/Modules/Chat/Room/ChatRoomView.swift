@@ -32,6 +32,7 @@ struct ChatRoomView: View {
 
     #if canImport(UIKit)
     @State private var screenshotObserver: NSObjectProtocol?
+    @State private var screenCaptureObserver: NSObjectProtocol?
     #endif
 
     // Keyboard navigation (macOS) — nil means text field cursor mode
@@ -39,7 +40,7 @@ struct ChatRoomView: View {
     @FocusState private var isNavActive: Bool
 
     /// Live room data from the repository subscription — falls back to the initial room.
-    private var liveRoom: ChatRoom {
+    public var liveRoom: ChatRoom {
         repository.rooms.first { $0.id == room.id } ?? room
     }
 
@@ -72,7 +73,7 @@ struct ChatRoomView: View {
                     .modifier(LiquidGlassModifier(cornerRadius: 12))
             } else if viewModel.messages.isEmpty {
                 if liveRoom.type == .secret {
-                    ChamberOfSecretsWelcomeView(messageLifetime: liveRoom.messageLifetime)
+                    PrivateSpaceWelcomeView(messageLifetime: liveRoom.messageLifetime)
                 } else {
                     ContentUnavailableView(
                         "No Messages",
@@ -165,10 +166,26 @@ struct ChatRoomView: View {
                     object: nil,
                     queue: .main
                 ) { _ in
-                    AlertManager.shared.showAlert(
-                        title: "Screenshot Detected",
-                        message: "Screenshots are not allowed in Chamber of Secrets rooms."
-                    )
+                    Task { @MainActor in
+                        AlertManager.shared.showAlert(
+                            title: "Screenshot Detected",
+                            message: "Screenshots are not allowed in Chamber of Secrets rooms."
+                        )
+                    }
+                }
+
+                screenCaptureObserver = NotificationCenter.default.addObserver(
+                    forName: UIScreen.capturedDidChangeNotification,
+                    object: nil,
+                    queue: .main
+                ) { _ in
+                    guard UIScreen.main.isCaptured else { return }
+                    Task { @MainActor in
+                        AlertManager.shared.showAlert(
+                            title: "Capture Blocked",
+                            message: "Screen recording, mirroring, and broadcasts are blocked in Chamber of Secrets rooms."
+                        )
+                    }
                 }
             }
             #endif
@@ -180,6 +197,10 @@ struct ChatRoomView: View {
             if let observer = screenshotObserver {
                 NotificationCenter.default.removeObserver(observer)
                 screenshotObserver = nil
+            }
+            if let observer = screenCaptureObserver {
+                NotificationCenter.default.removeObserver(observer)
+                screenCaptureObserver = nil
             }
             #endif
         }
@@ -282,6 +303,7 @@ struct ChatRoomView: View {
                 )
             }
         )
+        .sensitiveContentProtection(enabled: liveRoom.type == .secret)
         }
     }
 
@@ -446,86 +468,6 @@ struct ChatRoomView: View {
     }
 }
 
-// MARK: - Chamber of Secrets Welcome View
-
-struct ChamberOfSecretsWelcomeView: View {
-    let messageLifetime: TimeInterval?
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 32) {
-                // Big icon
-                ZStack {
-                    Circle()
-                        .fill(RadialGradient(
-                            colors: [Color.orange.opacity(0.3), Color.red.opacity(0.1), Color.clear],
-                            center: .center, startRadius: 10, endRadius: 80
-                        ))
-                        .frame(width: 160, height: 160)
-                    Text("🔥")
-                        .font(.system(size: 72))
-                }
-
-                // Title
-                VStack(spacing: 8) {
-                    Text("Chamber of Secrets")
-                        .font(.title2.bold())
-                        .foregroundStyle(
-                            LinearGradient(colors: [.orange, .red], startPoint: .leading, endPoint: .trailing)
-                        )
-                    Text("Messages in this room automatically delete after a set time — whether read or not.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                }
-
-                // Feature cards
-                VStack(spacing: 12) {
-                    featureRow(icon: "flame.fill", color: .orange,
-                               title: "Auto-Deleting Messages",
-                               subtitle: messageLifetime != nil ? "Every message deletes after \(formatLifetime(messageLifetime!))" : "Messages delete on a timer")
-                    featureRow(icon: "exclamationmark.shield.fill", color: .red,
-                               title: "Screenshot Detection",
-                               subtitle: "You'll be notified if someone takes a screenshot")
-                    featureRow(icon: "eye.slash.fill", color: .purple,
-                               title: "No Message History",
-                               subtitle: "Once gone, messages cannot be recovered")
-                }
-                .padding(.horizontal, 24)
-            }
-            .padding(.vertical, 48)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .onTapGesture {
-            #if canImport(UIKit)
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            #endif
-        }
-    }
-
-    private func featureRow(icon: String, color: Color, title: String, subtitle: String) -> some View {
-        HStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(color.opacity(0.15))
-                    .frame(width: 48, height: 48)
-                Image(systemName: icon)
-                    .font(.title3)
-                    .foregroundStyle(color)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(16)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(color.opacity(0.2), lineWidth: 1))
-    }
-}
-
 struct RoomTitleView: View {
     let title: String
     var roomType: RoomType = .regular
@@ -538,99 +480,45 @@ struct RoomTitleView: View {
     @State private var textLayoutWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
 
-    init(title: String, roomType: RoomType = .regular, avatarImage: PlatformImage? = nil, showFocusRing: Bool = false) {
-        self.title = title
-        self.roomType = roomType
-        self.avatarImage = avatarImage
-        self.showFocusRing = showFocusRing
-    }
-
     var body: some View {
         HStack(spacing: 8) {
-            // Avatar circle — only rendered when a real image exists
             if let avatar = avatarImage {
                 Image(platformImage: avatar)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 34, height: 34)
+                    .frame(width: 32, height: 32)
                     .clipShape(Circle())
-                    // Thin background-coloured border gives the layered "sticker on top" look
-                    .overlay(Circle().strokeBorder(.background, lineWidth: 2))
-                    .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                    .overlay(Circle().strokeBorder(colorScheme == .dark ? .white.opacity(0.1) : .black.opacity(0.1), lineWidth: 0.5))
             }
 
-            // Chamber of Secrets flame icon
+            // Subtle Privacy Icon (Replaces Snake/Flame)
             if roomType == .secret {
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.orange, .red],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .symbolEffect(.variableColor.cumulative, options: .repeat(.continuous))
+                Image(systemName: "key.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
             }
 
-            // Room name
             Text(title)
                 .font(.headline)
                 .lineLimit(isExpanded ? nil : 1)
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
                 .background(
                     GeometryReader { geo in
-                        Color.clear
-                            .onAppear { containerWidth = geo.size.width }
-                            .onChange(of: geo.size.width) { _, newValue in containerWidth = newValue }
+                        Color.clear.onAppear { containerWidth = geo.size.width }
                     }
-                )
-                .background(
-                    Text(title)
-                        .font(.headline)
-                        .fixedSize()
-                        .hidden()
-                        .overlay(
-                            GeometryReader { proxy in
-                                Color.clear
-                                    .onAppear { textLayoutWidth = proxy.size.width }
-                                    .onChange(of: proxy.size.width) { _, newValue in textLayoutWidth = newValue }
-                            }
-                        )
                 )
         }
-        .padding(.leading, avatarImage != nil ? 6 : 16)
-        .padding(.trailing, 16)
-        .padding(.vertical, isExpanded ? 8 : 4)
-        .frame(minHeight: 44)
-        .frame(height: isExpanded ? nil : 44)
-        .modifier(LiquidGlassModifier(cornerRadius: 22))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
         .overlay(
-            RoundedRectangle(cornerRadius: 22)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: selectedTheme.colors(for: colorScheme).primary,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 2.5
-                )
-                .opacity(showFocusRing ? 1 : 0)
-                .animation(.easeInOut(duration: 0.15), value: showFocusRing)
+            Capsule()
+                .strokeBorder(selectedTheme.colors(for: colorScheme).primary.first ?? .blue, lineWidth: showFocusRing ? 2 : 0)
         )
         .onTapGesture {
-            // Heuristic: If text is wider than container, it's truncated
             if textLayoutWidth > containerWidth {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                    isExpanded = true
-                }
-
-                // Auto-collapse after 3 seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                    withAnimation {
-                        isExpanded = false
-                    }
-                }
+                withAnimation(.spring()) { isExpanded.toggle() }
             }
         }
     }
@@ -678,5 +566,172 @@ private struct SwipeBackEnabler: UIViewControllerRepresentable {
                 createdBy: "test-user"
             )
         )
+    }
+}
+
+// MARK: - The Moving Light Animation
+struct MagicalBorderModifier: ViewModifier {
+    let color: Color
+    let cornerRadius: CGFloat
+    @State private var rotation: Double = 0
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                // The glowing border line
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(
+                        AngularGradient(
+                            stops:[
+                                .init(color: .clear, location: 0.0),
+                                .init(color: color.opacity(0.2), location: 0.2),
+                                .init(color: color, location: 0.5), // The bright tip of the light
+                                .init(color: .white, location: 0.52), // Core of the light
+                                .init(color: color, location: 0.54),
+                                .init(color: color.opacity(0.2), location: 0.6),
+                                .init(color: .clear, location: 1.0)
+                            ],
+                            center: .center,
+                            angle: .degrees(rotation)
+                        ),
+                        lineWidth: 2
+                    )
+            }
+            // A secondary blurred overlay to make the moving line "glow"
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(
+                        AngularGradient(
+                            stops:[
+                                .init(color: .clear, location: 0.4),
+                                .init(color: color, location: 0.5),
+                                .init(color: .clear, location: 0.6)
+                            ],
+                            center: .center,
+                            angle: .degrees(rotation)
+                        ),
+                        lineWidth: 4
+                    )
+                    .blur(radius: 4)
+            }
+            // Clip everything to the rounded rectangle so it doesn't bleed outside
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .onAppear {
+                // Start the continuous rotation
+                withAnimation(.linear(duration: 4.0).repeatForever(autoreverses: false)) {
+                    rotation = 360
+                }
+            }
+    }
+}
+
+struct PrivateFeatureCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    var isFullWidth: Bool = false
+
+    var body: some View {
+        Group {
+            if isFullWidth {
+                // Horizontal Layout: Icon on the Left
+                HStack(spacing: 16) {
+                    iconView
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.caption.bold())
+                        Spacer()
+                            .frame(height: 2)
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+            } else {
+                // Vertical Layout: Icon on Top
+                VStack(spacing: 8) {
+                    iconView
+                    
+                    VStack(spacing: 2) {
+                        Text(title)
+                            .font(.caption.bold())
+                        Spacer()
+                            .frame(height: 2)
+                        Text(subtitle)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: isFullWidth ? 0 : 120) // Give vertical cards a consistent height
+        .background {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+                )
+        }
+    }
+
+    // Extracted Icon View for consistency
+    private var iconView: some View {
+        Image(systemName: icon)
+            .font(.system(size: 20))
+            .foregroundStyle(.primary.opacity(0.7))
+            .frame(width: 32, height: 32)
+            .background(Circle().fill(.primary.opacity(0.03)))
+    }
+}
+
+// MARK: - Private Space Welcome View
+struct PrivateSpaceWelcomeView: View {
+    let messageLifetime: TimeInterval?
+
+    var body: some View {
+        VStack(spacing: 32) {
+            Spacer()
+            
+            // Clean, Professional Icon
+            ZStack {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .frame(width: 100, height: 100)
+                
+                Image(systemName: "key.shield") // Universal SF Symbol
+                    .font(.system(size: 40))
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 12) {
+                Text("Secret Space")
+                    .font(.system(.title3, design: .rounded).bold())
+                
+                Text("Messages in this room are ephemeral. They are automatically removed based on the room's security policy.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+            }
+
+            // Simple Feature Grid
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    PrivateFeatureCard(icon: "clock.badge.exclamationmark", title: "Auto-Delete", subtitle: messageLifetime != nil ? "Varies" : "Timed")
+                    PrivateFeatureCard(icon: "hand.raised.fill", title: "No Capture", subtitle: "Screenshots Restricted")
+                }
+                PrivateFeatureCard(icon: "lock.fill", title: "Much More Privacy", subtitle: "Enjoy extra security features on top of already existing privacy focus.", isFullWidth: true)
+            }
+            .padding(.horizontal, 24)
+            
+            Spacer()
+        }
     }
 }

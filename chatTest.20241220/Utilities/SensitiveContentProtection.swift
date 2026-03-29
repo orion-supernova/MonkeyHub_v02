@@ -3,28 +3,26 @@ import Combine
 
 struct SensitiveContentProtectionModifier: ViewModifier {
     let isEnabled: Bool
-
+    
     #if canImport(UIKit)
     @State private var isLiveCaptureActive = UIScreen.main.isCaptured
     #endif
-
+    
     func body(content: Content) -> some View {
-        Group {
-            if isEnabled {
-                protectedContent(content)
-            } else {
-                content
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func protectedContent(_ content: Content) -> some View {
         #if canImport(UIKit)
-        IOSSecureContentContainer(content: content)
-            .overlay {
+        if isEnabled {
+            ZStack {
+                // The Secure Container
+                IOSSecureContentContainer {
+                    content
+                }
+                .ignoresSafeArea() // Fixes the black bars at top/bottom
+
+                // The Overlay
                 if isLiveCaptureActive {
                     SensitiveContentShieldOverlay()
+                        .transition(.opacity)
+                        .zIndex(1)
                 }
             }
             .onAppear {
@@ -33,6 +31,9 @@ struct SensitiveContentProtectionModifier: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) { _ in
                 isLiveCaptureActive = UIScreen.main.isCaptured
             }
+        } else {
+            content
+        }
         #else
         content
         #endif
@@ -40,142 +41,133 @@ struct SensitiveContentProtectionModifier: ViewModifier {
 }
 
 extension View {
-    func sensitiveContentProtection(enabled: Bool) -> some View {
+    func sensitiveContentProtection(enabled: Bool = true) -> some View {
         modifier(SensitiveContentProtectionModifier(isEnabled: enabled))
     }
 }
 
+// MARK: - Overlay View
 private struct SensitiveContentShieldOverlay: View {
     var body: some View {
         ZStack {
             Rectangle()
                 .fill(.ultraThinMaterial)
                 .ignoresSafeArea()
-
-            VStack(spacing: 10) {
+            
+            VStack(spacing: 12) {
                 Image(systemName: "eye.slash.fill")
-                    .font(.system(size: 28, weight: .semibold))
-                Text("Protected Content Hidden")
+                    .font(.system(size: 32, weight: .semibold))
+                Text("Protected Content")
                     .font(.headline)
-                Text("Screen recording, mirroring, or broadcast is active.")
+                Text("Screen recording or mirroring is active.")
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
             }
             .padding(24)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .padding(.horizontal, 24)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            .padding(24)
         }
+        // Allows user to still interact with the app if they really want to,
+        // or set to true to block everything during recording.
         .allowsHitTesting(true)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Protected content hidden while screen capture is active.")
     }
 }
 
+// MARK: - UIKit Implementation
 #if canImport(UIKit)
 import UIKit
 
 private struct IOSSecureContentContainer<Content: View>: UIViewControllerRepresentable {
-    let content: Content
+    let content: () -> Content
 
-    func makeUIViewController(context: Context) -> SecureLayerHostingController<Content> {
-        SecureLayerHostingController(rootView: content)
+    func makeUIViewController(context: Context) -> SecureLayerViewController<Content> {
+        SecureLayerViewController(rootView: content())
     }
 
-    func updateUIViewController(_ uiViewController: SecureLayerHostingController<Content>, context: Context) {
-        uiViewController.updateRootView(content)
+    func updateUIViewController(_ uiViewController: SecureLayerViewController<Content>, context: Context) {
+        uiViewController.update(content())
     }
 }
 
-private final class SecureLayerHostingController<Content: View>: UIViewController {
-    private let secureTextField = UITextField()
-    private let containerView = UIView()
+private final class SecureLayerViewController<Content: View>: UIViewController {
+    private let textField = UITextField()
     private let hostingController: UIHostingController<Content>
-    private var didApplyProtection = false
+    
+    // This is the container that will hold the layer
+    private let containerView = UIView()
 
     init(rootView: Content) {
-        hostingController = UIHostingController(rootView: rootView)
+        self.hostingController = UIHostingController(rootView: rootView)
         super.init(nibName: nil, bundle: nil)
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
+    required init?(coder: NSCoder) { fatalError() }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        setupViews()
+        view.backgroundColor = .clear
+        
+        setupSecureTextField()
+        setupHostingView()
+    }
+    
+    private func setupSecureTextField() {
+        textField.isSecureTextEntry = true
+        textField.isUserInteractionEnabled = false
+        view.addSubview(textField)
+        textField.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            textField.topAnchor.constraint(equalTo: view.topAnchor),
+            textField.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            textField.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            textField.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        
+        // Find the "Canvas" view inside the text field
+        if let canvas = textField.subviews.first(where: { type(of: $0).description().contains("Canvas") }) {
+            canvas.addSubview(containerView)
+            containerView.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                containerView.topAnchor.constraint(equalTo: canvas.topAnchor),
+                containerView.bottomAnchor.constraint(equalTo: canvas.bottomAnchor),
+                containerView.leadingAnchor.constraint(equalTo: canvas.leadingAnchor),
+                containerView.trailingAnchor.constraint(equalTo: canvas.trailingAnchor)
+            ])
+        }
+    }
+    
+    private func setupHostingView() {
+        addChild(hostingController)
+        view.addSubview(hostingController.view) // Keep in main hierarchy for TOUCHES
+        hostingController.didMove(toParent: self)
+        
+        hostingController.view.backgroundColor = .clear
+        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            hostingController.view.topAnchor.constraint(equalTo: view.topAnchor),
+            hostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            hostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        
+        // THE TRICK: Move the LAYER to the secure container,
+        // but keep the VIEW in the main hierarchy.
+        DispatchQueue.main.async {
+            self.containerView.layer.addSublayer(self.hostingController.view.layer)
+        }
     }
 
+    func update(_ rootView: Content) {
+        hostingController.rootView = rootView
+    }
+    
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        applyProtectionIfNeeded()
-        synchronizeProtectedLayerFrame()
-    }
-
-    func updateRootView(_ rootView: Content) {
-        hostingController.rootView = rootView
-        view.setNeedsLayout()
-    }
-
-    private func setupViews() {
-        view.backgroundColor = .clear
-        containerView.translatesAutoresizingMaskIntoConstraints = false
-        containerView.backgroundColor = .clear
-        view.addSubview(containerView)
-
-        secureTextField.translatesAutoresizingMaskIntoConstraints = false
-        secureTextField.isSecureTextEntry = true
-        secureTextField.backgroundColor = .clear
-        secureTextField.borderStyle = .none
-        secureTextField.textColor = .clear
-        secureTextField.tintColor = .clear
-        secureTextField.isUserInteractionEnabled = false
-        secureTextField.alpha = 0.01
-        view.insertSubview(secureTextField, at: 0)
-
-        NSLayoutConstraint.activate([
-            secureTextField.topAnchor.constraint(equalTo: view.topAnchor),
-            secureTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            secureTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            secureTextField.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            containerView.topAnchor.constraint(equalTo: view.topAnchor),
-            containerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            containerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            containerView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
-
-        addChild(hostingController)
-        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
-        hostingController.view.backgroundColor = .clear
-        containerView.addSubview(hostingController.view)
-
-        NSLayoutConstraint.activate([
-            hostingController.view.topAnchor.constraint(equalTo: containerView.topAnchor),
-            hostingController.view.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
-            hostingController.view.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
-            hostingController.view.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
-        ])
-
-        hostingController.didMove(toParent: self)
-    }
-
-    private func applyProtectionIfNeeded() {
-        guard !didApplyProtection else { return }
-        guard let secureSublayer = secureTextField.layer.sublayers?.first else { return }
-
-        secureSublayer.addSublayer(containerView.layer)
-        didApplyProtection = true
-    }
-
-    private func synchronizeProtectedLayerFrame() {
-        guard didApplyProtection else { return }
-
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        containerView.layer.frame = secureTextField.bounds
-        CATransaction.commit()
+        // Ensure the layer follows the bounds of the screen/view
+        hostingController.view.layer.frame = view.bounds
     }
 }
 #endif

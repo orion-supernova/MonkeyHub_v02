@@ -40,7 +40,7 @@ struct ChatRoomView: View {
     @FocusState private var isNavActive: Bool
 
     /// Live room data from the repository subscription — falls back to the initial room.
-    private var liveRoom: ChatRoom {
+    public var liveRoom: ChatRoom {
         repository.rooms.first { $0.id == room.id } ?? room
     }
 
@@ -495,7 +495,7 @@ struct ChamberOfSecretsWelcomeView: View {
                         .foregroundStyle(
                             LinearGradient(colors: [.orange, .red], startPoint: .leading, endPoint: .trailing)
                         )
-                    Text("Messages in this room automatically delete after a set time — whether read or not.")
+                    Text("Messages in this room automatically delete after a set time. Whether read or not.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -503,16 +503,31 @@ struct ChamberOfSecretsWelcomeView: View {
                 }
 
                 // Feature cards
-                VStack(spacing: 12) {
-                    featureRow(icon: "flame.fill", color: .orange,
-                               title: "Auto-Deleting Messages",
-                               subtitle: messageLifetime != nil ? "Every message deletes after \(formatLifetime(messageLifetime!))" : "Messages delete on a timer")
-                    featureRow(icon: "exclamationmark.shield.fill", color: .red,
-                               title: "Screenshot Detection",
-                               subtitle: "You'll be notified if someone takes a screenshot")
-                    featureRow(icon: "eye.slash.fill", color: .purple,
-                               title: "No Message History",
-                               subtitle: "Once gone, messages cannot be recovered")
+                // MARK: - Redesigned Feature Cards Container
+                VStack(spacing: 16) {
+                    HStack(spacing: 16) {
+                        SecretFeatureCard(
+                            icon: "flame.fill",
+                            color: .orange,
+                            title: "Auto-Delete",
+                            subtitle: messageLifetime != nil ? formatLifetime(messageLifetime!) : "On Timer"
+                        )
+                        
+                        SecretFeatureCard(
+                            icon: "exclamationmark.shield.fill",
+                            color: .red,
+                            title: "Protected",
+                            subtitle: "No Screenshots"
+                        )
+                    }
+                    
+                    SecretFeatureCard(
+                        icon: "eye.slash.fill",
+                        color: .purple,
+                        title: "End-to-End Privacy",
+                        subtitle: "Content is hidden from system-level recording and broadcasts.",
+                        isFullWidth: true
+                    )
                 }
                 .padding(.horizontal, 24)
             }
@@ -700,5 +715,62 @@ private struct SwipeBackEnabler: UIViewControllerRepresentable {
                 createdBy: "test-user"
             )
         )
+    }
+}
+
+struct SecretFeatureCard: View {
+    let icon: String
+    let color: Color
+    let title: String
+    let subtitle: String
+    var isFullWidth: Bool = false
+
+    var body: some View {
+        VStack(alignment: isFullWidth ? .leading : .center, spacing: 12) {
+            // Icon with a glowing backdrop
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.2))
+                    .frame(width: 44, height: 44)
+                    .blur(radius: 8)
+                
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(color)
+            }
+            .frame(maxWidth: isFullWidth ? .none : .infinity, alignment: isFullWidth ? .leading : .center)
+
+            VStack(alignment: isFullWidth ? .leading : .center, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(isFullWidth ? .leading : .center)
+                    .lineLimit(2)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .frame(height: isFullWidth ? nil : 140) // Square-ish for grid, auto for full-width
+        .background {
+            RoundedRectangle(cornerRadius: 24)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [color.opacity(0.6), .clear, color.opacity(0.2)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                // Subtle outer glow
+                .shadow(color: color.opacity(0.1), radius: 10, x: 0, y: 5)
+        }
     }
 }

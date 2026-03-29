@@ -166,10 +166,12 @@ struct ChatRoomView: View {
                     object: nil,
                     queue: .main
                 ) { _ in
-                    AlertManager.shared.showAlert(
-                        title: "Screenshot Detected",
-                        message: "Screenshots are not allowed in Chamber of Secrets rooms."
-                    )
+                    Task { @MainActor in
+                        AlertManager.shared.showAlert(
+                            title: "Screenshot Detected",
+                            message: "Screenshots are not allowed in Chamber of Secrets rooms."
+                        )
+                    }
                 }
 
                 screenCaptureObserver = NotificationCenter.default.addObserver(
@@ -178,10 +180,12 @@ struct ChatRoomView: View {
                     queue: .main
                 ) { _ in
                     guard UIScreen.main.isCaptured else { return }
-                    AlertManager.shared.showAlert(
-                        title: "Capture Blocked",
-                        message: "Screen recording, mirroring, and broadcasts are blocked in Chamber of Secrets rooms."
-                    )
+                    Task { @MainActor in
+                        AlertManager.shared.showAlert(
+                            title: "Capture Blocked",
+                            message: "Screen recording, mirroring, and broadcasts are blocked in Chamber of Secrets rooms."
+                        )
+                    }
                 }
             }
             #endif

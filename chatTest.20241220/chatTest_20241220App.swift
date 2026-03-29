@@ -15,6 +15,16 @@ struct chatTest_20241220App: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var uiAppDelegate
     #endif
 
+    init() {
+        // Restore theme from Keychain so it survives reinstalls.
+        // @AppStorage uses UserDefaults which is wiped on fresh install,
+        // but Keychain persists. Seed UserDefaults if it hasn't been set yet.
+        if UserDefaults.standard.string(forKey: "selectedTheme") == nil,
+           let saved = KeychainService.get("selectedTheme") {
+            UserDefaults.standard.set(saved, forKey: "selectedTheme")
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             MainView()

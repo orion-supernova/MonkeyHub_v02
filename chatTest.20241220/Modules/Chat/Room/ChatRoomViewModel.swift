@@ -26,7 +26,8 @@ class ChatRoomViewModel: ObservableObject {
         print("🎬 ChatRoomViewModel init (\(roomId))")
 
         self.userId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
-        self.userName = userDefaults.string(forKey: userNameUserDefaultsKey) ?? "User"
+        let cachedName = ConvexAuthService.shared.cachedUser?.name ?? ConvexAuthService.shared.cachedUser?.username
+        self.userName = cachedName ?? userDefaults.string(forKey: userNameUserDefaultsKey) ?? "User"
 
         setupBindings()
         typingManager.setActiveRoom(roomId)

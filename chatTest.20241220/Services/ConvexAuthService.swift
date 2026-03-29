@@ -127,6 +127,8 @@ final class ConvexAuthService: ObservableObject {
                     bio: p.bio,
                     deviceTokens: nil
                 )
+                // Keep UserDefaults in sync so ChatRoomViewModel always has the correct name.
+                userDefaults.set(p.name ?? p.username, forKey: "userName")
             }
         } catch {
             // Not fatal — profile will load on next opportunity

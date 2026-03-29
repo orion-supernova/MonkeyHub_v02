@@ -17,6 +17,7 @@ struct ThemeSelectionSheet: View {
                         ) {
                             withAnimation(.spring(duration: 0.4)) {
                                 selectedTheme = theme
+                                KeychainService.save(theme.rawValue, for: "selectedTheme")
                             }
                         }
                         .opacity(animateContent ? 1 : 0)

@@ -317,10 +317,7 @@ struct ChatRoomView: View {
                     isShowingAttachmentMenu: $isShowingAttachmentMenu,
                     navHighlight: navIndex,
                     onSendMessage: { text in
-                        Task {
-                            await viewModel.sendMessage(text)
-                            await MainActor.run { messageText = "" }
-                        }
+                        Task { await viewModel.sendMessage(text) }
                     },
                     onTextChanged: { text in viewModel.onTextChanged(text) },
                     onTakePhoto: { isShowingAttachmentMenu = false; showCamera = true },

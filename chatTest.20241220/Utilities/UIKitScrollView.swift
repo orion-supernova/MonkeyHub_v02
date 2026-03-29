@@ -83,6 +83,8 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
     private var isKeyboardAnimating = false
     private var currentKeyboardHeight: CGFloat = 0
     private var baselineSafeAreaBottom: CGFloat = 0
+    private var isInteractiveKeyboardDismissInProgress = false
+    private var shouldMaintainBottomDuringKeyboardInteraction = false
 
     init(content: Content) {
         super.init(nibName: nil, bundle: nil)
@@ -143,7 +145,10 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
     }
 
     @objc private func keyboardWillShow(_ notification: Notification) {
-        wasAtBottomBeforeKeyboard = isNearBottom(threshold: autoFollowThreshold)
+        let wasNearBottom = isNearBottom(threshold: autoFollowThreshold)
+        wasAtBottomBeforeKeyboard = wasNearBottom
+        shouldMaintainBottomDuringKeyboardInteraction = wasNearBottom || shouldAutoFollowBottom
+        isInteractiveKeyboardDismissInProgress = false
         baselineSafeAreaBottom = view.window?.safeAreaInsets.bottom ?? 0
         
         // Blocking layout snaps early prevents the flicker when focus changes.
@@ -152,10 +157,16 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
     }
 
     @objc private func keyboardWillHide(_ notification: Notification) {
+        if !isInteractiveKeyboardDismissInProgress {
+            shouldMaintainBottomDuringKeyboardInteraction = isNearBottom(threshold: autoFollowThreshold) || shouldAutoFollowBottom
+        }
         isKeyboardAnimating = true
         isProgrammaticScroll = true
         currentKeyboardHeight = 0
-        applyInsets(maintainBottomIfNeeded: true)
+        applyInsets(
+            maintainBottomIfNeeded: shouldMaintainBottomDuringKeyboardInteraction,
+            forceInsetUpdate: true
+        )
     }
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
@@ -332,7 +343,7 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         }
     }
 
-    private func applyInsets(maintainBottomIfNeeded: Bool = true) {
+    private func applyInsets(maintainBottomIfNeeded: Bool = true, forceInsetUpdate: Bool = false) {
         let dynamicBottom = max(currentKeyboardHeight, baselineSafeAreaBottom)
         let totalBottomInset = baseBottomInset + dynamicBottom
 
@@ -343,7 +354,7 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
             right: 0
         )
 
-        if scrollView.contentInset != newInsets, !isKeyboardAnimating {
+        if scrollView.contentInset != newInsets, (!isKeyboardAnimating || forceInsetUpdate) {
             scrollView.contentInset = newInsets
             scrollView.scrollIndicatorInsets = newInsets
             
@@ -354,11 +365,27 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
 
         minContentHeightConstraint?.constant = -(baseTopInset + totalBottomInset)
 
+        if forceInsetUpdate {
+            adjustContentOffsetForCurrentInsets(maintainBottom: maintainBottomIfNeeded)
+        }
+
         if maintainBottomIfNeeded && shouldAutoFollowBottom && !scrollView.isDragging && !scrollView.isDecelerating {
             if distanceFromBottom() > -1 {
                 scheduleScrollToBottomAfterLayout(animated: false)
             }
         }
+    }
+
+    private func adjustContentOffsetForCurrentInsets(maintainBottom: Bool) {
+        let minOffsetY = -scrollView.contentInset.top
+        let maxOffsetY = max(
+            minOffsetY,
+            scrollView.contentSize.height - scrollView.bounds.height + scrollView.contentInset.bottom
+        )
+        let targetOffsetY = maintainBottom ? maxOffsetY : min(max(scrollView.contentOffset.y, minOffsetY), maxOffsetY)
+
+        guard abs(scrollView.contentOffset.y - targetOffsetY) > 0.5 else { return }
+        scrollView.contentOffset.y = targetOffsetY
     }
 
     @objc private func keyboardWillChangeFrame(_ notification: Notification) {
@@ -372,7 +399,27 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         }
 
         let keyboardVisibleHeight = max(0, window.bounds.maxY - endFrame.minY)
+        let wasKeyboardVisible = currentKeyboardHeight > 0
+        let keyboardIsMovingDown = keyboardVisibleHeight < currentKeyboardHeight
         currentKeyboardHeight = keyboardVisibleHeight
+
+        if scrollView.isDragging && (wasKeyboardVisible || keyboardVisibleHeight > 0) {
+            isInteractiveKeyboardDismissInProgress = true
+        }
+
+        if isInteractiveKeyboardDismissInProgress && keyboardIsMovingDown {
+            applyInsets(
+                maintainBottomIfNeeded: shouldMaintainBottomDuringKeyboardInteraction,
+                forceInsetUpdate: true
+            )
+
+            if keyboardVisibleHeight == 0 && !scrollView.isTracking && !scrollView.isDecelerating {
+                finishInteractiveKeyboardDismissIfNeeded()
+            } else {
+                publishAtBottomStateIfNeeded()
+            }
+            return
+        }
         
         let shouldAnchorForKeyboard = (keyboardVisibleHeight > 0)
             ? (wasAtBottomBeforeKeyboard || shouldAutoFollowBottom)
@@ -458,7 +505,7 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
     private func flushPendingScrollToBottomIfNeeded() {
         guard !isKeyboardAnimating else { return }
         guard shouldScrollToBottomAfterLayout else { return }
-        guard !scrollView.isDragging, !scrollView.isDecelerating, distanceFromBottom() > -1 else { return }
+        guard !scrollView.isDragging, !scrollView.isDecelerating else { return }
         
         shouldScrollToBottomAfterLayout = false
         let animated = pendingScrollToBottomAnimated
@@ -473,14 +520,28 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
             isKeyboardAnimating = false
             isProgrammaticScroll = false
         }
+        if currentKeyboardHeight > 0 {
+            isInteractiveKeyboardDismissInProgress = true
+            shouldMaintainBottomDuringKeyboardInteraction = isNearBottom(threshold: autoFollowThreshold)
+        }
         shouldScrollToBottomAfterLayout = false
         pendingScrollToBottomAnimated = false
         lastDragOffsetY = scrollView.contentOffset.y
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate {
+            finishInteractiveKeyboardDismissIfNeeded()
+        }
     }
     
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         isProgrammaticScroll = false
         publishAtBottomStateIfNeeded()
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        finishInteractiveKeyboardDismissIfNeeded()
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -489,7 +550,13 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         let frameHeight = scrollView.bounds.height
 
         hasHadScrollableContent = hasHadScrollableContent || contentHeight > frameHeight + 1
-        if scrollView.isDragging {
+        if isInteractiveKeyboardDismissInProgress {
+            if scrollView.isDragging && offsetY < (lastDragOffsetY - 0.5) {
+                shouldMaintainBottomDuringKeyboardInteraction = false
+                shouldAutoFollowBottom = false
+            }
+            lastDragOffsetY = offsetY
+        } else if scrollView.isDragging {
             if offsetY < (lastDragOffsetY - 0.5) {
                 shouldAutoFollowBottom = false
             }
@@ -551,6 +618,19 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
 
     private func isScrollable() -> Bool {
         scrollView.contentSize.height > scrollView.bounds.height + 1
+    }
+
+    private func finishInteractiveKeyboardDismissIfNeeded() {
+        guard isInteractiveKeyboardDismissInProgress else { return }
+
+        isInteractiveKeyboardDismissInProgress = false
+        shouldAutoFollowBottom = shouldMaintainBottomDuringKeyboardInteraction && isNearBottom(threshold: autoFollowThreshold)
+
+        if shouldAutoFollowBottom {
+            scheduleScrollToBottomAfterLayout(animated: false)
+        }
+
+        publishAtBottomStateIfNeeded()
     }
 }
 

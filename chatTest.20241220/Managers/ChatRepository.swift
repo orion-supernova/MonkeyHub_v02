@@ -96,10 +96,10 @@ class ChatRepository: ObservableObject {
             for updated in mergedRooms {
                 guard updated.id != activeRoomId,
                       let previous = previousById[updated.id],
-                      let newTime = updated.lastMessageDate,
-                      let oldTime = previous.lastMessageDate,
-                      newTime > oldTime else { continue }
-                unreadCounts[updated.id, default: 0] += 1
+                      let newTime = updated.lastMessageDate else { continue }
+                // oldTime nil means the room had no messages before — treat first message as new.
+                let isNew = previous.lastMessageDate.map { newTime > $0 } ?? true
+                if isNew { unreadCounts[updated.id, default: 0] += 1 }
             }
         }
         hasPerformedInitialRoomFetch = true
@@ -361,7 +361,7 @@ class ChatRepository: ObservableObject {
     // MARK: - Push Notification Handling (background wake only)
 
     func handleIncomingPush(_ userInfo: [AnyHashable: Any]) {
-        guard let roomId = userInfo["roomId"] as? String else { return }
+        guard let roomId = NotificationRouter.shared.extractRoomId(from: userInfo) else { return }
         let senderId = userInfo["senderId"] as? String ?? ""
         let currentUserId = userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
 

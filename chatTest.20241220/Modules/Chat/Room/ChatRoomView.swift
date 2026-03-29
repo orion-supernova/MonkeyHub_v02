@@ -32,6 +32,7 @@ struct ChatRoomView: View {
 
     #if canImport(UIKit)
     @State private var screenshotObserver: NSObjectProtocol?
+    @State private var screenCaptureObserver: NSObjectProtocol?
     #endif
 
     // Keyboard navigation (macOS) — nil means text field cursor mode
@@ -170,6 +171,18 @@ struct ChatRoomView: View {
                         message: "Screenshots are not allowed in Chamber of Secrets rooms."
                     )
                 }
+
+                screenCaptureObserver = NotificationCenter.default.addObserver(
+                    forName: UIScreen.capturedDidChangeNotification,
+                    object: nil,
+                    queue: .main
+                ) { _ in
+                    guard UIScreen.main.isCaptured else { return }
+                    AlertManager.shared.showAlert(
+                        title: "Capture Blocked",
+                        message: "Screen recording, mirroring, and broadcasts are blocked in Chamber of Secrets rooms."
+                    )
+                }
             }
             #endif
         }
@@ -180,6 +193,10 @@ struct ChatRoomView: View {
             if let observer = screenshotObserver {
                 NotificationCenter.default.removeObserver(observer)
                 screenshotObserver = nil
+            }
+            if let observer = screenCaptureObserver {
+                NotificationCenter.default.removeObserver(observer)
+                screenCaptureObserver = nil
             }
             #endif
         }
@@ -282,6 +299,7 @@ struct ChatRoomView: View {
                 )
             }
         )
+        .sensitiveContentProtection(enabled: liveRoom.type == .secret)
         }
     }
 

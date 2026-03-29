@@ -774,203 +774,99 @@ struct EnhancedRoomCard: View {
     @State private var isLoadingAvatar = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Header: avatar + badges + leave button
+        VStack(alignment: .leading, spacing: 12) {
+            // 1. Header Row (Fixed by Avatar Height)
             HStack {
-                Group {
-                    if let avatarImage = roomAvatarImage {
-                        Image(platformImage: avatarImage)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 40, height: 40)
-                            .clipShape(Circle())
-                    } else {
-                        ZStack {
-                            Circle()
-                                .fill(LinearGradient(
-                                    colors: selectedTheme.colors(for: colorScheme).primary,
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ))
-                            if isLoadingAvatar {
-                                ProgressView()
-                                    .tint(.white)
-                                    .scaleEffect(0.7)
-                            } else {
-                                Text(room.name.prefix(1).uppercased())
-                                    .font(.headline.bold())
-                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-                            }
-                        }
-                        .frame(width: 40, height: 40)
-                    }
-                }
-                .shadow(color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.2), radius: 4, y: 2)
-                .task(id: room.avatarStorageId) {
-                    roomAvatarImage = nil
-                    guard let storageId = room.avatarStorageId else {
-                        isLoadingAvatar = false
-                        return
-                    }
-                    isLoadingAvatar = true
-                    if let image = await ConvexFileCacheService.shared.image(for: storageId) {
-                        roomAvatarImage = image
-                    }
-                    isLoadingAvatar = false
-                }
-
+                avatarView
                 Spacer()
-
-                HStack(spacing: 8) {
-                    if unreadCount > 0 {
-                        Text("\(unreadCount)")
-                            .font(.caption2.bold())
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.red)
-                            .clipShape(Capsule())
-                    }
-                    Button(action: action) {
-                        Image(systemName: "door.left.hand.open")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
-                            .frame(width: 28, height: 28)
-                            .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))
-                            .clipShape(Circle())
-                    }
-                    .contentShape(Circle())
-#if os(macOS)
-                    .buttonStyle(.borderless)
-#endif
-                }
+                headerButtons
             }
-
-            // Room name + last message / typing indicator
+            .frame(height: 40) // Match avatar height
+            
+            // Name & Message area
             VStack(alignment: .leading, spacing: 4) {
                 Text(room.name)
                     .font(.headline)
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
                     .lineLimit(1)
-
-                if let typing = typingText {
-                    HStack(spacing: 4) {
-                        Image(systemName: "ellipsis.bubble")
-                            .imageScale(.small)
-                        Text(typing)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                    .lineLimit(1)
-                } else if room.type == .secret,
-                          let sentAt = room.lastMessageDate,
-                          let lifetime = room.messageLifetime {
-                    let expiresAt = sentAt.addingTimeInterval(lifetime)
-                    if expiresAt > Date() {
-                        // 🪄 MAGICAL THEME: Updated Countdown Timer
-                        TimelineView(.periodic(from: .now, by: 1.0)) { context in
-                            let remaining = max(0, expiresAt.timeIntervalSince(context.date))
-                            HStack(spacing: 4) {
-                                Image(systemName: "hourglass.circle.fill")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(Color.teal)
-                                Text("Vanishes in \(formatCountdown(remaining))")
-                                    .font(.system(.caption, design: .serif).italic()) // Serif font for HP feel
-                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                                    .lineLimit(1)
-                            }
+                
+                // Fixed height container (20px) to ensure uniformity
+                Group {
+                    if let typing = typingText {
+                        HStack(spacing: 4) {
+                            Image(systemName: "ellipsis.bubble").imageScale(.small)
+                            Text(typing)
                         }
+                        .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                        
+                    } else if room.type == .secret {
+                        // SECRET ROOM LOGIC
+                        if let sentAt = room.lastMessageDate,
+                           let lifetime = room.messageLifetime,
+                           sentAt.addingTimeInterval(lifetime) > Date() {
+                            
+                            let expiresAt = sentAt.addingTimeInterval(lifetime)
+                            TimelineView(.periodic(from: .now, by: 1.0)) { context in
+                                let remaining = max(0, expiresAt.timeIntervalSince(context.date))
+                                HStack(spacing: 4) {
+                                    Image(systemName: "hourglass.circle.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(Color.teal)
+                                    Text("Vanishes in \(formatCountdown(remaining))")
+                                        .font(.system(.caption, design: .serif).italic())
+                                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                                }
+                            }
+                        } else {
+                            // Empty or Expired Secret Room
+                            Text("No last message")
+                                .font(.caption)
+                                .italic()
+                                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.6))
+                        }
+                        
+                    } else if let lastMessage = room.lastMessage {
+                        // STANDARD ROOM WITH MESSAGE
+                        Text(lastMessage)
+                            .font(.caption)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                        
+                    } else {
+                        // STANDARD ROOM EMPTY
+                        Text("No messages yet")
+                            .font(.caption)
+                            .italic()
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.6))
                     }
-                } else if let lastMessage = room.lastMessage {
-                    Text(lastMessage)
-                        .font(.caption)
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                        .lineLimit(1)
-                } else {
-                    Text("No messages yet")
-                        .font(.caption)
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.6))
-                        .italic()
-                        .lineLimit(1)
                 }
+                .lineLimit(1)
+                .frame(height: 20)
             }
-
-            // Footer: member count + room type badge
-            HStack(spacing: 4) {
-                Image(systemName: "person.2.fill")
-                    .imageScale(.small)
-                Text("\(room.resolvedMemberCount)")
+            
+            // 3. Footer Row (Fixed height to accommodate badges)
+            HStack(alignment: .center, spacing: 4) {
+                HStack(spacing: 4) {
+                    Image(systemName: "person.2.fill")
+                        .imageScale(.small)
+                    Text("\(room.resolvedMemberCount)")
+                }
+                .font(.caption2)
+                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
                 
                 Spacer()
                 
-                // 🪄 MAGICAL THEME: Updated Bottom Right Badge
-                if room.type == .secret {
-                    HStack(spacing: 4) {
-                        Text("🐍")
-                            .font(.system(size: 9))
-                        Text("Chamber")
-                            .font(.system(size: 10, weight: .bold, design: .serif))
+                // Badges container
+                HStack(spacing: 6) {
+                    if room.type == .secret {
+                        chamberBadge
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        LinearGradient(
-                            colors:[Color.teal.opacity(0.25), Color.green.opacity(0.15)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        in: Capsule()
-                    )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.teal, .mint],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .overlay(
-                        Capsule().strokeBorder(
-                            LinearGradient(
-                                colors:[Color.teal.opacity(0.6), Color.green.opacity(0.2)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 0.8
-                        )
-                    )
-                    // Subtle magical glow
-                    .shadow(color: Color.teal.opacity(0.3), radius: 3, x: 0, y: 1)
-                }
-                
-                if room.hasPassword {
-                    HStack(spacing: 3) {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 9))
-                        Text("Password")
-                            .font(.system(size: 9, weight: .semibold))
+                    
+                    if room.hasPassword {
+                        passwordBadge
                     }
-                    .padding(.horizontal, 8) // adjusted to match Chamber padding
-                    .padding(.vertical, 4)   // adjusted to match Chamber padding
-                    .background(
-                        LinearGradient(
-                            colors:[Color.indigo.opacity(0.2), Color.blue.opacity(0.2)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        in: Capsule()
-                    )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.indigo, .blue],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .overlay(Capsule().strokeBorder(Color.indigo.opacity(0.3), lineWidth: 0.5))
                 }
             }
-            .font(.caption2)
-            .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+            .frame(height: 24) // Ensures row height is consistent even if badges are missing
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -989,15 +885,113 @@ struct EnhancedRoomCard: View {
         .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 
+    // MARK: - Subcomponents
+
+    private var secretMessageLogic: some View {
+        Group {
+            if let sentAt = room.lastMessageDate,
+               let lifetime = room.messageLifetime,
+               sentAt.addingTimeInterval(lifetime) > Date() {
+                
+                let expiresAt = sentAt.addingTimeInterval(lifetime)
+                TimelineView(.periodic(from: .now, by: 1.0)) { context in
+                    let remaining = max(0, expiresAt.timeIntervalSince(context.date))
+                    HStack(spacing: 4) {
+                        Image(systemName: "hourglass.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.teal)
+                        Text("Vanishes in \(formatCountdown(remaining))")
+                            .font(.system(.caption, design: .serif).italic())
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                    }
+                }
+            } else {
+                Text(" ") // Keeps the line height active
+            }
+        }
+    }
+
+    private var chamberBadge: some View {
+        HStack(spacing: 4) {
+            Text("🐍").font(.system(size: 9))
+            Text("Chamber").font(.system(size: 10, weight: .bold, design: .serif))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(Color.teal.opacity(0.15)))
+        .foregroundStyle(Color.teal)
+    }
+
+    private var passwordBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "lock.fill").font(.system(size: 9))
+            Text("Password").font(.system(size: 9, weight: .semibold))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(Color.indigo.opacity(0.15)))
+        .foregroundStyle(Color.indigo)
+    }
+
+    private var avatarView: some View {
+        Group {
+            if let avatarImage = roomAvatarImage {
+                Image(platformImage: avatarImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    Circle().fill(LinearGradient(colors: selectedTheme.colors(for: colorScheme).primary, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    if isLoadingAvatar {
+                        ProgressView().tint(.white).scaleEffect(0.7)
+                    } else {
+                        Text(room.name.prefix(1).uppercased())
+                            .font(.headline.bold())
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                    }
+                }
+            }
+        }
+        .frame(width: 40, height: 40)
+        .clipShape(Circle())
+        .task(id: room.avatarStorageId) {
+            // ... (Avatar loading logic remains same)
+            roomAvatarImage = nil
+            guard let storageId = room.avatarStorageId else { isLoadingAvatar = false; return }
+            isLoadingAvatar = true
+            if let image = await ConvexFileCacheService.shared.image(for: storageId) { roomAvatarImage = image }
+            isLoadingAvatar = false
+        }
+    }
+
+    private var headerButtons: some View {
+        HStack(spacing: 8) {
+            if unreadCount > 0 {
+                Text("\(unreadCount)")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.red)
+                    .clipShape(Capsule())
+            }
+            Button(action: action) {
+                Image(systemName: "door.left.hand.open")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
+                    .frame(width: 28, height: 28)
+                    .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     private func formatCountdown(_ seconds: TimeInterval) -> String {
         let s = Int(seconds)
-        if s >= 3600 {
-            return "\(s / 3600)h \((s % 3600) / 60)m"
-        } else if s >= 60 {
-            return "\(s / 60)m \(s % 60)s"
-        } else {
-            return "\(s)s"
-        }
+        if s >= 3600 { return "\(s / 3600)h \((s % 3600) / 60)m" }
+        else if s >= 60 { return "\(s / 60)m \(s % 60)s" }
+        else { return "\(s)s" }
     }
 }
 

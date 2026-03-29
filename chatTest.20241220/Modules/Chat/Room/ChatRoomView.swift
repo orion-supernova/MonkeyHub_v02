@@ -469,63 +469,76 @@ struct ChatRoomView: View {
 }
 
 // MARK: - Chamber of Secrets Welcome View
-
 struct ChamberOfSecretsWelcomeView: View {
     let messageLifetime: TimeInterval?
 
     var body: some View {
         ScrollView {
             VStack(spacing: 32) {
-                // Big icon
+                // Magical Glowing Icon
                 ZStack {
                     Circle()
                         .fill(RadialGradient(
-                            colors: [Color.orange.opacity(0.3), Color.red.opacity(0.1), Color.clear],
-                            center: .center, startRadius: 10, endRadius: 80
+                            colors:[Color.green.opacity(0.4), Color.teal.opacity(0.1), Color.clear],
+                            center: .center, startRadius: 10, endRadius: 90
                         ))
-                        .frame(width: 160, height: 160)
-                    Text("🔥")
-                        .font(.system(size: 72))
+                        .frame(width: 180, height: 180)
+                        // Add a slow pulse to the background glow
+                        .phaseAnimator([false, true]) { content, phase in
+                            content
+                                .scaleEffect(phase ? 1.05 : 0.95)
+                                .opacity(phase ? 1.0 : 0.7)
+                        } animation: { _ in
+                            .easeInOut(duration: 2.0).repeatForever(autoreverses: true)
+                        }
+                    
+                    Text("🐍") // The Basilisk / Chamber theme!
+                        .font(.system(size: 80))
+                        .shadow(color: .green.opacity(0.5), radius: 10, x: 0, y: 5)
                 }
 
                 // Title
                 VStack(spacing: 8) {
                     Text("Chamber of Secrets")
-                        .font(.title2.bold())
+                        .font(.system(.title, design: .serif).bold()) // Serif font for that HP book feel
                         .foregroundStyle(
-                            LinearGradient(colors: [.orange, .red], startPoint: .leading, endPoint: .trailing)
+                            LinearGradient(
+                                colors:[.teal, .green, .mint],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    Text("Messages in this room automatically delete after a set time. Whether read or not.")
+                    
+                    Text("Messages in this room vanish into the shadows. Whether read or not.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)
                 }
 
-                // Feature cards
-                // MARK: - Redesigned Feature Cards Container
+                // Magical Feature Cards Grid
                 VStack(spacing: 16) {
                     HStack(spacing: 16) {
                         SecretFeatureCard(
-                            icon: "flame.fill",
-                            color: .orange,
-                            title: "Auto-Delete",
-                            subtitle: messageLifetime != nil ? formatLifetime(messageLifetime!) : "On Timer"
+                            icon: "hourglass.circle.fill", // Time running out
+                            color: .green,
+                            title: "Evanesco", // Vanishing spell
+                            subtitle: messageLifetime != nil ? formatLifetime(messageLifetime!) : "Auto-Deletes"
                         )
                         
                         SecretFeatureCard(
-                            icon: "exclamationmark.shield.fill",
-                            color: .red,
-                            title: "Protected",
-                            subtitle: "No Screenshots"
+                            icon: "lock.shield.fill",
+                            color: .purple,
+                            title: "Protego", // Shield spell
+                            subtitle: "Screenshots Blocked"
                         )
                     }
                     
                     SecretFeatureCard(
                         icon: "eye.slash.fill",
-                        color: .purple,
-                        title: "End-to-End Privacy",
-                        subtitle: "Content is hidden from system-level recording and broadcasts.",
+                        color: .teal,
+                        title: "Unforgivable Secrecy",
+                        subtitle: "End-to-End privacy. Screen recording and broadcasting are fully neutralized.",
                         isFullWidth: true
                     )
                 }
@@ -539,27 +552,6 @@ struct ChamberOfSecretsWelcomeView: View {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             #endif
         }
-    }
-
-    private func featureRow(icon: String, color: Color, title: String, subtitle: String) -> some View {
-        HStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(color.opacity(0.15))
-                    .frame(width: 48, height: 48)
-                Image(systemName: icon)
-                    .font(.title3)
-                    .foregroundStyle(color)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(16)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(color.opacity(0.2), lineWidth: 1))
     }
 }
 
@@ -598,7 +590,7 @@ struct RoomTitleView: View {
 
             // Chamber of Secrets flame icon
             if roomType == .secret {
-                Image(systemName: "flame.fill")
+                Text("🐍")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(
                         LinearGradient(
@@ -730,47 +722,95 @@ struct SecretFeatureCard: View {
             // Icon with a glowing backdrop
             ZStack {
                 Circle()
-                    .fill(color.opacity(0.2))
+                    .fill(color.opacity(0.15))
                     .frame(width: 44, height: 44)
-                    .blur(radius: 8)
+                    .blur(radius: 6)
                 
                 Image(systemName: icon)
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(color)
+                    .shadow(color: color.opacity(0.5), radius: 3)
             }
             .frame(maxWidth: isFullWidth ? .none : .infinity, alignment: isFullWidth ? .leading : .center)
 
             VStack(alignment: isFullWidth ? .leading : .center, spacing: 4) {
                 Text(title)
-                    .font(.subheadline.weight(.bold))
+                    .font(.system(.subheadline, design: .serif).weight(.bold))
                     .foregroundStyle(.primary)
                 
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(isFullWidth ? .leading : .center)
-                    .lineLimit(2)
+                    .lineLimit(3)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .frame(height: isFullWidth ? nil : 140) // Square-ish for grid, auto for full-width
+        .frame(height: isFullWidth ? nil : 145)
         .background {
-            RoundedRectangle(cornerRadius: 24)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [color.opacity(0.6), .clear, color.opacity(0.2)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                )
-                // Subtle outer glow
-                .shadow(color: color.opacity(0.1), radius: 10, x: 0, y: 5)
+                // The Animated Glowing Border
+                .modifier(MagicalBorderModifier(color: color, cornerRadius: 24))
         }
+        // Outer ambient glow
+        .shadow(color: color.opacity(0.08), radius: 15, x: 0, y: 8)
+    }
+}
+
+// MARK: - The Moving Light Animation
+struct MagicalBorderModifier: ViewModifier {
+    let color: Color
+    let cornerRadius: CGFloat
+    @State private var rotation: Double = 0
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                // The glowing border line
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(
+                        AngularGradient(
+                            stops:[
+                                .init(color: .clear, location: 0.0),
+                                .init(color: color.opacity(0.2), location: 0.2),
+                                .init(color: color, location: 0.5), // The bright tip of the light
+                                .init(color: .white, location: 0.52), // Core of the light
+                                .init(color: color, location: 0.54),
+                                .init(color: color.opacity(0.2), location: 0.6),
+                                .init(color: .clear, location: 1.0)
+                            ],
+                            center: .center,
+                            angle: .degrees(rotation)
+                        ),
+                        lineWidth: 2
+                    )
+            }
+            // A secondary blurred overlay to make the moving line "glow"
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(
+                        AngularGradient(
+                            stops:[
+                                .init(color: .clear, location: 0.4),
+                                .init(color: color, location: 0.5),
+                                .init(color: .clear, location: 0.6)
+                            ],
+                            center: .center,
+                            angle: .degrees(rotation)
+                        ),
+                        lineWidth: 4
+                    )
+                    .blur(radius: 4)
+            }
+            // Clip everything to the rounded rectangle so it doesn't bleed outside
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .onAppear {
+                // Start the continuous rotation
+                withAnimation(.linear(duration: 4.0).repeatForever(autoreverses: false)) {
+                    rotation = 360
+                }
+            }
     }
 }

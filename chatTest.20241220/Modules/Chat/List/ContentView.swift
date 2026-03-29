@@ -867,21 +867,20 @@ struct EnhancedRoomCard: View {
                           let lifetime = room.messageLifetime {
                     let expiresAt = sentAt.addingTimeInterval(lifetime)
                     if expiresAt > Date() {
-                        // Live countdown until the last message expires
+                        // 🪄 MAGICAL THEME: Updated Countdown Timer
                         TimelineView(.periodic(from: .now, by: 1.0)) { context in
                             let remaining = max(0, expiresAt.timeIntervalSince(context.date))
                             HStack(spacing: 4) {
-                                Image(systemName: "flame.fill")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(Color.orange)
-                                Text("Expires in \(formatCountdown(remaining))")
-                                    .font(.caption)
+                                Image(systemName: "hourglass.circle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Color.teal)
+                                Text("Vanishes in \(formatCountdown(remaining))")
+                                    .font(.system(.caption, design: .serif).italic()) // Serif font for HP feel
                                     .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
                                     .lineLimit(1)
                             }
                         }
                     }
-                    // If already expired, show nothing (falls through to implicit empty)
                 } else if let lastMessage = room.lastMessage {
                     Text(lastMessage)
                         .font(.caption)
@@ -901,33 +900,48 @@ struct EnhancedRoomCard: View {
                 Image(systemName: "person.2.fill")
                     .imageScale(.small)
                 Text("\(room.resolvedMemberCount)")
+                
                 Spacer()
+                
+                // 🪄 MAGICAL THEME: Updated Bottom Right Badge
                 if room.type == .secret {
-                    HStack(spacing: 3) {
-                        Image(systemName: "flame.fill")
+                    HStack(spacing: 4) {
+                        Text("🐍")
                             .font(.system(size: 9))
-                        Text("Secret")
-                            .font(.system(size: 9, weight: .semibold))
+                        Text("Chamber")
+                            .font(.system(size: 10, weight: .bold, design: .serif))
                     }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
                     .background(
                         LinearGradient(
-                            colors: [Color.orange.opacity(0.2), Color.red.opacity(0.2)],
-                            startPoint: .leading,
-                            endPoint: .trailing
+                            colors:[Color.teal.opacity(0.25), Color.green.opacity(0.15)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         ),
                         in: Capsule()
                     )
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [.orange, .red],
+                            colors: [.teal, .mint],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
                     )
-                    .overlay(Capsule().strokeBorder(Color.orange.opacity(0.3), lineWidth: 0.5))
+                    .overlay(
+                        Capsule().strokeBorder(
+                            LinearGradient(
+                                colors:[Color.teal.opacity(0.6), Color.green.opacity(0.2)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.8
+                        )
+                    )
+                    // Subtle magical glow
+                    .shadow(color: Color.teal.opacity(0.3), radius: 3, x: 0, y: 1)
                 }
+                
                 if room.hasPassword {
                     HStack(spacing: 3) {
                         Image(systemName: "lock.fill")
@@ -935,11 +949,11 @@ struct EnhancedRoomCard: View {
                         Text("Password")
                             .font(.system(size: 9, weight: .semibold))
                     }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, 8) // adjusted to match Chamber padding
+                    .padding(.vertical, 4)   // adjusted to match Chamber padding
                     .background(
                         LinearGradient(
-                            colors: [Color.indigo.opacity(0.2), Color.blue.opacity(0.2)],
+                            colors:[Color.indigo.opacity(0.2), Color.blue.opacity(0.2)],
                             startPoint: .leading,
                             endPoint: .trailing
                         ),

@@ -775,22 +775,21 @@ struct EnhancedRoomCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // 1. Header Row (Fixed by Avatar Height)
+            // 1. Header Row
             HStack {
                 avatarView
                 Spacer()
                 headerButtons
             }
-            .frame(height: 40) // Match avatar height
+            .frame(height: 40)
             
-            // Name & Message area
+            // 2. Name & Message area
             VStack(alignment: .leading, spacing: 4) {
                 Text(room.name)
                     .font(.headline)
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
                     .lineLimit(1)
                 
-                // Fixed height container (20px) to ensure uniformity
                 Group {
                     if let typing = typingText {
                         HStack(spacing: 4) {
@@ -800,7 +799,7 @@ struct EnhancedRoomCard: View {
                         .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
                         
                     } else if room.type == .secret {
-                        // SECRET ROOM LOGIC
+                        // PRIVATE ROOM LOGIC
                         if let sentAt = room.lastMessageDate,
                            let lifetime = room.messageLifetime,
                            sentAt.addingTimeInterval(lifetime) > Date() {
@@ -809,33 +808,28 @@ struct EnhancedRoomCard: View {
                             TimelineView(.periodic(from: .now, by: 1.0)) { context in
                                 let remaining = max(0, expiresAt.timeIntervalSince(context.date))
                                 HStack(spacing: 4) {
-                                    Image(systemName: "hourglass.circle.fill")
+                                    Image(systemName: "clock.arrow.2.circlepath")
                                         .font(.system(size: 10))
-                                        .foregroundStyle(Color.teal)
-                                    Text("Vanishes in \(formatCountdown(remaining))")
-                                        .font(.system(.caption, design: .serif).italic())
-                                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                                        .foregroundStyle(.secondary)
+                                    Text("Expires in \(formatCountdown(remaining))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         } else {
-                            // Empty or Expired Secret Room
-                            Text("No last message")
+                            Text("No recent activity")
                                 .font(.caption)
-                                .italic()
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.6))
+                                .foregroundStyle(.secondary.opacity(0.6))
                         }
                         
                     } else if let lastMessage = room.lastMessage {
-                        // STANDARD ROOM WITH MESSAGE
                         Text(lastMessage)
                             .font(.caption)
                             .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
                         
                     } else {
-                        // STANDARD ROOM EMPTY
                         Text("No messages yet")
                             .font(.caption)
-                            .italic()
                             .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.6))
                     }
                 }
@@ -843,7 +837,7 @@ struct EnhancedRoomCard: View {
                 .frame(height: 20)
             }
             
-            // 3. Footer Row (Fixed height to accommodate badges)
+            // 3. Footer Row
             HStack(alignment: .center, spacing: 4) {
                 HStack(spacing: 4) {
                     Image(systemName: "person.2.fill")
@@ -855,10 +849,9 @@ struct EnhancedRoomCard: View {
                 
                 Spacer()
                 
-                // Badges container
                 HStack(spacing: 6) {
                     if room.type == .secret {
-                        chamberBadge
+                        privateBadge
                     }
                     
                     if room.hasPassword {
@@ -866,70 +859,48 @@ struct EnhancedRoomCard: View {
                     }
                 }
             }
-            .frame(height: 24) // Ensures row height is consistent even if badges are missing
+            .frame(height: 24)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(selectedTheme.colors(for: colorScheme).cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: selectedTheme.colors(for: colorScheme).primary[0].opacity(0.1), radius: 8, y: 4)
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 4)
         .overlay(
             RoundedRectangle(cornerRadius: 20)
                 .strokeBorder(
                     isSelected
                         ? selectedTheme.colors(for: colorScheme).accent
-                        : selectedTheme.colors(for: colorScheme).accent.opacity(0.1),
-                    lineWidth: isSelected ? 2.5 : 1)
+                        : .primary.opacity(0.05),
+                    lineWidth: isSelected ? 2 : 1)
         )
-        .scaleEffect(isSelected ? 1.03 : 1.0)
-        .animation(.easeInOut(duration: 0.15), value: isSelected)
+        .scaleEffect(isSelected ? 1.02 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
     }
 
     // MARK: - Subcomponents
 
-    private var secretMessageLogic: some View {
-        Group {
-            if let sentAt = room.lastMessageDate,
-               let lifetime = room.messageLifetime,
-               sentAt.addingTimeInterval(lifetime) > Date() {
-                
-                let expiresAt = sentAt.addingTimeInterval(lifetime)
-                TimelineView(.periodic(from: .now, by: 1.0)) { context in
-                    let remaining = max(0, expiresAt.timeIntervalSince(context.date))
-                    HStack(spacing: 4) {
-                        Image(systemName: "hourglass.circle.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Color.teal)
-                        Text("Vanishes in \(formatCountdown(remaining))")
-                            .font(.system(.caption, design: .serif).italic())
-                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                    }
-                }
-            } else {
-                Text(" ") // Keeps the line height active
-            }
-        }
-    }
-
-    private var chamberBadge: some View {
+    private var privateBadge: some View {
         HStack(spacing: 4) {
-            Text("🐍").font(.system(size: 9))
-            Text("Chamber").font(.system(size: 10, weight: .bold, design: .serif))
+            Image(systemName: "key.fill")
+                .font(.system(size: 8))
+            Text("Secret")
+                .font(.system(size: 10, weight: .bold))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Capsule().fill(Color.teal.opacity(0.15)))
-        .foregroundStyle(Color.teal)
+        .background(Capsule().fill(.secondary.opacity(0.1)))
+        .foregroundStyle(.secondary)
     }
 
     private var passwordBadge: some View {
         HStack(spacing: 3) {
-            Image(systemName: "lock.fill").font(.system(size: 9))
-            Text("Password").font(.system(size: 9, weight: .semibold))
+            Image(systemName: "lock.fill").font(.system(size: 8))
+            Text("Locked").font(.system(size: 10, weight: .bold))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Capsule().fill(Color.indigo.opacity(0.15)))
+        .background(Capsule().fill(Color.indigo.opacity(0.1)))
         .foregroundStyle(Color.indigo)
     }
 
@@ -947,7 +918,7 @@ struct EnhancedRoomCard: View {
                     } else {
                         Text(room.name.prefix(1).uppercased())
                             .font(.headline.bold())
-                            .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
+                            .foregroundStyle(.white)
                     }
                 }
             }
@@ -955,7 +926,6 @@ struct EnhancedRoomCard: View {
         .frame(width: 40, height: 40)
         .clipShape(Circle())
         .task(id: room.avatarStorageId) {
-            // ... (Avatar loading logic remains same)
             roomAvatarImage = nil
             guard let storageId = room.avatarStorageId else { isLoadingAvatar = false; return }
             isLoadingAvatar = true
@@ -970,14 +940,14 @@ struct EnhancedRoomCard: View {
                 Text("\(unreadCount)")
                     .font(.caption2.bold())
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
                     .background(Color.red)
                     .clipShape(Capsule())
             }
             Button(action: action) {
-                Image(systemName: "door.left.hand.open")
-                    .font(.system(size: 14, weight: .bold))
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
                     .frame(width: 28, height: 28)
                     .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))

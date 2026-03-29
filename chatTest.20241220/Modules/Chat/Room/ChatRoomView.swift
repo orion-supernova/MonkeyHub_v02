@@ -73,7 +73,7 @@ struct ChatRoomView: View {
                     .modifier(LiquidGlassModifier(cornerRadius: 12))
             } else if viewModel.messages.isEmpty {
                 if liveRoom.type == .secret {
-                    ChamberOfSecretsWelcomeView(messageLifetime: liveRoom.messageLifetime)
+                    PrivateSpaceWelcomeView(messageLifetime: liveRoom.messageLifetime)
                 } else {
                     ContentUnavailableView(
                         "No Messages",
@@ -468,93 +468,6 @@ struct ChatRoomView: View {
     }
 }
 
-// MARK: - Chamber of Secrets Welcome View
-struct ChamberOfSecretsWelcomeView: View {
-    let messageLifetime: TimeInterval?
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 32) {
-                // Magical Glowing Icon
-                ZStack {
-                    Circle()
-                        .fill(RadialGradient(
-                            colors:[Color.green.opacity(0.4), Color.teal.opacity(0.1), Color.clear],
-                            center: .center, startRadius: 10, endRadius: 90
-                        ))
-                        .frame(width: 180, height: 180)
-                        // Add a slow pulse to the background glow
-                        .phaseAnimator([false, true]) { content, phase in
-                            content
-                                .scaleEffect(phase ? 1.05 : 0.95)
-                                .opacity(phase ? 1.0 : 0.7)
-                        } animation: { _ in
-                            .easeInOut(duration: 2.0).repeatForever(autoreverses: true)
-                        }
-                    
-                    Text("🐍") // The Basilisk / Chamber theme!
-                        .font(.system(size: 80))
-                        .shadow(color: .green.opacity(0.5), radius: 10, x: 0, y: 5)
-                }
-
-                // Title
-                VStack(spacing: 8) {
-                    Text("Chamber of Secrets")
-                        .font(.system(.title, design: .serif).bold()) // Serif font for that HP book feel
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors:[.teal, .green, .mint],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                    
-                    Text("Messages in this room vanish into the shadows. Whether read or not.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                }
-
-                // Magical Feature Cards Grid
-                VStack(spacing: 16) {
-                    HStack(spacing: 16) {
-                        SecretFeatureCard(
-                            icon: "hourglass.circle.fill", // Time running out
-                            color: .green,
-                            title: "Evanesco", // Vanishing spell
-                            subtitle: messageLifetime != nil ? formatLifetime(messageLifetime!) : "Auto-Deletes"
-                        )
-                        
-                        SecretFeatureCard(
-                            icon: "lock.shield.fill",
-                            color: .purple,
-                            title: "Protego", // Shield spell
-                            subtitle: "Screenshots Blocked"
-                        )
-                    }
-                    
-                    SecretFeatureCard(
-                        icon: "eye.slash.fill",
-                        color: .teal,
-                        title: "Unforgivable Secrecy",
-                        subtitle: "End-to-End privacy. Screen recording and broadcasting are fully neutralized.",
-                        isFullWidth: true
-                    )
-                }
-                .padding(.horizontal, 24)
-            }
-            .padding(.vertical, 48)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .onTapGesture {
-            #if canImport(UIKit)
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            #endif
-        }
-    }
-}
-
 struct RoomTitleView: View {
     let title: String
     var roomType: RoomType = .regular
@@ -567,99 +480,45 @@ struct RoomTitleView: View {
     @State private var textLayoutWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
 
-    init(title: String, roomType: RoomType = .regular, avatarImage: PlatformImage? = nil, showFocusRing: Bool = false) {
-        self.title = title
-        self.roomType = roomType
-        self.avatarImage = avatarImage
-        self.showFocusRing = showFocusRing
-    }
-
     var body: some View {
         HStack(spacing: 8) {
-            // Avatar circle — only rendered when a real image exists
             if let avatar = avatarImage {
                 Image(platformImage: avatar)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 34, height: 34)
+                    .frame(width: 32, height: 32)
                     .clipShape(Circle())
-                    // Thin background-coloured border gives the layered "sticker on top" look
-                    .overlay(Circle().strokeBorder(.background, lineWidth: 2))
-                    .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                    .overlay(Circle().strokeBorder(colorScheme == .dark ? .white.opacity(0.1) : .black.opacity(0.1), lineWidth: 0.5))
             }
 
-            // Chamber of Secrets flame icon
+            // Subtle Privacy Icon (Replaces Snake/Flame)
             if roomType == .secret {
-                Text("🐍")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.orange, .red],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .symbolEffect(.variableColor.cumulative, options: .repeat(.continuous))
+                Image(systemName: "key.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
             }
 
-            // Room name
             Text(title)
                 .font(.headline)
                 .lineLimit(isExpanded ? nil : 1)
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
                 .background(
                     GeometryReader { geo in
-                        Color.clear
-                            .onAppear { containerWidth = geo.size.width }
-                            .onChange(of: geo.size.width) { _, newValue in containerWidth = newValue }
+                        Color.clear.onAppear { containerWidth = geo.size.width }
                     }
-                )
-                .background(
-                    Text(title)
-                        .font(.headline)
-                        .fixedSize()
-                        .hidden()
-                        .overlay(
-                            GeometryReader { proxy in
-                                Color.clear
-                                    .onAppear { textLayoutWidth = proxy.size.width }
-                                    .onChange(of: proxy.size.width) { _, newValue in textLayoutWidth = newValue }
-                            }
-                        )
                 )
         }
-        .padding(.leading, avatarImage != nil ? 6 : 16)
-        .padding(.trailing, 16)
-        .padding(.vertical, isExpanded ? 8 : 4)
-        .frame(minHeight: 44)
-        .frame(height: isExpanded ? nil : 44)
-        .modifier(LiquidGlassModifier(cornerRadius: 22))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
         .overlay(
-            RoundedRectangle(cornerRadius: 22)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: selectedTheme.colors(for: colorScheme).primary,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 2.5
-                )
-                .opacity(showFocusRing ? 1 : 0)
-                .animation(.easeInOut(duration: 0.15), value: showFocusRing)
+            Capsule()
+                .strokeBorder(selectedTheme.colors(for: colorScheme).primary.first ?? .blue, lineWidth: showFocusRing ? 2 : 0)
         )
         .onTapGesture {
-            // Heuristic: If text is wider than container, it's truncated
             if textLayoutWidth > containerWidth {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                    isExpanded = true
-                }
-
-                // Auto-collapse after 3 seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                    withAnimation {
-                        isExpanded = false
-                    }
-                }
+                withAnimation(.spring()) { isExpanded.toggle() }
             }
         }
     }
@@ -707,55 +566,6 @@ private struct SwipeBackEnabler: UIViewControllerRepresentable {
                 createdBy: "test-user"
             )
         )
-    }
-}
-
-struct SecretFeatureCard: View {
-    let icon: String
-    let color: Color
-    let title: String
-    let subtitle: String
-    var isFullWidth: Bool = false
-
-    var body: some View {
-        VStack(alignment: isFullWidth ? .leading : .center, spacing: 12) {
-            // Icon with a glowing backdrop
-            ZStack {
-                Circle()
-                    .fill(color.opacity(0.15))
-                    .frame(width: 44, height: 44)
-                    .blur(radius: 6)
-                
-                Image(systemName: icon)
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(color)
-                    .shadow(color: color.opacity(0.5), radius: 3)
-            }
-            .frame(maxWidth: isFullWidth ? .none : .infinity, alignment: isFullWidth ? .leading : .center)
-
-            VStack(alignment: isFullWidth ? .leading : .center, spacing: 4) {
-                Text(title)
-                    .font(.system(.subheadline, design: .serif).weight(.bold))
-                    .foregroundStyle(.primary)
-                
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(isFullWidth ? .leading : .center)
-                    .lineLimit(3)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity)
-        .frame(height: isFullWidth ? nil : 145)
-        .background {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(.ultraThinMaterial)
-                // The Animated Glowing Border
-                .modifier(MagicalBorderModifier(color: color, cornerRadius: 24))
-        }
-        // Outer ambient glow
-        .shadow(color: color.opacity(0.08), radius: 15, x: 0, y: 8)
     }
 }
 
@@ -812,5 +622,116 @@ struct MagicalBorderModifier: ViewModifier {
                     rotation = 360
                 }
             }
+    }
+}
+
+struct PrivateFeatureCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    var isFullWidth: Bool = false
+
+    var body: some View {
+        Group {
+            if isFullWidth {
+                // Horizontal Layout: Icon on the Left
+                HStack(spacing: 16) {
+                    iconView
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.caption.bold())
+                        Spacer()
+                            .frame(height: 2)
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+            } else {
+                // Vertical Layout: Icon on Top
+                VStack(spacing: 8) {
+                    iconView
+                    
+                    VStack(spacing: 2) {
+                        Text(title)
+                            .font(.caption.bold())
+                        Spacer()
+                            .frame(height: 2)
+                        Text(subtitle)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: isFullWidth ? 0 : 120) // Give vertical cards a consistent height
+        .background {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+                )
+        }
+    }
+
+    // Extracted Icon View for consistency
+    private var iconView: some View {
+        Image(systemName: icon)
+            .font(.system(size: 20))
+            .foregroundStyle(.primary.opacity(0.7))
+            .frame(width: 32, height: 32)
+            .background(Circle().fill(.primary.opacity(0.03)))
+    }
+}
+
+// MARK: - Private Space Welcome View
+struct PrivateSpaceWelcomeView: View {
+    let messageLifetime: TimeInterval?
+
+    var body: some View {
+        VStack(spacing: 32) {
+            Spacer()
+            
+            // Clean, Professional Icon
+            ZStack {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .frame(width: 100, height: 100)
+                
+                Image(systemName: "key.shield") // Universal SF Symbol
+                    .font(.system(size: 40))
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 12) {
+                Text("Secret Space")
+                    .font(.system(.title3, design: .rounded).bold())
+                
+                Text("Messages in this room are ephemeral. They are automatically removed based on the room's security policy.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+            }
+
+            // Simple Feature Grid
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    PrivateFeatureCard(icon: "clock.badge.exclamationmark", title: "Auto-Delete", subtitle: messageLifetime != nil ? "Varies" : "Timed")
+                    PrivateFeatureCard(icon: "hand.raised.fill", title: "No Capture", subtitle: "Screenshots Restricted")
+                }
+                PrivateFeatureCard(icon: "lock.fill", title: "Much More Privacy", subtitle: "Enjoy extra security features on top of already existing privacy focus.", isFullWidth: true)
+            }
+            .padding(.horizontal, 24)
+            
+            Spacer()
+        }
     }
 }

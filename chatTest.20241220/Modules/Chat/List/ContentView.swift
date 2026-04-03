@@ -187,7 +187,7 @@ private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String
     private var headerHeight: CGFloat {
         switch verticalSizeClass {
         case .compact:
-            return 240  // Landscape mode
+            return 240  // Landscape modeReally good,
         default:
             return 320  // Portrait mode
         }
@@ -203,130 +203,139 @@ private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String
                     endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea()
-                .frame(height: headerHeight)
+//                .frame(height: headerHeight)
 
-                ScrollView {
-                    VStack(spacing: 0) {
-                        // Header content
-                        VStack(spacing: verticalSizeClass == .compact ? 12 : 20) {
-                            // Status bar spacing
-                            Color.clear
-                                .frame(height: verticalSizeClass == .compact ? 20 : 50)
+                ZStack(alignment: .top) {
+                    // Sticky Header content (non-scrollable)
+                    VStack(spacing: verticalSizeClass == .compact ? 12 : 20) {
+                        // Status bar spacing
+                        Color.clear
+                            .frame(height: verticalSizeClass == .compact ? 20 : 50)
 
-                            // Title and action buttons
-                            VStack(spacing: 16) {
-                                // Title and room count
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        let title = selectedSection == .chats ? "Chat Rooms" : selectedSection.rawValue
-                                        let titleSize = verticalSizeClass == .compact ? CGFloat(28) : CGFloat(34)
-                                        
-                                        Text(title)
-                                            .font(.system(size: titleSize, weight: .bold))
-                                            .foregroundStyle(
-                                                selectedTheme.colors(for: colorScheme).text)
-
-                                        Text(
-                                            sectionSummary
-                                        )
-                                        .font(.subheadline)
+                        // Title and action buttons
+                        VStack(spacing: 16) {
+                            // Title and room count
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    let title = selectedSection == .chats ? "Chat Rooms" : selectedSection.rawValue
+                                    let titleSize = verticalSizeClass == .compact ? CGFloat(28) : CGFloat(34)
+                                    
+                                    Text(title)
+                                        .font(.system(size: titleSize, weight: .bold))
                                         .foregroundStyle(
-                                            selectedTheme.colors(for: colorScheme).text.opacity(0.8)
-                                        )
-                                    }
+                                            selectedTheme.colors(for: colorScheme).text)
 
-                                    Spacer()
+                                    Text(
+                                        sectionSummary
+                                    )
+                                    .font(.subheadline)
+                                    .foregroundStyle(
+                                        selectedTheme.colors(for: colorScheme).text.opacity(0.8)
+                                    )
                                 }
 
-                                // Action buttons
-                                HStack(spacing: 12) {
-                                    // Create Room button
-                                    Button {
-                                        isShowingNewRoomSheet = true
-                                    } label: {
-                                        HStack(spacing: 8) {
-                                            Image(systemName: "plus.circle.fill")
-                                            Text("New Room")
-                                        }
-                                        .font(.headline)
-                                        .foregroundStyle(
-                                            selectedTheme.colors(for: colorScheme).text
-                                        )
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 12)
-                                        .background(
-                                            LinearGradient(
-                                                colors: [
-                                                    selectedTheme.colors(for: colorScheme)
-                                                        .headerOverlay,
-                                                    selectedTheme.colors(for: colorScheme)
-                                                        .headerOverlay.opacity(0.8),
-                                                ],
-                                                startPoint: .leading,
-                                                endPoint: .trailing
-                                            )
-                                        )
-                                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 16)
-                                                .strokeBorder(
-                                                    selectedTheme.colors(for: colorScheme).text
-                                                        .opacity(0.2),
-                                                    lineWidth: 1
-                                                )
-                                        )
-#if os(macOS)
-                                        .buttonStyle(.plain)
-                                        .contentShape(RoundedRectangle(cornerRadius: 16))
-#endif
-                                    }
-
-                                    // Search button
-                                    Button {
-                                        isShowingSearchView = true
-                                    } label: {
-                                        HStack(spacing: 8) {
-                                            Image(systemName: "magnifyingglass")
-                                            Text("Search")
-                                        }
-                                        .font(.headline)
-                                        .foregroundStyle(
-                                            selectedTheme.colors(for: colorScheme).text
-                                        )
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 12)
-                                        .background(
-                                            LinearGradient(
-                                                colors: [
-                                                    selectedTheme.colors(for: colorScheme)
-                                                        .headerOverlay,
-                                                    selectedTheme.colors(for: colorScheme)
-                                                        .headerOverlay.opacity(0.8),
-                                                ],
-                                                startPoint: .leading,
-                                                endPoint: .trailing
-                                            )
-                                        )
-                                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 16)
-                                                .strokeBorder(
-                                                    selectedTheme.colors(for: colorScheme).text
-                                                        .opacity(0.2),
-                                                    lineWidth: 1
-                                                )
-                                        )
-#if os(macOS)
-                                        .buttonStyle(.plain)
-                                        .contentShape(RoundedRectangle(cornerRadius: 16))
-#endif
-                                    }
-                                }
-
-                                sectionSelector
+                                Spacer()
                             }
-                            .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
-                            .padding(.bottom, verticalSizeClass == .compact ? 36 : 44)
+
+                            // Action buttons
+                            HStack(spacing: 12) {
+                                // Create Room button
+                                Button {
+                                    isShowingNewRoomSheet = true
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "plus.circle.fill")
+                                        Text("New Room")
+                                    }
+                                    .font(.headline)
+                                    .foregroundStyle(
+                                        selectedTheme.colors(for: colorScheme).text
+                                    )
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        LinearGradient(
+                                            colors: [
+                                                selectedTheme.colors(for: colorScheme)
+                                                    .headerOverlay,
+                                                selectedTheme.colors(for: colorScheme)
+                                                    .headerOverlay.opacity(0.8),
+                                            ],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .strokeBorder(
+                                                selectedTheme.colors(for: colorScheme).text
+                                                    .opacity(0.2),
+                                                lineWidth: 1
+                                            )
+                                    )
+#if os(macOS)
+                                    .buttonStyle(.plain)
+                                    .contentShape(RoundedRectangle(cornerRadius: 16))
+#endif
+                                }
+
+                                // Search button
+                                Button {
+                                    isShowingSearchView = true
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "magnifyingglass")
+                                        Text("Search")
+                                    }
+                                    .font(.headline)
+                                    .foregroundStyle(
+                                        selectedTheme.colors(for: colorScheme).text
+                                    )
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        LinearGradient(
+                                            colors: [
+                                                selectedTheme.colors(for: colorScheme)
+                                                    .headerOverlay,
+                                                selectedTheme.colors(for: colorScheme)
+                                                    .headerOverlay.opacity(0.8),
+                                            ],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .strokeBorder(
+                                                selectedTheme.colors(for: colorScheme).text
+                                                    .opacity(0.2),
+                                                lineWidth: 1
+                                            )
+                                    )
+#if os(macOS)
+                                    .buttonStyle(.plain)
+                                    .contentShape(RoundedRectangle(cornerRadius: 16))
+#endif
+                                }
+                            }
+
+                            sectionSelector
+                        }
+                        .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
+                        .padding(.bottom, verticalSizeClass == .compact ? 36 : 44)
+                    }
+                    .zIndex(0)
+
+                    // Scrollable chat list/content
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            // Transparent spacer so content starts just below sticky header
+                            Color.clear
+                                .frame(height: headerHeight - 20)
+                                .allowsHitTesting(false)
 
                             // Main content
                             LazyVStack(spacing: 16) {
@@ -447,7 +456,10 @@ private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String
                                         }
                                     )
                                 }
-                        }
+                                // Footer spacer to ensure floating/hovering buttons don't cover last items
+                                Color.clear
+                                    .frame(height: 100)
+                            }
                             .padding(.top, 16)
                             .background(
                                 ZStack {
@@ -468,10 +480,10 @@ private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String
                                         .offset(y: -25)  // Adjusted offset
                                 }
                             )
-                            .offset(y: -40)  // Increased overlap with header
-                            .padding(.top, 40)  // Adjusted padding to compensate
+                            
                         }
                     }
+                    .zIndex(1)
                 }
             }
             .navigationDestination(for: ChatRoom.self) { room in
@@ -607,9 +619,6 @@ private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String
         }
         .task {
             await loadData()
-        }
-        .refreshable {
-            await refreshData()
         }
         .alert("Sign Out", isPresented: $showingSignOutAlert) {
             Button("Cancel", role: .cancel) {}
@@ -799,804 +808,6 @@ private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String
     }
 }
 
-struct EnhancedRoomCard: View {
-    let room: ChatRoom
-    let unreadCount: Int
-    let typingText: String?
-    var isSelected: Bool = false
-    let action: () -> Void
-    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var roomAvatarImage: PlatformImage?
-    @State private var isLoadingAvatar = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // 1. Header Row
-            HStack {
-                avatarView
-                Spacer()
-                headerButtons
-            }
-            .frame(height: 40)
-            
-            // 2. Name & Message area
-            VStack(alignment: .leading, spacing: 4) {
-                Text(room.name)
-                    .font(.headline)
-                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                    .lineLimit(1)
-                
-                Group {
-                    if let typing = typingText {
-                        HStack(spacing: 4) {
-                            Image(systemName: "ellipsis.bubble").imageScale(.small)
-                            Text(typing)
-                        }
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                        
-                    } else if room.type == .secret {
-                        // PRIVATE ROOM LOGIC
-                        if let sentAt = room.lastMessageDate,
-                           let lifetime = room.messageLifetime,
-                           sentAt.addingTimeInterval(lifetime) > Date() {
-                            
-                            let expiresAt = sentAt.addingTimeInterval(lifetime)
-                            TimelineView(.periodic(from: .now, by: 1.0)) { context in
-                                let remaining = max(0, expiresAt.timeIntervalSince(context.date))
-                                HStack(spacing: 4) {
-                                    Image(systemName: "clock.arrow.2.circlepath")
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.secondary)
-                                    Text("Expires in \(formatCountdown(remaining))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        } else {
-                            Text("No recent activity")
-                                .font(.caption)
-                                .foregroundStyle(.secondary.opacity(0.6))
-                        }
-                        
-                    } else if let lastMessage = room.lastMessage {
-                        Text(lastMessage)
-                            .font(.caption)
-                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                        
-                    } else {
-                        Text("No messages yet")
-                            .font(.caption)
-                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.6))
-                    }
-                }
-                .lineLimit(1)
-                .frame(height: 20)
-            }
-            
-            // 3. Footer Row
-            HStack(alignment: .center, spacing: 4) {
-                HStack(spacing: 4) {
-                    Image(systemName: "person.2.fill")
-                        .imageScale(.small)
-                    Text("\(room.resolvedMemberCount)")
-                }
-                .font(.caption2)
-                .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                
-                Spacer()
-                
-                HStack(spacing: 6) {
-                    if room.type == .secret {
-                        privateBadge
-                    }
-                    
-                    if room.hasPassword {
-                        passwordBadge
-                    }
-                }
-            }
-            .frame(height: 24)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(selectedTheme.colors(for: colorScheme).cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.05), radius: 8, y: 4)
-        .overlay(
-            RoundedRectangle(cornerRadius: 20)
-                .strokeBorder(
-                    isSelected
-                        ? selectedTheme.colors(for: colorScheme).accent
-                        : .primary.opacity(0.05),
-                    lineWidth: isSelected ? 2 : 1)
-        )
-        .scaleEffect(isSelected ? 1.02 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
-    }
-
-    // MARK: - Subcomponents
-
-    private var privateBadge: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "key.fill")
-                .font(.system(size: 8))
-            Text("Secret")
-                .font(.system(size: 10, weight: .bold))
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Capsule().fill(.secondary.opacity(0.1)))
-        .foregroundStyle(.secondary)
-    }
-
-    private var passwordBadge: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "lock.fill").font(.system(size: 8))
-            Text("Locked").font(.system(size: 10, weight: .bold))
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Capsule().fill(Color.indigo.opacity(0.1)))
-        .foregroundStyle(Color.indigo)
-    }
-
-    private var avatarView: some View {
-        Group {
-            if let avatarImage = roomAvatarImage {
-                Image(platformImage: avatarImage)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                ZStack {
-                    Circle().fill(LinearGradient(colors: selectedTheme.colors(for: colorScheme).primary, startPoint: .topLeading, endPoint: .bottomTrailing))
-                    if isLoadingAvatar {
-                        ProgressView().tint(.white).scaleEffect(0.7)
-                    } else {
-                        Text(room.name.prefix(1).uppercased())
-                            .font(.headline.bold())
-                            .foregroundStyle(.white)
-                    }
-                }
-            }
-        }
-        .frame(width: 40, height: 40)
-        .clipShape(Circle())
-        .task(id: room.avatarStorageId) {
-            roomAvatarImage = nil
-            guard let storageId = room.avatarStorageId else { isLoadingAvatar = false; return }
-            isLoadingAvatar = true
-            if let image = await ConvexFileCacheService.shared.image(for: storageId) { roomAvatarImage = image }
-            isLoadingAvatar = false
-        }
-    }
-
-    private var headerButtons: some View {
-        HStack(spacing: 8) {
-            if unreadCount > 0 {
-                Text("\(unreadCount)")
-                    .font(.caption2.bold())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.red)
-                    .clipShape(Capsule())
-            }
-            Button(action: action) {
-                Image(systemName: "rectangle.portrait.and.arrow.right")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
-                    .frame(width: 28, height: 28)
-                    .background(selectedTheme.colors(for: colorScheme).destructive.opacity(0.1))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private func formatCountdown(_ seconds: TimeInterval) -> String {
-        let s = Int(seconds)
-        if s >= 3600 { return "\(s / 3600)h \((s % 3600) / 60)m" }
-        else if s >= 60 { return "\(s / 60)m \(s % 60)s" }
-        else { return "\(s)s" }
-    }
-}
-
-struct EnhancedNewRoomSheet: View {
-    @Binding var isShowingSheet: Bool
-    @Binding var roomName: String
-    @State private var selectedType: RoomType = .regular
-    @State private var messageLifetime: TimeInterval = 30  // 30 seconds default
-    let createRoom: (RoomType, TimeInterval?, String?) async -> Void
-    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
-    @State private var animateContent = false
-    @State private var selectedOptionId: TimeInterval?
-    @Namespace private var animation
-    @FocusState private var isRoomNameFocused: Bool
-
-    // Password Protection
-    @State private var isProtected = false
-    @State private var roomPassword = ""
-
-    @State private var keyboardHeight: CGFloat = 0
-    @State private var scrollID = UUID()  // For scroll anchor
-    @Environment(\.colorScheme) private var colorScheme
-
-    private let lifetimeOptions: [(String, TimeInterval)] = [
-        ("10 seconds", 10),
-        ("30 seconds", 30),
-        ("1 minute", 60),
-        ("5 minutes", 300),
-        ("10 minutes", 600),
-        ("30 minutes", 1800),
-        ("1 hour", 3600),
-    ]
-
-    var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 24) {
-                        // Enhanced Header with animation
-                        VStack(spacing: 8) {
-                            Text("Create New Room")
-                                .font(.title.bold())
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                                .opacity(animateContent ? 1 : 0)
-                                .offset(y: animateContent ? 0 : 20)
-
-                            Text("Select room type and customize settings")
-                                .font(.subheadline)
-                                .foregroundStyle(
-                                    selectedTheme.colors(for: colorScheme).textSecondary
-                                )
-                                .opacity(animateContent ? 1 : 0)
-                                .offset(y: animateContent ? 0 : 20)
-                        }
-                        .padding(.top, 12)
-
-                        // Room Type Selector with improved animations
-                        VStack(alignment: .leading, spacing: 20) {
-                            Text("ROOM TYPE")
-                                .font(.caption.bold())
-                                .foregroundStyle(
-                                    selectedTheme.colors(for: colorScheme).textSecondary
-                                )
-                                .padding(.leading, 4)
-                                .opacity(animateContent ? 1 : 0)
-                                .offset(y: animateContent ? 0 : 20)
-
-                            VStack(spacing: 16) {
-                                ForEach([RoomType.regular, .secret], id: \.self) { type in
-                                    RoomTypeButton(
-                                        type: type,
-                                        selectedType: $selectedType,
-                                        selectedTheme: selectedTheme,
-                                        animateContent: animateContent
-                                    )
-                                }
-                            }
-                        }
-
-                        // Message Lifetime Selector with improved animations
-                        if selectedType == .secret {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("MESSAGE LIFETIME")
-                                    .font(.caption.bold())
-                                    .foregroundStyle(
-                                        selectedTheme.colors(for: colorScheme).textSecondary
-                                    )
-                                    .padding(.leading, 4)
-                                    .transition(.move(edge: .top).combined(with: .opacity))
-
-                                VStack(spacing: 12) {
-                                    ForEach(lifetimeOptions, id: \.1) { option in
-                                        Button {
-                                            withAnimation(.spring(duration: 0.3)) {
-                                                messageLifetime = option.1
-                                                selectedOptionId = option.1
-                                            }
-                                        } label: {
-                                            HStack {
-                                                Text(option.0)
-                                                    .font(.subheadline)
-                                                    .foregroundStyle(
-                                                        selectedTheme.colors(for: colorScheme)
-                                                            .textPrimary)
-
-                                                Spacer()
-
-                                                if messageLifetime == option.1 {
-                                                    Image(systemName: "checkmark.circle.fill")
-                                                        .foregroundStyle(
-                                                            selectedTheme.colors(for: colorScheme)
-                                                                .accent
-                                                        )
-                                                        .matchedGeometryEffect(
-                                                            id: "check\(option.1)",
-                                                            in: animation
-                                                        )
-                                                }
-                                            }
-                                            .padding(.horizontal, 16)
-                                            .padding(.vertical, 12)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 12)
-                                                    .fill(
-                                                        selectedTheme.colors(for: colorScheme)
-                                                            .cardBackground
-                                                    )
-                                                    .overlay(
-                                                        RoundedRectangle(cornerRadius: 12)
-                                                            .strokeBorder(
-                                                                messageLifetime == option.1
-                                                                    ? selectedTheme.colors(
-                                                                        for: colorScheme
-                                                                    ).accent
-                                                                    : selectedTheme.colors(
-                                                                        for: colorScheme
-                                                                    ).textSecondary
-                                                                        .opacity(0.1),
-                                                                lineWidth: messageLifetime
-                                                                    == option.1
-                                                                    ? 1.5 : 1
-                                                            )
-                                                    )
-                                            )
-                                            .scaleEffect(messageLifetime == option.1 ? 1.02 : 1)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .transition(.scale.combined(with: .opacity))
-                                    }
-                                }
-                            }
-                            .padding(.top, 8)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                        }
-
-                        // Room name input with simplified keyboard handling
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("ROOM NAME")
-                                .font(.caption.bold())
-                                .foregroundStyle(
-                                    selectedTheme.colors(for: colorScheme).textSecondary
-                                )
-                                .padding(.leading, 4)
-                                .opacity(animateContent ? 1 : 0)
-                                .offset(y: animateContent ? 0 : 20)
-
-                            TextField("Enter room name", text: $roomName)
-                                .textFieldStyle(.plain)
-                                .padding()
-                                .background(selectedTheme.colors(for: colorScheme).cardBackground)
-                                .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .strokeBorder(
-                                            roomName.isEmpty
-                                                ? selectedTheme.colors(for: colorScheme)
-                                                    .textSecondary
-                                                    .opacity(0.1)
-                                                : selectedTheme.colors(for: colorScheme).accent
-                                                    .opacity(
-                                                        0.2),
-                                            lineWidth: 1
-                                        )
-                                )
-                                .focused($isRoomNameFocused)
-                        }
-                        .id(scrollID)  // Add scroll anchor
-                        .opacity(animateContent ? 1 : 0)
-                        .offset(y: animateContent ? 0 : 20)
-
-                        // Password Protection toggle and input
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Label("Protect with Password", systemImage: "lock.shield")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                                Spacer()
-                                Toggle("", isOn: $isProtected)
-                                    .labelsHidden()
-                                    .tint(selectedTheme.colors(for: colorScheme).accent)
-                            }
-                            .padding()
-                            .background(selectedTheme.colors(for: colorScheme).cardBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                            if isProtected {
-                                SecureField("Enter room password", text: $roomPassword)
-                                    .textFieldStyle(.plain)
-                                    .padding()
-                                    .background(selectedTheme.colors(for: colorScheme).cardBackground)
-                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .strokeBorder(
-                                                roomPassword.isEmpty
-                                                    ? selectedTheme.colors(for: colorScheme)
-                                                        .textSecondary
-                                                        .opacity(0.1)
-                                                    : selectedTheme.colors(for: colorScheme).accent
-                                                        .opacity(0.2),
-                                                lineWidth: 1
-                                            )
-                                    )
-                                    .transition(.move(edge: .top).combined(with: .opacity))
-                            }
-                        }
-                        .opacity(animateContent ? 1 : 0)
-                        .offset(y: animateContent ? 0 : 20)
-
-                        // Create button with enhanced animation
-                        Button {
-                            // Add haptic feedback
-                        #if canImport(UIKit)
-                            let impactMed = UIImpactFeedbackGenerator(style: .medium)
-                            impactMed.impactOccurred()
-                        #endif
-
-                            Task {
-                                await createRoom(
-                                    selectedType,
-                                    selectedType == .secret ? messageLifetime : nil,
-                                    isProtected ? roomPassword : nil
-                                )
-                            }
-                        } label: {
-                            HStack(spacing: 12) {
-                                if selectedType == .secret {
-                                    Image(systemName: "flame.fill")
-                                        .symbolEffect(.variableColor.cumulative.hideInactiveLayers.nonReversing, options: .repeat(.continuous))
-                                        .transition(.scale.combined(with: .opacity))
-                                    Text("Create Secret Room")
-                                } else {
-                                    Image(systemName: "plus.circle.fill")
-                                        .transition(.scale.combined(with: .opacity))
-                                    Text("Create Room")
-                                }
-                            }
-                            .font(.headline)
-                            .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(
-                                LinearGradient(
-                                    colors: selectedType == .secret
-                                        ? [Color.orange, Color.red]
-                                        : selectedTheme.colors(for: colorScheme).primary,
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                            .shadow(
-                                color: selectedType == .secret
-                                    ? Color.orange.opacity(0.4)
-                                    : selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3),
-                                radius: 5, y: 2
-                            )
-                            .scaleEffect(roomName.isEmpty ? 0.98 : 1)
-                        }
-                        .disabled(roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .opacity(animateContent ? 1 : 0)
-                        .offset(y: animateContent ? 0 : 20)
-#if os(macOS)
-                        .buttonStyle(.plain)
-                        .focusable(false)
-#endif
-                        .contentShape(RoundedRectangle(cornerRadius: 16))
-                    }
-                    .padding(20)
-                    .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 20 : 16)
-                }
-                .onChange(of: isRoomNameFocused) { _, isFocused in
-                    if isFocused {
-                        withAnimation {
-                            proxy.scrollTo(scrollID, anchor: .bottom)
-                        }
-                    }
-                }
-                .background(selectedTheme.colors(for: colorScheme).background)
-                #if canImport(UIKit)
-                .navigationBarTitleDisplayMode(.inline)
-                #endif
-                .toolbar {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("Done") {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                isRoomNameFocused = false
-                            }
-                        }
-                        .foregroundStyle(
-                            colorScheme == .dark
-                                ? selectedTheme.colors(for: colorScheme).accent
-                                : selectedTheme.colors(for: colorScheme).primary[0]
-                        )
-                    }
-
-                    // Add close button
-                    ToolbarItem(placement: {
-                        #if canImport(UIKit)
-                        return .navigationBarTrailing
-                        #else
-                        return .automatic
-                        #endif
-                    }()) {
-                        Button {
-                            isShowingSheet = false
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title2)
-                                .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(
-                                    selectedTheme.colors(for: colorScheme).textSecondary)
-                        }
-#if os(macOS)
-                        .buttonStyle(.plain)
-                        .focusable(false)
-#endif
-                        .contentShape(Circle())
-                    }
-                }
-            }
-            .onAppear {
-                withAnimation(.easeOut(duration: 0.4)) {
-                    animateContent = true
-                }
-            }
-            .onChange(of: selectedType) { _, _ in
-                #if canImport(UIKit)
-                let impactLight = UIImpactFeedbackGenerator(style: .light)
-                impactLight.impactOccurred()
-                #endif
-            }
-        }
-        #if os(macOS)
-        .frame(minWidth: 500, idealWidth: 560, minHeight: 500, idealHeight: selectedType == .secret ? 760 : 620)
-        #else
-        .presentationDetents([
-            .height(selectedType == .secret ? 900 : 620),
-            .large,
-        ])
-        .presentationDragIndicator(.visible)
-        .presentationBackground(selectedTheme.colors(for: colorScheme).background)
-        .interactiveDismissDisabled()
-        #endif
-    }
-}
-
-struct JoinRoomSheet: View {
-    @Binding var isShowingSheet: Bool
-    let availableRooms: [ChatRoom]
-    let joinRoom: (ChatRoom) async -> Void
-    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        VStack(spacing: 24) {
-            // Header
-            VStack(spacing: 8) {
-                Text("Join Room")
-                    .font(.title.bold())
-                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-
-                Text("Join an existing room")
-                    .font(.subheadline)
-                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-            }
-
-            if availableRooms.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "magnifyingglass.circle.fill")
-                        .font(.system(size: 60))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: selectedTheme.colors(for: colorScheme).primary,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-
-                    Text("No Rooms Available")
-                        .font(.title2.bold())
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-
-                    Text("Create a new room or try again later")
-                        .font(.subheadline)
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(40)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 16) {
-                        ForEach(availableRooms) { room in
-                            Button {
-                                Task {
-                                    await joinRoom(room)
-                                }
-                            } label: {
-                                HStack(spacing: 16) {
-                                    // Room icon
-                                    ZStack {
-                                        Circle()
-                                            .fill(
-                                                LinearGradient(
-                                                    colors: selectedTheme.colors(for: colorScheme)
-                                                        .primary,
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                )
-                                            )
-
-                                        Image(
-                                            systemName: room.hasPassword ? "lock.fill" : (room.type == .regular
-                                                ? "bubble.left" : "lock.shield")
-                                        )
-                                        .font(.title3.bold())
-                                        .foregroundStyle(
-                                            selectedTheme.colors(for: colorScheme).text)
-                                    }
-                                    .frame(width: 44, height: 44)
-
-                                    // Room info
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        HStack {
-                                            Text(room.name)
-                                                .font(.headline)
-                                                .foregroundStyle(
-                                                    selectedTheme.colors(for: colorScheme).textPrimary)
-                                            
-                                            if room.hasPassword {
-                                                Image(systemName: "key.fill")
-                                                    .font(.caption2)
-                                                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
-                                            }
-                                        }
-
-                                        HStack {
-                                            Image(systemName: "person.2.fill")
-                                                .imageScale(.small)
-                                            Text("\(room.resolvedMemberCount) members")
-                                        }
-                                        .font(.caption)
-                                        .foregroundStyle(
-                                            selectedTheme.colors(for: colorScheme).textSecondary)
-                                    }
-
-                                    Spacer()
-
-                                    Image(systemName: "chevron.right")
-                                        .font(.headline)
-                                        .foregroundStyle(
-                                            selectedTheme.colors(for: colorScheme).textSecondary)
-                                }
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(selectedTheme.colors(for: colorScheme).cardBackground)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .strokeBorder(
-                                            selectedTheme.colors(for: colorScheme).accent.opacity(
-                                                0.1), lineWidth: 1)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-            }
-        }
-        .padding(.top, 24)
-        .background(selectedTheme.colors(for: colorScheme).background)
-    }
-}
-
 #Preview {
     ContentView()
-}
-
-struct RoomTypeButton: View {
-    let type: RoomType
-    @Binding var selectedType: RoomType
-    let selectedTheme: AppTheme
-    let animateContent: Bool
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        Button {
-            withAnimation(.spring(duration: 0.5, bounce: 0.3)) {
-                selectedType = type
-            }
-        } label: {
-            HStack(spacing: 16) {
-                // Room type icon
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: selectedType == type
-                                    ? selectedTheme.colors(for: colorScheme).primary
-                                    : [selectedTheme.colors(for: colorScheme).cardBackground],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 44, height: 44)
-                        .shadow(
-                            color: selectedType == type
-                                ? selectedTheme.colors(for: colorScheme).primary[0].opacity(0.3)
-                                : .clear,
-                            radius: 5, y: 2
-                        )
-
-                    Image(
-                        systemName: type == .regular
-                            ? "bubble.left.circle.fill"
-                            : "lock.shield.fill"
-                    )
-                    .font(.title3)
-                    .foregroundStyle(
-                        selectedType == type
-                            ? selectedTheme.colors(for: colorScheme).text
-                            : selectedTheme.colors(for: colorScheme).textSecondary
-                    )
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(
-                        type == .regular
-                            ? "Regular Room" : "Chamber of Secrets"
-                    )
-                    .font(.headline)
-                    .foregroundStyle(
-                        selectedTheme.colors(for: colorScheme).textPrimary
-                    )
-
-                    Text(
-                        type == .regular
-                            ? "Standard chat room with permanent messages"
-                            : "Secret room with self-destructing messages"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(
-                        selectedTheme.colors(for: colorScheme).textSecondary
-                    )
-                    .lineLimit(2)
-                }
-
-                Spacer()
-
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(
-                        selectedTheme.colors(for: colorScheme).accent
-                    )
-                    .opacity(selectedType == type ? 1 : 0)
-            }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(selectedTheme.colors(for: colorScheme).cardBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(
-                        selectedType == type
-                            ? selectedTheme.colors(for: colorScheme).accent
-                            : selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.1),
-                        lineWidth: selectedType == type ? 1.5 : 1
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-        .opacity(animateContent ? 1 : 0)
-        .offset(y: animateContent ? 0 : 20)
-    }
 }

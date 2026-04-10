@@ -184,6 +184,10 @@ private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String
     }
     #endif
 
+    private var headerHeight: CGFloat {
+        verticalSizeClass == .compact ? 240 : 320
+    }
+
     var body: some View {
         NavigationStack(path: $navigationState.path) {
             ZStack(alignment: .top) {
@@ -195,7 +199,129 @@ private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String
                 )
                 .ignoresSafeArea()
 
-                // Scrollable content with header as safeAreaInset
+                // Sticky header — drawn before ScrollView so content scrolls over it
+                VStack(spacing: verticalSizeClass == .compact ? 12 : 20) {
+                    // Status bar spacing
+                    Color.clear
+                        .frame(height: verticalSizeClass == .compact ? 20 : 50)
+
+                    // Title and action buttons
+                    VStack(spacing: 16) {
+                        // Title and room count
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                let title = selectedSection == .chats ? "Chat Rooms" : selectedSection.rawValue
+                                let titleSize = verticalSizeClass == .compact ? CGFloat(28) : CGFloat(34)
+
+                                Text(title)
+                                    .font(.system(size: titleSize, weight: .bold))
+                                    .foregroundStyle(
+                                        selectedTheme.colors(for: colorScheme).text)
+
+                                Text(
+                                    sectionSummary
+                                )
+                                .font(.subheadline)
+                                .foregroundStyle(
+                                    selectedTheme.colors(for: colorScheme).text.opacity(0.8)
+                                )
+                            }
+
+                            Spacer()
+                        }
+
+                        // Action buttons
+                        HStack(spacing: 12) {
+                            // Create Room button
+                            Button {
+                                isShowingNewRoomSheet = true
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "plus.circle.fill")
+                                    Text("New Room")
+                                }
+                                .font(.headline)
+                                .foregroundStyle(
+                                    selectedTheme.colors(for: colorScheme).text
+                                )
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(
+                                    LinearGradient(
+                                        colors: [
+                                            selectedTheme.colors(for: colorScheme)
+                                                .headerOverlay,
+                                            selectedTheme.colors(for: colorScheme)
+                                                .headerOverlay.opacity(0.8),
+                                        ],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .strokeBorder(
+                                            selectedTheme.colors(for: colorScheme).text
+                                                .opacity(0.2),
+                                            lineWidth: 1
+                                        )
+                                )
+#if os(macOS)
+                                .buttonStyle(.plain)
+                                .contentShape(RoundedRectangle(cornerRadius: 16))
+#endif
+                            }
+
+                            // Search button
+                            Button {
+                                isShowingSearchView = true
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "magnifyingglass")
+                                    Text("Search")
+                                }
+                                .font(.headline)
+                                .foregroundStyle(
+                                    selectedTheme.colors(for: colorScheme).text
+                                )
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(
+                                    LinearGradient(
+                                        colors: [
+                                            selectedTheme.colors(for: colorScheme)
+                                                .headerOverlay,
+                                            selectedTheme.colors(for: colorScheme)
+                                                .headerOverlay.opacity(0.8),
+                                        ],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .strokeBorder(
+                                            selectedTheme.colors(for: colorScheme).text
+                                                .opacity(0.2),
+                                            lineWidth: 1
+                                        )
+                                )
+#if os(macOS)
+                                .buttonStyle(.plain)
+                                .contentShape(RoundedRectangle(cornerRadius: 16))
+#endif
+                            }
+                        }
+
+                        sectionSelector
+                    }
+                    .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
+                    .padding(.bottom, verticalSizeClass == .compact ? 36 : 44)
+                }
+
+                // Scrollable content — frame starts below header, content overflows upward
                 ScrollView {
                     LazyVStack(spacing: 16) {
                         if selectedSection == .chats && viewModel.myRooms.isEmpty {
@@ -332,129 +458,8 @@ private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String
                             .padding(.bottom, -1000)
                     )
                 }
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    // Sticky header — outside ScrollView, fully tappable
-                    VStack(spacing: verticalSizeClass == .compact ? 12 : 20) {
-                        // Status bar spacing
-                        Color.clear
-                            .frame(height: verticalSizeClass == .compact ? 20 : 50)
-
-                        // Title and action buttons
-                        VStack(spacing: 16) {
-                            // Title and room count
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    let title = selectedSection == .chats ? "Chat Rooms" : selectedSection.rawValue
-                                    let titleSize = verticalSizeClass == .compact ? CGFloat(28) : CGFloat(34)
-
-                                    Text(title)
-                                        .font(.system(size: titleSize, weight: .bold))
-                                        .foregroundStyle(
-                                            selectedTheme.colors(for: colorScheme).text)
-
-                                    Text(
-                                        sectionSummary
-                                    )
-                                    .font(.subheadline)
-                                    .foregroundStyle(
-                                        selectedTheme.colors(for: colorScheme).text.opacity(0.8)
-                                    )
-                                }
-
-                                Spacer()
-                            }
-
-                            // Action buttons
-                            HStack(spacing: 12) {
-                                // Create Room button
-                                Button {
-                                    isShowingNewRoomSheet = true
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "plus.circle.fill")
-                                        Text("New Room")
-                                    }
-                                    .font(.headline)
-                                    .foregroundStyle(
-                                        selectedTheme.colors(for: colorScheme).text
-                                    )
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .background(
-                                        LinearGradient(
-                                            colors: [
-                                                selectedTheme.colors(for: colorScheme)
-                                                    .headerOverlay,
-                                                selectedTheme.colors(for: colorScheme)
-                                                    .headerOverlay.opacity(0.8),
-                                            ],
-                                            startPoint: .leading,
-                                            endPoint: .trailing
-                                        )
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .strokeBorder(
-                                                selectedTheme.colors(for: colorScheme).text
-                                                    .opacity(0.2),
-                                                lineWidth: 1
-                                            )
-                                    )
-#if os(macOS)
-                                    .buttonStyle(.plain)
-                                    .contentShape(RoundedRectangle(cornerRadius: 16))
-#endif
-                                }
-
-                                // Search button
-                                Button {
-                                    isShowingSearchView = true
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "magnifyingglass")
-                                        Text("Search")
-                                    }
-                                    .font(.headline)
-                                    .foregroundStyle(
-                                        selectedTheme.colors(for: colorScheme).text
-                                    )
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .background(
-                                        LinearGradient(
-                                            colors: [
-                                                selectedTheme.colors(for: colorScheme)
-                                                    .headerOverlay,
-                                                selectedTheme.colors(for: colorScheme)
-                                                    .headerOverlay.opacity(0.8),
-                                            ],
-                                            startPoint: .leading,
-                                            endPoint: .trailing
-                                        )
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .strokeBorder(
-                                                selectedTheme.colors(for: colorScheme).text
-                                                    .opacity(0.2),
-                                                lineWidth: 1
-                                            )
-                                    )
-#if os(macOS)
-                                    .buttonStyle(.plain)
-                                    .contentShape(RoundedRectangle(cornerRadius: 16))
-#endif
-                                }
-                            }
-
-                            sectionSelector
-                        }
-                        .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
-                        .padding(.bottom, verticalSizeClass == .compact ? 36 : 44)
-                    }
-                }
+                .padding(.top, headerHeight - 20) // ScrollView frame starts below header, 20pt overlap
+                .scrollClipDisabled() // Allow content to overflow upward over the header
             }
             .navigationDestination(for: ChatRoom.self) { room in
                 ChatRoomView(room: room)

@@ -184,15 +184,6 @@ private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String
     }
     #endif
 
-    private var headerHeight: CGFloat {
-        switch verticalSizeClass {
-        case .compact:
-            return 240  // Landscape modeReally good,
-        default:
-            return 320  // Portrait mode
-        }
-    }
-
     var body: some View {
         NavigationStack(path: $navigationState.path) {
             ZStack(alignment: .top) {
@@ -203,10 +194,146 @@ private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String
                     endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea()
-//                .frame(height: headerHeight)
 
-                ZStack(alignment: .top) {
-                    // Sticky Header content (non-scrollable)
+                // Scrollable content with header as safeAreaInset
+                ScrollView {
+                    LazyVStack(spacing: 16) {
+                        if selectedSection == .chats && viewModel.myRooms.isEmpty {
+                            if viewModel.isLoading {
+                                VStack(spacing: 16) {
+                                    ProgressView()
+                                        .scaleEffect(1.5)
+                                    Text("Loading Rooms...")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.gray)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(40)
+                            } else {
+                                VStack(spacing: 16) {
+                                    Image(systemName: "bubble.left.circle.fill")
+                                        .font(.system(size: 60))
+                                        .foregroundStyle(
+                                            LinearGradient(
+                                                colors: selectedTheme.colors(for: colorScheme)
+                                                    .primary,
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .padding(.bottom, 8)
+
+                                    Text("No Active Rooms")
+                                        .font(.title2.bold())
+                                        .foregroundStyle(
+                                            selectedTheme.colors(for: colorScheme).textPrimary)
+
+                                    Text("Create a new room to start chatting")
+                                        .font(.subheadline)
+                                        .foregroundStyle(
+                                            selectedTheme.colors(for: colorScheme).textSecondary
+                                        )
+                                        .multilineTextAlignment(.center)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(40)
+                            }
+                        } else if selectedSection == .chats {
+                            VStack(spacing: 24) {
+                                // Section header
+                                HStack {
+                                    Text("Your Rooms")
+                                        .font(.title2.bold())
+                                        .foregroundStyle(
+                                            selectedTheme.colors(for: colorScheme)
+                                                .textPrimary)
+
+                                    Spacer()
+
+                                    Text("\(viewModel.myRooms.count) Total")
+                                        .font(.subheadline)
+                                        .foregroundStyle(
+                                            selectedTheme.colors(for: colorScheme)
+                                                .textSecondary
+                                        )
+                                }
+                                .padding(
+                                    .horizontal, horizontalSizeClass == .regular ? 32 : 20)
+
+                                // Rooms grid
+                                LazyVGrid(columns: gridColumns, spacing: 16) {
+                                    ForEach(Array(viewModel.myRooms.enumerated()), id: \.element.id) { index, room in
+                                        NavigationLink(value: room) {
+                                            EnhancedRoomCard(
+                                                room: room,
+                                                unreadCount: viewModel.unreadCounts[room.id] ?? 0,
+                                                typingText: viewModel.typingText(for: room.id),
+                                                isSelected: selectedRoomIndex == index
+                                            ) {
+                                                initiateLeaveRoom(room)
+                                            }
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(
+                                    .horizontal, horizontalSizeClass == .regular ? 32 : 16)
+                            }
+                        } else {
+                            ConnectionsPanelView(
+                                friends: viewModel.friends,
+                                incomingRequests: viewModel.incomingRequests,
+                                outgoingRequests: viewModel.outgoingRequests,
+                                selectedSection: selectedSection,
+                                startFriendChat: { friend in
+                                    directStartFriend = friend
+                                },
+                                removeFriend: { friend in
+                                    Task { await viewModel.removeFriend(friend) }
+                                },
+                                approveRequest: { request in
+                                    Task { await viewModel.approve(request) }
+                                },
+                                rejectRequest: { request in
+                                    Task { await viewModel.reject(request) }
+                                },
+                                cancelRequest: { request in
+                                    Task { await viewModel.cancelRequest(request) }
+                                },
+                                previewRequest: { request in
+                                    previewRequest = request
+                                },
+                                openOutgoingRequest: { request in
+                                    navigationState.path.append(
+                                        DraftDirectChatSession(
+                                            user: request.user,
+                                            roomType: request.roomType,
+                                            messageLifetime: request.messageLifetime,
+                                            requestId: request.id
+                                        )
+                                    )
+                                }
+                            )
+                        }
+                        // Footer spacer to ensure floating/hovering buttons don't cover last items
+                        Color.clear
+                            .frame(height: 100)
+                    }
+                    .padding(.top, 16)
+                    .background(
+                        UnevenRoundedRectangle(topLeadingRadius: 32, topTrailingRadius: 32)
+                            .fill(selectedTheme.colors(for: colorScheme).background)
+                            .shadow(
+                                color: selectedTheme.colors(for: colorScheme).primary[0]
+                                    .opacity(0.1),
+                                radius: 20,
+                                y: -10
+                            )
+                            .padding(.bottom, -1000)
+                    )
+                }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    // Sticky header — outside ScrollView, fully tappable
                     VStack(spacing: verticalSizeClass == .compact ? 12 : 20) {
                         // Status bar spacing
                         Color.clear
@@ -219,7 +346,7 @@ private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String
                                 VStack(alignment: .leading, spacing: 4) {
                                     let title = selectedSection == .chats ? "Chat Rooms" : selectedSection.rawValue
                                     let titleSize = verticalSizeClass == .compact ? CGFloat(28) : CGFloat(34)
-                                    
+
                                     Text(title)
                                         .font(.system(size: titleSize, weight: .bold))
                                         .foregroundStyle(
@@ -327,163 +454,6 @@ private func joinRoom(_ room: ChatRoom, password: String? = nil) async -> String
                         .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 24)
                         .padding(.bottom, verticalSizeClass == .compact ? 36 : 44)
                     }
-                    .zIndex(0)
-
-                    // Scrollable chat list/content
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            // Transparent spacer so content starts just below sticky header
-                            Color.clear
-                                .frame(height: headerHeight - 20)
-                                .allowsHitTesting(false)
-
-                            // Main content
-                            LazyVStack(spacing: 16) {
-                                if selectedSection == .chats && viewModel.myRooms.isEmpty {
-                                    if viewModel.isLoading {
-                                        VStack(spacing: 16) {
-                                            ProgressView()
-                                                .scaleEffect(1.5)
-                                            Text("Loading Rooms...")
-                                                .font(.subheadline)
-                                                .foregroundStyle(.gray)
-                                        }
-                                        .frame(maxWidth: .infinity)
-                                        .padding(40)
-                                    } else {
-                                        VStack(spacing: 16) {
-                                            Image(systemName: "bubble.left.circle.fill")
-                                                .font(.system(size: 60))
-                                                .foregroundStyle(
-                                                    LinearGradient(
-                                                        colors: selectedTheme.colors(for: colorScheme)
-                                                            .primary,
-                                                        startPoint: .topLeading,
-                                                        endPoint: .bottomTrailing
-                                                    )
-                                                )
-                                                .padding(.bottom, 8)
-
-                                            Text("No Active Rooms")
-                                                .font(.title2.bold())
-                                                .foregroundStyle(
-                                                    selectedTheme.colors(for: colorScheme).textPrimary)
-
-                                            Text("Create a new room to start chatting")
-                                                .font(.subheadline)
-                                                .foregroundStyle(
-                                                    selectedTheme.colors(for: colorScheme).textSecondary
-                                                )
-                                                .multilineTextAlignment(.center)
-                                        }
-                                        .frame(maxWidth: .infinity)
-                                        .padding(40)
-                                    }
-                                } else if selectedSection == .chats {
-                                    VStack(spacing: 24) {
-                                        // Section header
-                                        HStack {
-                                            Text("Your Rooms")
-                                                .font(.title2.bold())
-                                                .foregroundStyle(
-                                                    selectedTheme.colors(for: colorScheme)
-                                                        .textPrimary)
-
-                                            Spacer()
-
-                                            Text("\(viewModel.myRooms.count) Total")
-                                                .font(.subheadline)
-                                                .foregroundStyle(
-                                                    selectedTheme.colors(for: colorScheme)
-                                                        .textSecondary
-                                                )
-                                        }
-                                        .padding(
-                                            .horizontal, horizontalSizeClass == .regular ? 32 : 20)
-
-                                        // Rooms grid
-                                        LazyVGrid(columns: gridColumns, spacing: 16) {
-                                            ForEach(Array(viewModel.myRooms.enumerated()), id: \.element.id) { index, room in
-                                                NavigationLink(value: room) {
-                                                    EnhancedRoomCard(
-                                                        room: room,
-                                                        unreadCount: viewModel.unreadCounts[room.id] ?? 0,
-                                                        typingText: viewModel.typingText(for: room.id),
-                                                        isSelected: selectedRoomIndex == index
-                                                    ) {
-                                                        initiateLeaveRoom(room)
-                                                    }
-                                                }
-                                                .buttonStyle(.plain)
-                                            }
-                                        }
-                                        .padding(
-                                            .horizontal, horizontalSizeClass == .regular ? 32 : 16)
-                                    }
-                                } else {
-                                    ConnectionsPanelView(
-                                        friends: viewModel.friends,
-                                        incomingRequests: viewModel.incomingRequests,
-                                        outgoingRequests: viewModel.outgoingRequests,
-                                        selectedSection: selectedSection,
-                                        startFriendChat: { friend in
-                                            directStartFriend = friend
-                                        },
-                                        removeFriend: { friend in
-                                            Task { await viewModel.removeFriend(friend) }
-                                        },
-                                        approveRequest: { request in
-                                            Task { await viewModel.approve(request) }
-                                        },
-                                        rejectRequest: { request in
-                                            Task { await viewModel.reject(request) }
-                                        },
-                                        cancelRequest: { request in
-                                            Task { await viewModel.cancelRequest(request) }
-                                        },
-                                        previewRequest: { request in
-                                            previewRequest = request
-                                        },
-                                        openOutgoingRequest: { request in
-                                            navigationState.path.append(
-                                                DraftDirectChatSession(
-                                                    user: request.user,
-                                                    roomType: request.roomType,
-                                                    messageLifetime: request.messageLifetime,
-                                                    requestId: request.id
-                                                )
-                                            )
-                                        }
-                                    )
-                                }
-                                // Footer spacer to ensure floating/hovering buttons don't cover last items
-                                Color.clear
-                                    .frame(height: 100)
-                            }
-                            .padding(.top, 16)
-                            .background(
-                                ZStack {
-                                    // Main background with shadow
-                                    RoundedRectangle(cornerRadius: 32)
-                                        .fill(selectedTheme.colors(for: colorScheme).background)
-                                        .shadow(
-                                            color: selectedTheme.colors(for: colorScheme).primary[0]
-                                                .opacity(0.1),
-                                            radius: 20,
-                                            y: -10
-                                        )
-
-                                    // Extended top edge overlay
-                                    Rectangle()
-                                        .fill(selectedTheme.colors(for: colorScheme).background)
-                                        .frame(height: 50)  // Increased height
-                                        .offset(y: -25)  // Adjusted offset
-                                }
-                            )
-                            
-                        }
-                    }
-                    .zIndex(1)
                 }
             }
             .navigationDestination(for: ChatRoom.self) { room in

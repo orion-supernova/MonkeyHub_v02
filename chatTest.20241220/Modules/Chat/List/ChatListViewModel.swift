@@ -20,6 +20,18 @@ class ChatListViewModel: ObservableObject {
         }
     }
 
+    enum JoinRoomResult {
+        case success(ChatRoom)
+        case passwordRequired(ChatRoom)
+        case wrongPassword
+        case failed(String)
+    }
+
+    enum LeaveAction {
+        case confirmLeave(ChatRoom)
+        case confirmDelete(ChatRoom)
+    }
+
     @Published var myRooms: [ChatRoom] = []
     @Published var unreadCounts: [String: Int] = [:]
     @Published var roomListTyping: [String: [String]] = [:]
@@ -31,6 +43,10 @@ class ChatListViewModel: ObservableObject {
     private let repository = ChatRepository.shared
     private let convexAPI = ConvexChatAPI.shared
     private var cancellables = Set<AnyCancellable>()
+
+    private var userId: String {
+        userDefaults.string(forKey: userIdUserDefaultsKey) ?? ""
+    }
 
     init() {
         setupBindings()
@@ -68,6 +84,8 @@ class ChatListViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    // MARK: - Lifecycle
+
     func loadRooms() async {
         isLoading = true
         await repository.ensureRoomsLoaded()
@@ -80,14 +98,123 @@ class ChatListViewModel: ObservableObject {
         isLoading = false
     }
 
+    // MARK: - Room Operations
+
+    func createRoom(name: String, type: RoomType, messageLifetime: TimeInterval?, password: String?) async -> ChatRoom? {
+        let passwordHash = password.map { SecurityUtils.sha256($0) }
+        do {
+            let roomId = try await convexAPI.createRoom(
+                name: name,
+                userId: userId,
+                isPrivate: true,
+                type: type,
+                messageLifetime: messageLifetime,
+                passwordHash: passwordHash
+            )
+            let room = ChatRoom(
+                id: roomId,
+                name: name,
+                createdBy: userId,
+                participants: [userId],
+                memberCount: 1,
+                type: type,
+                messageLifetime: messageLifetime,
+                hasPassword: passwordHash != nil
+            )
+            repository.addRoomOptimistically(room)
+            return room
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+            return nil
+        }
+    }
+
+    func joinRoom(_ room: ChatRoom, password: String? = nil) async -> JoinRoomResult {
+        let passwordHash = password.map { SecurityUtils.sha256($0) }
+        do {
+            try await convexAPI.joinRoom(roomId: room.id, userId: userId, passwordHash: passwordHash)
+            await repository.fetchRooms(force: true)
+            if let joinedRoom = myRooms.first(where: { $0.id == room.id }) {
+                return .success(joinedRoom)
+            }
+            return .success(room)
+        } catch {
+            let message = friendlyErrorMessage(error)
+            if message.contains("ROOM_PASSWORD_REQUIRED") {
+                return .passwordRequired(room)
+            } else if message.contains("ROOM_PASSWORD_INVALID") {
+                return .wrongPassword
+            } else {
+                return .failed(message)
+            }
+        }
+    }
+
+    func initiateLeaveRoom(_ room: ChatRoom) -> LeaveAction {
+        let isLastUser = room.participants.count == 1 && room.participants.contains(userId)
+        if isLastUser {
+            return .confirmDelete(room)
+        } else {
+            return .confirmLeave(room)
+        }
+    }
+
+    func leaveRoom(_ room: ChatRoom) async {
+        repository.removeRoomOptimistically(room.id)
+        do {
+            try await convexAPI.leaveRoom(roomId: room.id, userId: userId)
+        } catch {
+            repository.addRoomOptimistically(room)
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+        }
+    }
+
+    func deleteRoomCompletely(_ room: ChatRoom) async {
+        repository.removeRoomOptimistically(room.id)
+        do {
+            try await convexAPI.deleteRoom(roomId: room.id, userId: userId)
+        } catch {
+            repository.addRoomOptimistically(room)
+            AlertManager.shared.showAlert(title: "Error", message: error.localizedDescription)
+        }
+    }
+
+    // MARK: - Friend / DM Operations
+
+    func startFriendConversation(with friend: ChatUser, roomType: RoomType, messageLifetime: TimeInterval?) async -> ChatRoom? {
+        do {
+            let roomId = try await convexAPI.getOrCreateDM(
+                userId: userId,
+                friendId: friend.id,
+                roomType: roomType,
+                messageLifetime: messageLifetime
+            )
+            let room = ChatRoom(
+                id: roomId,
+                name: "Chat with \(friend.displayName)",
+                createdBy: userId,
+                participants: [userId, friend.id],
+                memberCount: 2,
+                isPrivate: true,
+                type: roomType,
+                messageLifetime: messageLifetime
+            )
+            if !myRooms.contains(where: { $0.id == room.id }) {
+                repository.addRoomOptimistically(room)
+            }
+            return room
+        } catch {
+            AlertManager.shared.showAlert(title: "Error", message: AppLogger.shared.friendlyError(error))
+            return nil
+        }
+    }
+
     func approve(_ request: FriendRequest) async {
-        let userId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
         guard !userId.isEmpty else { return }
 
         do {
             let roomId = try await convexAPI.approveDirectRequest(userId: userId, requesterId: request.user.id)
             if let roomId {
-                // Request had messages — room was created, navigate straight to it.
                 let room = ChatRoom(
                     id: roomId,
                     name: "Chat with \(request.user.displayName)",
@@ -101,14 +228,12 @@ class ChatListViewModel: ObservableObject {
                 repository.addRoomOptimistically(room)
                 NavigationStateManager.shared.navigateToRoom(room)
             }
-            // else: plain friend request, no room yet — friends list will update via subscription.
         } catch {
             AlertManager.shared.showAlert(title: "Error", message: AppLogger.shared.friendlyError(error))
         }
     }
 
     func removeFriend(_ friend: ChatUser) async {
-        let userId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
         guard !userId.isEmpty else { return }
         do {
             try await convexAPI.removeFriend(userId: userId, friendId: friend.id)
@@ -118,7 +243,6 @@ class ChatListViewModel: ObservableObject {
     }
 
     func reject(_ request: FriendRequest) async {
-        let userId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
         guard !userId.isEmpty else { return }
 
         do {
@@ -129,7 +253,6 @@ class ChatListViewModel: ObservableObject {
     }
 
     func cancelRequest(_ request: FriendRequest) async {
-        let userId = UserDefaults.standard.string(forKey: userIdUserDefaultsKey) ?? ""
         guard !userId.isEmpty else { return }
 
         do {
@@ -139,9 +262,30 @@ class ChatListViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Auth
+
+    func signOut() {
+        ConvexAuthService.shared.signOut()
+    }
+
+    // MARK: - Computed
+
     var totalPendingRequestCount: Int {
         incomingRequests.count + outgoingRequests.count
     }
+
+    func sectionSummary(for section: Section) -> String {
+        switch section {
+        case .chats:
+            "^[\(myRooms.count) Active Room](inflect: true)"
+        case .friends:
+            "^[\(friends.count) Friend](inflect: true)"
+        case .requests:
+            "^[\(totalPendingRequestCount) Pending Request](inflect: true)"
+        }
+    }
+
+    // MARK: - Room Helpers
 
     func addRoomOptimistically(_ room: ChatRoom) {
         repository.addRoomOptimistically(room)
@@ -155,7 +299,6 @@ class ChatListViewModel: ObservableObject {
         repository.markRoomAsRead(roomId: roomId)
     }
 
-    /// Returns a human-readable typing string for the room list row, or nil if nobody is typing.
     func typingText(for roomId: String) -> String? {
         guard let names = roomListTyping[roomId], !names.isEmpty else { return nil }
         switch names.count {

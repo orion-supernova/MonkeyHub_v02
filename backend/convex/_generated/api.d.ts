@@ -9,6 +9,8 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as calls from "../calls.js";
+import type * as crons from "../crons.js";
 import type * as files from "../files.js";
 import type * as friends from "../friends.js";
 import type * as messages from "../messages.js";
@@ -17,6 +19,8 @@ import type * as reactions from "../reactions.js";
 import type * as rooms from "../rooms.js";
 import type * as typing from "../typing.js";
 import type * as users from "../users.js";
+import type * as voipPush from "../voipPush.js";
+import type * as voipTokens from "../voipTokens.js";
 
 import type {
   ApiFromModules,
@@ -26,6 +30,8 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  calls: typeof calls;
+  crons: typeof crons;
   files: typeof files;
   friends: typeof friends;
   messages: typeof messages;
@@ -34,6 +40,8 @@ declare const fullApi: ApiFromModules<{
   rooms: typeof rooms;
   typing: typeof typing;
   users: typeof users;
+  voipPush: typeof voipPush;
+  voipTokens: typeof voipTokens;
 }>;
 
 /**

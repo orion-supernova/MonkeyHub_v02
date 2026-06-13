@@ -18,10 +18,12 @@ struct MessageView: View {
     let onRequestReactionPicker: () -> Void
     let isReactionPickerActive: Bool
     var onResend: (() -> Void)? = nil
+    var onReply: (() -> Void)? = nil
 
     let imageZoomNamespace: Namespace.ID
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAllReactions = false
+    @State private var showThread = false
 
     var body: some View {
         if message.senderId == ChatMessage.systemSenderId {
@@ -72,6 +74,12 @@ struct MessageView: View {
                 }
             }
         }
+        .sheet(isPresented: $showThread) {
+            ThreadView(
+                rootMessageId: message.replyToId ?? message.id,
+                currentUserId: currentUserId
+            )
+        }
     }
 
     @ViewBuilder
@@ -86,6 +94,14 @@ struct MessageView: View {
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(.secondary)
                             .padding(.leading, 12)
+                    }
+
+                    if let preview = message.replyToPreview {
+                        Button { showThread = true } label: {
+                            ReplyTetherView(preview: preview, isCurrentUser: isCurrentUser)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(isCurrentUser ? .trailing : .leading, 8)
                     }
 
                     ZStack(alignment: isCurrentUser ? .bottomTrailing : .bottomLeading) {
@@ -170,6 +186,12 @@ struct MessageView: View {
                         Label("React", systemImage: "face.smiling")
                     }
 
+                    if let onReply {
+                        Button(action: onReply) {
+                            Label("Reply", systemImage: "arrowshape.turn.up.left")
+                        }
+                    }
+
                     if isCurrentUser {
                         Button(role: .destructive, action: onDelete) {
                             Label("Delete", systemImage: "trash")
@@ -217,10 +239,8 @@ struct MessageView: View {
     @ViewBuilder
     private var messageContent: some View {
         switch message.type {
-        case .text:
-            Text(message.content)
-                .font(.system(size: 16))
-                .foregroundColor(isCurrentUser ? .white : (colorScheme == .dark ? .white : .primary))
+        case .text, .url:
+            LinkifiedTextMessage(content: message.content, isCurrentUser: isCurrentUser)
         case .image:
             ZStack {
                 ConvexImageView(
@@ -298,6 +318,99 @@ struct MessageView: View {
                 emoji: emoji, on: message.id, in: message.roomId
             )
         }
+    }
+}
+
+// MARK: - Reply Tether (denormalized parent preview above a reply bubble)
+
+struct ReplyTetherView: View {
+    let preview: ReplyPreview
+    let isCurrentUser: Bool
+    @AppStorage(AppearanceKeys.replyStyle) private var replyStyle = ReplyStyle.phantomEcho
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var previewText: String {
+        if preview.isParentDeleted { return "Message removed" }
+        switch preview.type {
+        case .image: return "📷 Photo"
+        case .video: return "🎬 Video"
+        case .audio: return "🎙 Voice message"
+        default: return preview.contentPreview
+        }
+    }
+
+    var body: some View {
+        switch replyStyle {
+        case .phantomEcho: phantomEcho
+        case .stickyNote: stickyNote
+        case .comicTail: comicTail
+        case .classic: classic
+        }
+    }
+
+    private var labelStack: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(preview.senderName)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+            Text(previewText)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .italic(preview.isParentDeleted)
+                .lineLimit(1)
+        }
+    }
+
+    // Translucent ghosted bar (default).
+    private var phantomEcho: some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 1.5).fill(Color.accentColor).frame(width: 3)
+            labelStack
+        }
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .frame(maxWidth: 220, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05)))
+        .opacity(0.85)
+    }
+
+    // Paper sticky note, slightly tilted.
+    private var stickyNote: some View {
+        HStack(spacing: 6) { labelStack }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .frame(maxWidth: 220, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 4)
+                .fill(Color(hex: "FFE08A").opacity(colorScheme == .dark ? 0.85 : 1.0)))
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(.black.opacity(0.08)))
+            .shadow(color: .black.opacity(0.15), radius: 2, x: 1, y: 2)
+            .rotationEffect(.degrees(isCurrentUser ? 1.5 : -1.5))
+    }
+
+    // Comic speech bubble with a little tail.
+    private var comicTail: some View {
+        HStack(spacing: 6) { labelStack }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .frame(maxWidth: 220, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.06))
+            )
+            .overlay(alignment: .bottomLeading) {
+                Image(systemName: "arrowtriangle.down.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.06))
+                    .offset(x: 12, y: 6)
+            }
+    }
+
+    // Classic email-style left quote bar.
+    private var classic: some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(Color.accentColor.opacity(0.6)).frame(width: 2)
+            labelStack
+        }
+        .padding(.leading, 4).padding(.vertical, 2)
+        .frame(maxWidth: 220, alignment: .leading)
     }
 }
 

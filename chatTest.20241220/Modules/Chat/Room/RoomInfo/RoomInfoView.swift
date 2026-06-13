@@ -696,6 +696,7 @@ struct RoomInfoView: View {
                             isCreator: member.id == viewModel.room.createdBy,
                             isCurrentUser: member.id == viewModel.currentUserId,
                             canRemove: viewModel.isCreator && member.id != viewModel.currentUserId,
+                            roomId: viewModel.room.id,
                             onRemove: {
                                 Task {
                                     await viewModel.removeMember(member.id)
@@ -776,6 +777,7 @@ struct MemberRowView: View {
     let isCreator: Bool
     let isCurrentUser: Bool
     let canRemove: Bool
+    var roomId: String = ""
     let onRemove: () -> Void
     
     @Environment(\.colorScheme) private var colorScheme
@@ -850,7 +852,12 @@ struct MemberRowView: View {
             }
             
             Spacer()
-            
+
+            if !isCurrentUser, !roomId.isEmpty {
+                CallButton(peer: member, roomId: roomId,
+                           tint: selectedTheme.colors(for: colorScheme).accent)
+            }
+
             if canRemove {
                 Button(role: .destructive) {
                     onRemove()
@@ -868,7 +875,7 @@ struct MemberRowView: View {
         }
         .padding()
     }
-    
+
 }
 
 // MARK: - Zoomable Avatar Overlay

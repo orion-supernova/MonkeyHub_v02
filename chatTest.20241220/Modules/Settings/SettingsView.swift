@@ -2,8 +2,10 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @Environment(\.colorScheme) private var colorScheme
     @State private var showingSignOutAlert = false
+    @State private var showingDeleteAccountAlert = false
     @State private var animateContent = false
     @State private var isShowingThemeSheet = false
     @State private var currentUser: ChatUser?
@@ -47,14 +49,27 @@ struct SettingsView: View {
 
     private var themeSection: some View {
         SettingsSection(title: "APPEARANCE", padding: 24) {
-            Button {
-                withAnimation(.spring(duration: 0.3)) {
-                    isShowingThemeSheet = true
+            VStack(spacing: 16) {
+                Button {
+                    withAnimation(.spring(duration: 0.3)) {
+                        isShowingThemeSheet = true
+                    }
+                } label: {
+                    ThemeRowContent()
                 }
-            } label: {
-                ThemeRowContent()
+                .buttonStyle(.plain)
+
+                NavigationLink {
+                    AppearanceSettingsView()
+                } label: {
+                    SettingsRow(
+                        icon: "paintbrush.pointed.fill",
+                        title: "Appearance & Chat",
+                        color: selectedTheme.colors(for: colorScheme).accent
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -97,17 +112,37 @@ struct SettingsView: View {
     private var accountSection: some View {
         SettingsSection(title: "ACCOUNT") {
             VStack(spacing: 16) {
-                SettingsRow(
+                SettingsToggleRow(
                     icon: "bell",
                     title: "Notifications",
-                    color: selectedTheme.colors(for: colorScheme).accent
+                    color: selectedTheme.colors(for: colorScheme).accent,
+                    isOn: $notificationsEnabled
                 )
+                .onChange(of: notificationsEnabled) { _, enabled in
+                    PushNotificationManager.shared.setNotificationsEnabled(enabled)
+                }
 
-                SettingsRow(
-                    icon: "lock.fill",
-                    title: "Privacy",
-                    color: selectedTheme.colors(for: colorScheme).accent
-                )
+                NavigationLink {
+                    ProfileVisibilityView()
+                } label: {
+                    SettingsRow(
+                        icon: "lock.fill",
+                        title: "Privacy",
+                        color: selectedTheme.colors(for: colorScheme).accent
+                    )
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink {
+                    BlockedUsersView()
+                } label: {
+                    SettingsRow(
+                        icon: "hand.raised.fill",
+                        title: "Blocked Users",
+                        color: selectedTheme.colors(for: colorScheme).accent
+                    )
+                }
+                .buttonStyle(.plain)
 
                 Button {
                     showingSignOutAlert = true
@@ -115,6 +150,16 @@ struct SettingsView: View {
                     SettingsRow(
                         icon: "rectangle.portrait.and.arrow.right",
                         title: "Sign Out",
+                        color: selectedTheme.colors(for: colorScheme).destructive
+                    )
+                }
+
+                Button {
+                    showingDeleteAccountAlert = true
+                } label: {
+                    SettingsRow(
+                        icon: "trash.fill",
+                        title: "Delete Account",
                         color: selectedTheme.colors(for: colorScheme).destructive
                     )
                 }
@@ -441,6 +486,14 @@ struct SettingsView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
+            .alert("Delete Account", isPresented: $showingDeleteAccountAlert) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    Task { await ConvexAuthService.shared.deleteAccount() }
+                }
+            } message: {
+                Text("This permanently deletes your account, messages, and rooms. This cannot be undone.")
+            }
         }
         .onAppear {
             navigationState.currentScreen = .settings
@@ -641,6 +694,44 @@ struct ThemeButton: View {
     }
 }
 
+/// A settings row with a trailing toggle instead of a chevron.
+struct SettingsToggleRow: View {
+    let icon: String
+    let title: String
+    let color: Color
+    @Binding var isOn: Bool
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack {
+            Image(systemName: icon)
+                .font(.headline)
+                .foregroundStyle(color)
+                .frame(width: 32)
+
+            Toggle(isOn: $isOn) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
+            }
+            .tint(selectedTheme.colors(for: colorScheme).accent)
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(
+                    selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.1),
+                    lineWidth: 1
+                )
+        )
+    }
+}
+
 struct SettingsRow: View {
     let icon: String
     let title: String
@@ -687,6 +778,9 @@ private func themeIcon(for theme: AppTheme) -> String {
     case .retroWave: return "sunset.fill"
     case .neonNight: return "sparkles"
     case .deepOcean: return "water.waves"
+    case .bioOrganic: return "leaf.fill"
+    case .vaultNoir: return "shield.lefthalf.filled"
+    case .risographPop: return "circle.hexagongrid.fill"
     }
 }
 

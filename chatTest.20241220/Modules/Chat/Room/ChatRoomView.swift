@@ -154,7 +154,11 @@ struct ChatRoomView: View {
             // Check if user is still a member of this room
             await checkMembership()
             await viewModel.loadMessages()
+            await viewModel.markRead()
             isLoading = false
+        }
+        .onChange(of: viewModel.messages.count) { _, _ in
+            Task { await viewModel.markRead() }
         }
         .onAppear {
             navigationState.currentScreen = .chatRoom
@@ -331,6 +335,14 @@ struct ChatRoomView: View {
                 if viewModel.isFetchingNewMessages {
                     SyncingIndicatorView()
                         .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                if let replyTarget = viewModel.replyingTo {
+                    ComposerReplyCard(message: replyTarget) {
+                        withAnimation(.spring(response: 0.3)) { viewModel.replyingTo = nil }
+                    }
+                    .padding(.horizontal, 16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
                 MessageInputView(

@@ -56,6 +56,8 @@ struct ConvexMessageDoc: Decodable {
     let name: String?
     let reactions: [ConvexReactionDoc]?
     let expiresAt: Double?  // Unix ms timestamp — set for Chamber of Secrets messages
+    let replyToId: String?
+    let replyToPreview: ConvexReplyPreviewDoc?
 
     func toChatMessage() -> ChatMessage {
         let isSystem = type == "system"
@@ -71,7 +73,28 @@ struct ConvexMessageDoc: Decodable {
             assetURL: nil,
             status: .sent,
             reactions: (reactions ?? []).map { $0.toMessageReaction() },
-            expiresAt: expiresAt.map { Date(timeIntervalSince1970: $0 / 1000) }
+            expiresAt: expiresAt.map { Date(timeIntervalSince1970: $0 / 1000) },
+            replyToId: replyToId,
+            replyToPreview: replyToPreview?.toReplyPreview()
+        )
+    }
+}
+
+/// Denormalized reply-parent snapshot nested inside a message document.
+struct ConvexReplyPreviewDoc: Decodable {
+    let senderId: String
+    let senderName: String
+    let contentPreview: String
+    let type: String
+    let mediaStorageId: String?
+
+    func toReplyPreview() -> ReplyPreview {
+        ReplyPreview(
+            senderId: senderId,
+            senderName: senderName,
+            contentPreview: contentPreview,
+            type: MessageType(rawValue: type) ?? .text,
+            mediaStorageId: mediaStorageId
         )
     }
 }
@@ -116,6 +139,10 @@ struct ConvexUserDoc: Decodable {
     let avatarStorageId: String?
     let status: String?
     let role: String? // returned by rooms:getMembers
+    let lastSeen: Double?
+    let visibility: ConvexVisibilityDoc?  // self-view only (users:getProfile)
+    let isRedacted: Bool?
+    let acceptsFriendRequests: Bool?
 
     // Optional fields for friendships/search
     let friendshipStatus: String?
@@ -131,7 +158,38 @@ struct ConvexUserDoc: Decodable {
             bio: bio,
             friendshipStatus: FriendshipStatus(rawValue: friendshipStatus ?? "") ?? .none,
             requestId: requestId,
-            role: role
+            role: role,
+            status: status,
+            lastSeen: lastSeen.map { Date(timeIntervalSince1970: $0 / 1000) },
+            visibility: visibility?.toProfileVisibility(acceptsFriendRequests: acceptsFriendRequests),
+            isRedacted: isRedacted ?? false,
+            acceptsFriendRequests: acceptsFriendRequests ?? true
+        )
+    }
+}
+
+/// The per-field visibility object embedded in `users:getProfile` (self only).
+struct ConvexVisibilityDoc: Decodable {
+    let avatar: String?
+    let status: String?
+    let lastSeen: String?
+    let seen: String?
+    let friendRequests: String?
+
+    func toProfileVisibility(acceptsFriendRequests: Bool?) -> ProfileVisibility {
+        // Match the backend `getProfile.canSee` contract: an UNSET field defaults
+        // to "public" for avatar/status/lastSeen (so the UI reflects what other
+        // users can actually see), while read receipts (`seen`) default to
+        // "nobody" (privacy-first — getReadState omits unless explicitly opened).
+        func level(_ raw: String?, _ fallback: VisibilityLevel) -> VisibilityLevel {
+            raw.flatMap { VisibilityLevel(rawValue: $0) } ?? fallback
+        }
+        return ProfileVisibility(
+            avatar: level(avatar, .everyone),
+            status: level(status, .everyone),
+            lastSeen: level(lastSeen, .everyone),
+            seen: level(seen, .nobody),
+            acceptsFriendRequests: acceptsFriendRequests ?? (friendRequests != "nobody")
         )
     }
 }
@@ -322,7 +380,8 @@ final class ConvexChatAPI {
         content: String,
         type: MessageType = .text,
         senderName: String,
-        mediaStorageId: String? = nil
+        mediaStorageId: String? = nil,
+        replyToId: String? = nil
     ) async throws -> String {
         var args: [String: ConvexEncodable?] = [
             "roomId": roomId,
@@ -333,6 +392,9 @@ final class ConvexChatAPI {
         ]
         if let mediaStorageId {
             args["mediaStorageId"] = mediaStorageId
+        }
+        if let replyToId {
+            args["replyToId"] = replyToId
         }
         let messageId: String = try await convex.mutation("messages:send", with: args)
         return messageId

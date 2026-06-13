@@ -330,7 +330,8 @@ class ChatRepository: ObservableObject {
                 content: message.content,
                 type: message.type,
                 senderName: message.senderName,
-                mediaStorageId: message.mediaStorageId
+                mediaStorageId: message.mediaStorageId,
+                replyToId: message.replyToId
             )
             // Don't remove optimistic here — handleMessagesSubscriptionUpdate will
             // drop it atomically when the server confirms the same content.

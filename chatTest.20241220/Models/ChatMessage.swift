@@ -15,6 +15,22 @@ enum MessageStatus: String, Codable {
     case error
 }
 
+/// Denormalized snapshot of a replied-to parent message, captured at send time
+/// so the inline reply tether keeps rendering even after the parent is deleted
+/// or expires. A deleted parent is signalled by `contentPreview == deletedSentinel`.
+struct ReplyPreview: Equatable, Codable {
+    let senderId: String
+    let senderName: String
+    var contentPreview: String
+    let type: MessageType
+    var mediaStorageId: String?
+
+    /// Backend sentinel placed in `contentPreview` when the parent is removed.
+    static let deletedSentinel = "__DELETED__"
+
+    var isParentDeleted: Bool { contentPreview == Self.deletedSentinel }
+}
+
 struct ChatMessage: Identifiable, Equatable, Codable {
     let id: String
     let senderId: String
@@ -28,6 +44,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     var status: MessageStatus
     var reactions: [MessageReaction]
     var expiresAt: Date?            // Non-nil for Chamber of Secrets messages
+    var replyToId: String?          // Parent message id when this is a reply
+    var replyToPreview: ReplyPreview?  // Denormalized parent snapshot for the tether
 
     static let systemSenderId = "system"
     static let systemSenderName = "System"
@@ -39,6 +57,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         case mediaStorageId, status, reactions
         case assetFileName
         case expiresAt
+        case replyToId, replyToPreview
     }
 
     init(
@@ -53,7 +72,9 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         assetURL: URL? = nil,
         status: MessageStatus = .sent,
         reactions: [MessageReaction] = [],
-        expiresAt: Date? = nil
+        expiresAt: Date? = nil,
+        replyToId: String? = nil,
+        replyToPreview: ReplyPreview? = nil
     ) {
         self.id = id
         self.senderId = senderId
@@ -67,6 +88,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         self.status = status
         self.reactions = reactions
         self.expiresAt = expiresAt
+        self.replyToId = replyToId
+        self.replyToPreview = replyToPreview
     }
 
     // MARK: - Codable
@@ -84,6 +107,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         reactions = try c.decodeIfPresent([MessageReaction].self, forKey: .reactions) ?? []
         mediaStorageId = try c.decodeIfPresent(String.self, forKey: .mediaStorageId)
         expiresAt = try c.decodeIfPresent(Date.self, forKey: .expiresAt)
+        replyToId = try c.decodeIfPresent(String.self, forKey: .replyToId)
+        replyToPreview = try c.decodeIfPresent(ReplyPreview.self, forKey: .replyToPreview)
 
         // Re-base local asset URL from filename only
         let fileName = try c.decodeIfPresent(String.self, forKey: .assetFileName)
@@ -103,6 +128,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         try c.encode(reactions, forKey: .reactions)
         try c.encodeIfPresent(mediaStorageId, forKey: .mediaStorageId)
         try c.encodeIfPresent(expiresAt, forKey: .expiresAt)
+        try c.encodeIfPresent(replyToId, forKey: .replyToId)
+        try c.encodeIfPresent(replyToPreview, forKey: .replyToPreview)
         // Persist filename only, not absolute URL
         try c.encodeIfPresent(assetURL?.lastPathComponent, forKey: .assetFileName)
     }
@@ -120,6 +147,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         lhs.status == rhs.status &&
         lhs.reactions.count == rhs.reactions.count &&
         lhs.assetURL == rhs.assetURL &&
-        lhs.expiresAt == rhs.expiresAt
+        lhs.expiresAt == rhs.expiresAt &&
+        lhs.replyToPreview == rhs.replyToPreview
     }
 }

@@ -11,6 +11,11 @@ struct ChatUser: Identifiable, Hashable {
     let friendshipStatus: FriendshipStatus
     let requestId: String?
     let role: String?
+    let status: String?            // "online" | "away" | "offline" (presence)
+    let lastSeen: Date?
+    let visibility: ProfileVisibility?  // self-view only; nil for other viewers
+    let isRedacted: Bool           // some profile fields hidden by the subject's privacy
+    let acceptsFriendRequests: Bool
 
     init(
         id: String,
@@ -22,7 +27,12 @@ struct ChatUser: Identifiable, Hashable {
         deviceTokens: [String]? = nil,
         friendshipStatus: FriendshipStatus = .none,
         requestId: String? = nil,
-        role: String? = nil
+        role: String? = nil,
+        status: String? = nil,
+        lastSeen: Date? = nil,
+        visibility: ProfileVisibility? = nil,
+        isRedacted: Bool = false,
+        acceptsFriendRequests: Bool = true
     ) {
         self.id = id
         self.name = name
@@ -34,7 +44,15 @@ struct ChatUser: Identifiable, Hashable {
         self.friendshipStatus = friendshipStatus
         self.requestId = requestId
         self.role = role
+        self.status = status
+        self.lastSeen = lastSeen
+        self.visibility = visibility
+        self.isRedacted = isRedacted
+        self.acceptsFriendRequests = acceptsFriendRequests
     }
+
+    /// Presence convenience.
+    var isOnline: Bool { status == "online" }
 
     /// Best available display name — name, then username
     var displayName: String {

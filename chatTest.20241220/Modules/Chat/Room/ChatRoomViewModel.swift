@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import ConvexMobile
 
 @MainActor
 class ChatRoomViewModel: ObservableObject {
@@ -7,6 +8,11 @@ class ChatRoomViewModel: ObservableObject {
     @Published private(set) var isFetchingOlderMessages = false
     @Published private(set) var isFetchingNewMessages = false
     @Published var typingText: String? = nil
+    /// The message the composer is currently replying to (nil = not replying).
+    @Published var replyingTo: ChatMessage? = nil
+    /// Latest "read up to" timestamp among OTHER members — drives the "Seen"
+    /// indicator under the last outgoing message (privacy-filtered by backend).
+    @Published var othersLastReadAt: Date? = nil
 
     // Dependencies
     private let repository = ChatRepository.shared
@@ -19,7 +25,10 @@ class ChatRoomViewModel: ObservableObject {
     private var userId: String = ""
     private var userName: String = "User"
     private var cancellables = Set<AnyCancellable>()
+    private var readStateSubscription: AnyCancellable?
     private var canLoadMoreOlderMessages = true
+
+    private struct ReadStateRow: Decodable { let userId: String; let lastReadAt: Double }
 
     init(roomId: String) {
         self.roomId = roomId
@@ -30,8 +39,30 @@ class ChatRoomViewModel: ObservableObject {
         self.userName = cachedName ?? userDefaults.string(forKey: userNameUserDefaultsKey) ?? "User"
 
         setupBindings()
+        subscribeToReadState()
         typingManager.setActiveRoom(roomId)
         repository.setActiveRoom(roomId)
+    }
+
+    /// Live read-state subscription so the "Seen" indicator updates the moment
+    /// the peer reads — not just when this user next sends/receives.
+    private func subscribeToReadState() {
+        guard !userId.isEmpty else { return }
+        readStateSubscription = ConvexService.shared.client
+            .subscribe(to: "messages:getReadState",
+                       with: ["roomId": roomId, "viewerUserId": userId],
+                       yielding: [ReadStateRow].self)
+            .receive(on: RunLoop.main)
+            .sink(
+                receiveCompletion: { _ in },
+                receiveValue: { [weak self] rows in
+                    guard let self else { return }
+                    self.othersLastReadAt = rows
+                        .filter { $0.userId != self.userId }
+                        .map { Date(timeIntervalSince1970: $0.lastReadAt / 1000) }
+                        .max()
+                }
+            )
     }
 
     deinit {
@@ -101,14 +132,58 @@ class ChatRoomViewModel: ObservableObject {
 
     func sendMessage(_ text: String) async {
         onSendMessage()
+        // Capture and clear the reply target so the next message isn't a reply.
+        let parent = replyingTo
+        replyingTo = nil
         let message = ChatMessage(
             senderId: userId,
             senderName: userName,
             content: text,
             type: .text,
-            roomId: roomId
+            roomId: roomId,
+            replyToId: parent?.id,
+            replyToPreview: parent.map { previewFor($0) }
         )
         await repository.sendMessage(message)
+    }
+
+    /// Builds the optimistic denormalized parent snapshot for a reply, matching
+    /// what the backend stores so the tether renders before the server echo.
+    private func previewFor(_ parent: ChatMessage) -> ReplyPreview {
+        let contentPreview: String
+        switch parent.type {
+        case .image, .video, .audio: contentPreview = parent.content
+        default: contentPreview = String(parent.content.prefix(140)) // match backend slice(0,140)
+        }
+        return ReplyPreview(
+            senderId: parent.senderId,
+            senderName: parent.senderName,
+            contentPreview: contentPreview,
+            type: parent.type,
+            mediaStorageId: parent.mediaStorageId
+        )
+    }
+
+    /// Marks the room read up to now (for read receipts). Call on appear / new messages.
+    func markRead() async {
+        guard !userId.isEmpty else { return }
+        try? await ConvexChatAPI.shared.markRoomRead(roomId: roomId, userId: userId)
+        await refreshReadState()
+    }
+
+    /// Refreshes how far OTHER members have read, for the "Seen" indicator.
+    func refreshReadState() async {
+        guard !userId.isEmpty else { return }
+        guard let state = try? await ConvexChatAPI.shared.fetchReadState(roomId: roomId, viewerUserId: userId) else { return }
+        othersLastReadAt = state.filter { $0.key != userId }.values.max()
+    }
+
+    /// The id of the most recent message sent by the current user, if it has
+    /// been read by another member (used to anchor the "Seen" label).
+    var lastSeenOutgoingMessageId: String? {
+        guard let readAt = othersLastReadAt else { return nil }
+        guard let lastOwn = messages.last(where: { $0.senderId == userId && $0.status == .sent }) else { return nil }
+        return readAt >= lastOwn.timestamp ? lastOwn.id : nil
     }
 
     func sendImage(_ image: PlatformImage) async {

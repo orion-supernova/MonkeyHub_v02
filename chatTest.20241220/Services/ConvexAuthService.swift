@@ -23,6 +23,8 @@ final class ConvexAuthService: ObservableObject {
             Task { await loadCachedUserProfile(userId: storedId) }
             // Start real-time subscriptions
             ConvexSubscriptionManager.shared.subscribeToRooms(userId: storedId)
+            // Start VoIP call session (signaling + presence + push registration)
+            CallController.shared.startSession(userId: storedId)
             // Re-associate this device with the logged-in user in OneSignal.
             // Deferred to next run-loop tick so ConvexAuthService.shared is fully
             // initialised before PushNotificationManager accesses currentUserId.
@@ -67,6 +69,7 @@ final class ConvexAuthService: ObservableObject {
         }
         // Stop all subscriptions
         ConvexSubscriptionManager.shared.clearAll()
+        CallController.shared.endSession()
         // Disassociate this device from the user in OneSignal before clearing credentials.
         PushNotificationManager.shared.logout()
         KeychainService.delete(keychainUserIdKey)
@@ -74,6 +77,17 @@ final class ConvexAuthService: ObservableObject {
         userDefaults.removeObject(forKey: "userName")
         isAuthenticated = false
         cachedUser = nil
+    }
+
+    /// Permanently deletes the account (cascade on the backend), then signs out.
+    func deleteAccount() async {
+        guard let userId = currentUserId else { return }
+        do {
+            try await convex.mutationVoid("auth:deleteAccount", with: ["userId": userId])
+        } catch {
+            AppLogger.shared.logError("auth:deleteAccount", error)
+        }
+        signOut()
     }
 
     // MARK: - Helpers
@@ -98,6 +112,8 @@ final class ConvexAuthService: ObservableObject {
 
         // Start real-time subscriptions
         ConvexSubscriptionManager.shared.subscribeToRooms(userId: response.userId)
+        // Start VoIP call session (signaling + presence + push registration)
+        CallController.shared.startSession(userId: response.userId)
 
         // Associate this device with the newly authenticated user in OneSignal.
         // OneSignal.initialize was already called at app launch — this just links the user.

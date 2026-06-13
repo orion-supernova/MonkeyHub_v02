@@ -59,6 +59,59 @@ struct MessageInputView: View {
     }
 }
 
+// MARK: - Composer Reply Card
+
+/// Preview bar shown above the composer when replying to a message.
+struct ComposerReplyCard: View {
+    let message: ChatMessage
+    let onCancel: () -> Void
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var previewText: String {
+        switch message.type {
+        case .image: return "📷 Photo"
+        case .video: return "🎬 Video"
+        case .audio: return "🎙 Voice message"
+        default: return message.content
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(selectedTheme.colors(for: colorScheme).accent)
+                .frame(width: 3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Replying to \(message.senderName)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(selectedTheme.colors(for: colorScheme).accent)
+                Text(previewText)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Button(action: onCancel) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+}
+
 // MARK: - Components
 
 struct LiquidButton: View {

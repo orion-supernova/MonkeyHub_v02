@@ -21,6 +21,7 @@ struct BaseView: View {
     @State private var isMenuExpanded = false
     @State private var menuButtonRotation = 0.0
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @AppStorage(AppearanceKeys.navStyle) private var navStyle = NavStyle.pill
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var navigationState = NavigationStateManager.shared
     @State private var hasSubscribed = false
@@ -48,15 +49,64 @@ struct BaseView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if navigationState.shouldShowFloatingMenu {
-                FloatingMenu(
-                    isExpanded: $isMenuExpanded,
-                    selectedTab: $selectedTab,
-                    rotation: $menuButtonRotation
-                )
-                .padding(24)
+                if navStyle == .radial {
+                    FloatingMenu(
+                        isExpanded: $isMenuExpanded,
+                        selectedTab: $selectedTab,
+                        rotation: $menuButtonRotation
+                    )
+                    .padding(24)
+                } else {
+                    PillNav(selectedTab: $selectedTab)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.bottom, 12)
+                }
             }
         }
         .animation(.spring(duration: 0.3), value: navigationState.currentScreen)
+    }
+}
+
+/// Native bottom pill tab bar (default navigation style).
+struct PillNav: View {
+    @Binding var selectedTab: BaseView.Tab
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let theme = selectedTheme.colors(for: colorScheme)
+        HStack(spacing: 6) {
+            ForEach(BaseView.Tab.allCases, id: \.self) { tab in
+                let isSelected = selectedTab == tab
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { selectedTab = tab }
+                    #if canImport(UIKit)
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    #endif
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 16, weight: .semibold))
+                        if isSelected {
+                            Text(tab.rawValue).font(.subheadline.weight(.semibold))
+                        }
+                    }
+                    .foregroundStyle(isSelected ? theme.text : theme.textSecondary)
+                    .padding(.horizontal, isSelected ? 16 : 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        Capsule().fill(isSelected
+                            ? AnyShapeStyle(LinearGradient(colors: theme.primary, startPoint: .topLeading, endPoint: .bottomTrailing))
+                            : AnyShapeStyle(Color.clear))
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(6)
+        .background(Capsule().fill(.ultraThinMaterial))
+        .overlay(Capsule().strokeBorder(theme.textSecondary.opacity(0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
     }
 }
 

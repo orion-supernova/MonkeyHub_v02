@@ -97,6 +97,37 @@ export const sendRequest = mutation({
     if (!friend) throw new Error("USER_NOT_FOUND");
     if (friend._id === userId) throw new Error("CANNOT_ADD_SELF");
 
+    // Block check.
+    //
+    // Asymmetric on purpose:
+    //   - If I (caller) blocked them: actionable error so the UI can prompt
+    //     to unblock first. The caller already knows about their own block.
+    //   - If they blocked me: generic USER_NOT_FOUND. The caller MUST NOT
+    //     learn they are blocked — that would defeat the point of a block.
+    const iBlockedThem = await ctx.db
+      .query("blocks")
+      .withIndex("by_pair", (q) =>
+        q.eq("userId", userId).eq("blockedUserId", friend._id)
+      )
+      .first();
+    const theyBlockedMe = await ctx.db
+      .query("blocks")
+      .withIndex("by_pair", (q) =>
+        q.eq("userId", friend._id).eq("blockedUserId", userId)
+      )
+      .first();
+    if (iBlockedThem) throw new Error("UNBLOCK_FIRST");
+    if (theyBlockedMe) throw new Error("USER_NOT_FOUND");
+
+    // Friend-request privacy is *not* a personal judgment (unlike a block),
+    // it's just a global setting — so we name it honestly. The client also
+    // surfaces this state up-front via getProfile's `acceptsFriendRequests`
+    // flag (the SEND REQUEST button is pre-disabled). This error is the
+    // safety net for stale-cache races.
+    if ((friend.visibility?.friendRequests ?? "public") === "nobody") {
+      throw new Error("NOT_ACCEPTING_REQUESTS");
+    }
+
     const existing = await ctx.db
       .query("friendships")
       .withIndex("by_pair", (q) =>
@@ -199,6 +230,27 @@ export const createDirectRequest = mutation({
 
     const target = await ctx.db.get(friendId);
     if (!target) throw new Error("USER_NOT_FOUND");
+
+    // Block check — asymmetric (see sendRequest for the rationale).
+    const iBlockedThem = await ctx.db
+      .query("blocks")
+      .withIndex("by_pair", (q) =>
+        q.eq("userId", userId).eq("blockedUserId", friendId)
+      )
+      .first();
+    const theyBlockedMe = await ctx.db
+      .query("blocks")
+      .withIndex("by_pair", (q) =>
+        q.eq("userId", friendId).eq("blockedUserId", userId)
+      )
+      .first();
+    if (iBlockedThem) throw new Error("UNBLOCK_FIRST");
+    if (theyBlockedMe) throw new Error("USER_NOT_FOUND");
+
+    // Friend-request privacy (see sendRequest for rationale on the name).
+    if ((target.visibility?.friendRequests ?? "public") === "nobody") {
+      throw new Error("NOT_ACCEPTING_REQUESTS");
+    }
 
     const { outgoing, incoming } = await getDirectFriendship(ctx, userId, friendId);
 
@@ -423,7 +475,6 @@ export const listIncomingDirectRequests = query({
             username: requester.username,
             name: requester.name,
             email: requester.email,
-            bio: requester.bio,
             avatarStorageId: requester.avatarStorageId,
             status: requester.status,
           },
@@ -466,7 +517,6 @@ export const listOutgoingDirectRequests = query({
             username: receiver.username,
             name: receiver.name,
             email: receiver.email,
-            bio: receiver.bio,
             avatarStorageId: receiver.avatarStorageId,
             status: receiver.status,
           },

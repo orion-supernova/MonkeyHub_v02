@@ -1,5 +1,5 @@
 {
-  "originHash" : "6a7172a3e415e5f509b61c2e2c7b9667a929b3415b799e0aa34b7a87e37dd9cd",
+  "originHash" : "ad911e3ce8fae2cf4b1779097c3e58a874790876cfc026774fc9369d3c7a38db",
   "pins" : [
     {
       "identity" : "convex-swift",
@@ -15,8 +15,17 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/OneSignal/OneSignal-iOS-SDK.git",
       "state" : {
-        "revision" : "d21c96dfc34dfffc94875adb965de25f62c99eb0",
-        "version" : "5.5.0"
+        "revision" : "ec44204c23ac526a78c2e6b38bc9dbf0f165d374",
+        "version" : "5.5.3"
+      }
+    },
+    {
+      "identity" : "webrtc",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/stasel/WebRTC.git",
+      "state" : {
+        "revision" : "7b7272aa4c2ebb597eaf0bf4f81ec19b6a0a44a3",
+        "version" : "148.0.0"
       }
     }
   ],

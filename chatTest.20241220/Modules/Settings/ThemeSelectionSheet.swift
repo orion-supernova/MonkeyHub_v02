@@ -153,6 +153,9 @@ struct ThemePreviewButton: View {
         case .retroWave: return "80s retro vibes"
         case .neonNight: return "Dark with neon accents"
         case .deepOcean: return "Calm and professional"
+        case .bioOrganic: return "Bioluminescent and fluid"
+        case .vaultNoir: return "Moody noir with brass"
+        case .risographPop: return "Bold retro print pop"
         }
     }
 }
@@ -164,6 +167,9 @@ private func themeIcon(for theme: AppTheme) -> String {
     case .retroWave: return "sunset.fill"
     case .neonNight: return "sparkles"
     case .deepOcean: return "water.waves"
+    case .bioOrganic: return "leaf.fill"
+    case .vaultNoir: return "shield.lefthalf.filled"
+    case .risographPop: return "circle.hexagongrid.fill"
     }
 }
 

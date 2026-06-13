@@ -239,9 +239,12 @@ export const getMembers = query({
           username: user.username,
           name: user.name,
           email: user.email,
-          bio: user.bio,
           avatarStorageId: user.avatarStorageId,
           status: user.status,
+          // Needed by the client's status dot — the 5-minute "fresh away"
+          // gate in user_avatar.dart reads this and demotes amber → gray
+          // once the user's been idle long enough.
+          lastSeen: user.lastSeen,
           role: m.role,
         };
       })
@@ -395,3 +398,44 @@ async function _deleteRoomContents(
     .collect();
   for (const m of members) await ctx.db.delete(m._id);
 }
+
+/**
+ * Returns the set of rooms both [userId] and [otherUserId] are members of,
+ * split into group rooms vs. the DM (if any). Used by the block-confirm sheet
+ * so the blocker can see exactly what will (and won't) be affected.
+ */
+export const listShared = query({
+  args: { userId: v.id("users"), otherUserId: v.id("users") },
+  handler: async (ctx, { userId, otherUserId }) => {
+    const mine = await ctx.db
+      .query("roomMembers")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    const groupRooms: any[] = [];
+    let hasDm = false;
+    for (const m of mine) {
+      const otherMembership = await ctx.db
+        .query("roomMembers")
+        .withIndex("by_room_user", (q) =>
+          q.eq("roomId", m.roomId).eq("userId", otherUserId)
+        )
+        .first();
+      if (!otherMembership) continue;
+      const room = await ctx.db.get(m.roomId);
+      if (!room) continue;
+      if (room.name?.startsWith("dm:")) {
+        hasDm = true;
+      } else {
+        groupRooms.push({
+          _id: room._id,
+          name: room.name,
+          memberCount: room.memberCount,
+          avatarStorageId: room.avatarStorageId,
+          isPrivate: room.isPrivate,
+          type: room.type,
+        });
+      }
+    }
+    return { groupRooms, hasDm };
+  },
+});

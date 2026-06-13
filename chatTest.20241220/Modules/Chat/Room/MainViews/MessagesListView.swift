@@ -11,8 +11,12 @@ struct MessagesListView: View {
     
     @State private var activeReactionPickerMessageId: String?
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @AppStorage(AppearanceKeys.chatStyle) private var chatStyle = ChatStyle.compact
+    @AppStorage(AppearanceKeys.viewReadReceipts) private var viewReadReceipts = false
     @State private var showScrollToBottom = false
     @State private var scrollToBottom = false
+
+    private var messageSpacing: CGFloat { chatStyle == .compact ? 8 : 18 }
 
     private var currentUserId: String {
         UserDefaults.standard.string(forKey: "userId") ?? ""
@@ -69,7 +73,7 @@ struct MessagesListView: View {
 
     private var messagesContent: some View {
         
-        LazyVStack(spacing: 8) {
+        LazyVStack(spacing: messageSpacing) {
             Color.clear
                 .frame(height: 55)
                 .listRowSeparator(.hidden)
@@ -92,6 +96,7 @@ struct MessagesListView: View {
                     onImageTapped: onImageTapped,
                     onDelete: { Task { await viewModel.deleteMessage(message.id) } },
                     onResend: { Task { await viewModel.sendMessage(message.content) } },
+                    onReply: { viewModel.replyingTo = message },
                     isReactionPickerActive: isActive,
                     onRequestReactionPicker: {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -109,6 +114,19 @@ struct MessagesListView: View {
                             .onTapGesture { dismissPicker() }
                     }
                 }
+            }
+
+            if viewReadReceipts,
+               let seenId = viewModel.lastSeenOutgoingMessageId,
+               viewModel.messages.last?.id == seenId {
+                HStack {
+                    Spacer()
+                    Label("Seen", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.trailing, 20)
+                }
+                .padding(.top, 2)
             }
 
             if let typingText = viewModel.typingText {
@@ -156,6 +174,7 @@ struct MessageRow: View, Equatable {
     let onImageTapped: (URL) -> Void
     let onDelete: () -> Void
     let onResend: () -> Void
+    var onReply: () -> Void = {}
     let isReactionPickerActive: Bool
     let onRequestReactionPicker: () -> Void
     let imageZoomNamespace: Namespace.ID
@@ -177,6 +196,7 @@ struct MessageRow: View, Equatable {
             onRequestReactionPicker: onRequestReactionPicker,
             isReactionPickerActive: isReactionPickerActive,
             onResend: onResend,
+            onReply: onReply,
             imageZoomNamespace: imageZoomNamespace
         )
         .id(message.id)

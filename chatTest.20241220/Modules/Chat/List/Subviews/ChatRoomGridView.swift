@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ChatRoomGridView: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @AppStorage(AppearanceKeys.roomLayout) private var roomLayout = RoomLayout.list
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -13,10 +14,14 @@ struct ChatRoomGridView: View {
     let onLeaveRoom: (ChatRoom) -> Void
 
     private var gridColumns: [GridItem] {
+        // "List" layout = single column; "Grid" = multi-column (2, or 3 on iPad).
+        if roomLayout == .list {
+            return [GridItem(.flexible())]
+        }
         if horizontalSizeClass == .regular {
-            [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
+            return [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
         } else {
-            [GridItem(.flexible()), GridItem(.flexible())]
+            return [GridItem(.flexible()), GridItem(.flexible())]
         }
     }
 

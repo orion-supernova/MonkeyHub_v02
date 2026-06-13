@@ -6,6 +6,9 @@ enum AppTheme: String, CaseIterable {
     case retroWave = "Retro Wave"
     case neonNight = "Neon Night"
     case deepOcean = "Deep Ocean"
+    case bioOrganic = "Bio Organic"
+    case vaultNoir = "Vault Noir"
+    case risographPop = "Risograph Pop"
 
     func colors(for scheme: ColorScheme) -> ThemeColors {
         switch self {
@@ -106,6 +109,57 @@ enum AppTheme: String, CaseIterable {
                 sheetGradient: scheme == .dark
                     ? [Color(hex: "1A2980").opacity(0.2), Color(hex: "26D0CE").opacity(0.15)]
                     : [Color(hex: "1A2980").opacity(0.1), Color(hex: "26D0CE").opacity(0.08)]
+            )
+        case .bioOrganic:
+            return ThemeColors(
+                primary: [Color(hex: "22D3EE"), Color(hex: "D946EF")],
+                secondary: [Color(hex: "22D3EE").opacity(0.2), Color(hex: "D946EF").opacity(0.1)],
+                accent: Color(hex: "22D3EE"),
+                text: .white,
+                background: scheme == .dark ? Color(hex: "050714") : Color(hex: "F1F6FF"),
+                cardBackground: scheme == .dark ? Color(hex: "101A33") : Color(hex: "FFFFFF"),
+                destructive: Color(hex: "FB7185"),
+                textPrimary: scheme == .dark ? .white : Color(hex: "0A0E20"),
+                textSecondary: scheme == .dark ? Color(hex: "A6B0CC") : Color(hex: "5A6280"),
+                headerBackground: [Color(hex: "22D3EE"), Color(hex: "D946EF")],
+                headerOverlay: Color(hex: "34D399").opacity(scheme == .dark ? 0.1 : 0.05),
+                sheetGradient: scheme == .dark
+                    ? [Color(hex: "22D3EE").opacity(0.2), Color(hex: "D946EF").opacity(0.12)]
+                    : [Color(hex: "22D3EE").opacity(0.1), Color(hex: "D946EF").opacity(0.06)]
+            )
+        case .vaultNoir:
+            return ThemeColors(
+                primary: [Color(hex: "D63B2A"), Color(hex: "B0492D")],
+                secondary: [Color(hex: "E9B872").opacity(0.2), Color(hex: "D63B2A").opacity(0.1)],
+                accent: Color(hex: "D63B2A"),
+                text: Color(hex: "F4F1EA"),
+                background: scheme == .dark ? Color(hex: "0A0A0B") : Color(hex: "F4F1EA"),
+                cardBackground: scheme == .dark ? Color(hex: "131318") : Color(hex: "FFFFFF"),
+                destructive: Color(hex: "D63B2A"),
+                textPrimary: scheme == .dark ? Color(hex: "F4F1EA") : Color(hex: "1C1C22"),
+                textSecondary: scheme == .dark ? Color(hex: "8A857A") : Color(hex: "6B665C"),
+                headerBackground: [Color(hex: "1C1C22"), Color(hex: "0A0A0B")],
+                headerOverlay: Color(hex: "E9B872").opacity(scheme == .dark ? 0.06 : 0.03),
+                sheetGradient: scheme == .dark
+                    ? [Color(hex: "D63B2A").opacity(0.12), Color(hex: "131318").opacity(0.2)]
+                    : [Color(hex: "D63B2A").opacity(0.06), Color(hex: "D9D4C5").opacity(0.2)]
+            )
+        case .risographPop:
+            return ThemeColors(
+                primary: [Color(hex: "1E3A8A"), Color(hex: "EA580C")],
+                secondary: [Color(hex: "FFC857").opacity(0.25), Color(hex: "EA580C").opacity(0.1)],
+                accent: Color(hex: "EA580C"),
+                text: Color(hex: "FAF3DE"),
+                background: scheme == .dark ? Color(hex: "1A1A1A") : Color(hex: "F3EAD3"),
+                cardBackground: scheme == .dark ? Color(hex: "2A2A2A") : Color(hex: "FAF3DE"),
+                destructive: Color(hex: "C2410C"),
+                textPrimary: scheme == .dark ? Color(hex: "F3EAD3") : Color(hex: "1A1A1A"),
+                textSecondary: scheme == .dark ? Color(hex: "B0AA98") : Color(hex: "5A554A"),
+                headerBackground: [Color(hex: "1E3A8A"), Color(hex: "EA580C")],
+                headerOverlay: Color(hex: "FFC857").opacity(scheme == .dark ? 0.1 : 0.06),
+                sheetGradient: scheme == .dark
+                    ? [Color(hex: "1E3A8A").opacity(0.25), Color(hex: "EA580C").opacity(0.15)]
+                    : [Color(hex: "1E3A8A").opacity(0.1), Color(hex: "EA580C").opacity(0.08)]
             )
         }
     }

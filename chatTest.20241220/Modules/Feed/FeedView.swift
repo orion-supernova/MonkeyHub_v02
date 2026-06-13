@@ -79,55 +79,8 @@ struct FeedView: View {
                                         )
                                         .padding(.bottom, 8)
 
-                                    VStack(spacing: 8) {
-                                        Text("Feed Coming Soon")
-                                            .font(.title2.bold())
-                                            .foregroundStyle(
-                                                selectedTheme.colors(for: colorScheme).textPrimary)
-
-                                        Text(
-                                            "Get ready for a more authentic social experience!\nComing very soon."
-                                        )
-                                        .font(.subheadline)
-                                        .foregroundStyle(
-                                            selectedTheme.colors(for: colorScheme).textSecondary
-                                        )
-                                        .multilineTextAlignment(.center)
-                                    }
-
-                                    // Feature preview
-                                    VStack(spacing: 16) {
-                                        FeaturePreviewRow(
-                                            icon: "camera.viewfinder",
-                                            title: "Daily Moments",
-                                            description: "Share authentic snapshots of your day"
-                                        )
-
-                                        FeaturePreviewRow(
-                                            icon: "clock.arrow.2.circlepath",
-                                            title: "Time Window",
-                                            description: "Post within random 2-minute windows"
-                                        )
-
-                                        FeaturePreviewRow(
-                                            icon: "photo.stack",
-                                            title: "Story Highlights",
-                                            description: "Keep your favorite moments forever"
-                                        )
-
-                                        FeaturePreviewRow(
-                                            icon: "face.smiling",
-                                            title: "Real Reactions",
-                                            description: "React with your authentic expressions"
-                                        )
-
-                                        FeaturePreviewRow(
-                                            icon: "person.2.wave.2",
-                                            title: "Friend Activities",
-                                            description: "See when friends are online and chatting"
-                                        )
-                                    }
-                                    .padding(.top, 8)
+                                    FriendsPresenceFeed()
+                                        .padding(.top, 8)
                                 }
                                 .padding(24)
                             }
@@ -184,6 +137,109 @@ struct FeedView: View {
         .onAppear {
             navigationState.currentScreen = .feedView
         }
+    }
+}
+
+// MARK: - Friends Presence Feed
+
+/// Live presence feed: friends sorted online-first, with status + last-seen.
+struct FriendsPresenceFeed: View {
+    @ObservedObject private var repository = ChatRepository.shared
+    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var theme: ThemeColors { selectedTheme.colors(for: colorScheme) }
+
+    private var sortedFriends: [ChatUser] {
+        repository.friends.sorted { a, b in
+            if a.isOnline != b.isOnline { return a.isOnline }
+            return (a.lastSeen ?? .distantPast) > (b.lastSeen ?? .distantPast)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("FRIENDS")
+                    .font(.caption.bold())
+                    .foregroundStyle(theme.textSecondary)
+                Spacer()
+                let onlineCount = repository.friends.filter { $0.isOnline }.count
+                if onlineCount > 0 {
+                    Text("\(onlineCount) online")
+                        .font(.caption.bold())
+                        .foregroundStyle(theme.accent)
+                }
+            }
+
+            if sortedFriends.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "person.2")
+                        .font(.system(size: 36))
+                        .foregroundStyle(theme.textSecondary)
+                    Text("No friends yet")
+                        .font(.subheadline)
+                        .foregroundStyle(theme.textSecondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+            } else {
+                ForEach(sortedFriends) { friend in
+                    PresenceRow(friend: friend, theme: theme)
+                }
+            }
+        }
+    }
+}
+
+private struct PresenceRow: View {
+    let friend: ChatUser
+    let theme: ThemeColors
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack(alignment: .bottomTrailing) {
+                Circle()
+                    .fill(LinearGradient(colors: theme.primary, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 46, height: 46)
+                    .overlay(
+                        Text(friend.displayInitial)
+                            .font(.headline.bold())
+                            .foregroundStyle(theme.text)
+                    )
+                if friend.isOnline {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 13, height: 13)
+                        .overlay(Circle().strokeBorder(theme.background, lineWidth: 2))
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(friend.displayName)
+                    .font(.headline)
+                    .foregroundStyle(theme.textPrimary)
+                Text(presenceText)
+                    .font(.caption)
+                    .foregroundStyle(friend.isOnline ? Color.green : theme.textSecondary)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 16).fill(theme.cardBackground))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(theme.textSecondary.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private var presenceText: String {
+        if friend.isOnline { return "Online" }
+        if friend.status == "away" { return "Away" }
+        guard let lastSeen = friend.lastSeen else { return "Offline" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return "Last seen \(formatter.localizedString(for: lastSeen, relativeTo: Date()))"
     }
 }
 

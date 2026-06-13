@@ -93,6 +93,18 @@ final class PushNotificationManager {
 
     func syncStoredTokenIfNeeded() {}
 
+    /// Toggles push delivery for this device via OneSignal's subscription opt-in/out.
+    func setNotificationsEnabled(_ enabled: Bool) {
+        #if os(iOS)
+        if enabled {
+            OneSignal.User.pushSubscription.optIn()
+        } else {
+            OneSignal.User.pushSubscription.optOut()
+        }
+        Swift.print("PushNotificationManager ℹ️ notifications \(enabled ? "opted in" : "opted out")")
+        #endif
+    }
+
     func handleIncomingPush(_ userInfo: [AnyHashable: Any]) {
         ChatRepository.shared.handleIncomingPush(userInfo)
     }

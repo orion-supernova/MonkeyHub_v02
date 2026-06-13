@@ -60,6 +60,21 @@ final class ConvexService {
         }
     }
 
+    /// Action wrapper with logging. Used for server-side actions (e.g. fetching
+    /// ICE/TURN config) that run outside the transactional query/mutation path.
+    @discardableResult
+    func action<T: Decodable>(_ name: String, with args: [String: ConvexEncodable?]? = nil) async throws -> T {
+        AppLogger.shared.logMutation(name, args: args?.compactMapValues { $0 as? any CustomStringConvertible }.mapValues { $0.description })
+        do {
+            let result: T = try await client.action(name, with: args)
+            AppLogger.shared.logMutationResult(name, result: "✓")
+            return result
+        } catch {
+            AppLogger.shared.logError(name, error)
+            throw error
+        }
+    }
+
     /// Void mutation wrapper with logging.
     func mutationVoid(_ name: String, with args: [String: ConvexEncodable?]? = nil) async throws {
         AppLogger.shared.logMutation(name, args: args?.compactMapValues { $0 as? any CustomStringConvertible }.mapValues { $0.description })

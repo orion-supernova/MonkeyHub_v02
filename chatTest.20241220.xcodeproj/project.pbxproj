@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		5475227C2F68ADE2004E36E9 /* ConvexMobile in Frameworks */ = {isa = PBXBuildFile; productRef = 5475227B2F68ADE2004E36E9 /* ConvexMobile */; };
 		5475228D2F69F7F9004E36E9 /* OneSignalFramework in Frameworks */ = {isa = PBXBuildFile; productRef = 5475228C2F69F7F9004E36E9 /* OneSignalFramework */; };
+		54918E822FDDA6F90031B1FC /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 54918E812FDDA6F90031B1FB /* WebRTC */; };
 		54C387942F1265C900D8DA86 /* CloudKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 54C387922F1265C300D8DA86 /* CloudKit.framework */; };
 /* End PBXBuildFile section */
 
@@ -33,6 +34,7 @@
 				54C387942F1265C900D8DA86 /* CloudKit.framework in Frameworks */,
 				5475228D2F69F7F9004E36E9 /* OneSignalFramework in Frameworks */,
 				5475227C2F68ADE2004E36E9 /* ConvexMobile in Frameworks */,
+				54918E822FDDA6F90031B1FC /* WebRTC in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -86,6 +88,7 @@
 			packageProductDependencies = (
 				5475227B2F68ADE2004E36E9 /* ConvexMobile */,
 				5475228C2F69F7F9004E36E9 /* OneSignalFramework */,
+				54918E812FDDA6F90031B1FB /* WebRTC */,
 			);
 			productName = chatTest.20241220;
 			productReference = 54EC1C3D2D15774800D57A53 /* chatTest.20241220.app */;
@@ -118,6 +121,7 @@
 			packageReferences = (
 				5475227A2F68ADE2004E36E9 /* XCRemoteSwiftPackageReference "convex-swift" */,
 				5475228B2F69F7F9004E36E9 /* XCRemoteSwiftPackageReference "OneSignal-iOS-SDK" */,
+				54918E802FDDA6F90031B1FA /* XCRemoteSwiftPackageReference "WebRTC" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 54EC1C3E2D15774800D57A53 /* Products */;
@@ -416,6 +420,14 @@
 				minimumVersion = 5.5.0;
 			};
 		};
+		54918E802FDDA6F90031B1FA /* XCRemoteSwiftPackageReference "WebRTC" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stasel/WebRTC.git";
+			requirement = {
+				kind = exactVersion;
+				version = 148.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -428,6 +440,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5475228B2F69F7F9004E36E9 /* XCRemoteSwiftPackageReference "OneSignal-iOS-SDK" */;
 			productName = OneSignalFramework;
+		};
+		54918E812FDDA6F90031B1FB /* WebRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 54918E802FDDA6F90031B1FA /* XCRemoteSwiftPackageReference "WebRTC" */;
+			productName = WebRTC;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

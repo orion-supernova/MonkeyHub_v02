@@ -26,8 +26,8 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
         scrollView.backgroundColor = .clear
         scrollView.contentInsetAdjustmentBehavior = .never
 
-        // Create a hosting controller for the SwiftUI content
-        let hostingController = UIHostingController(rootView: content)
+        // FIX: Wrapped content in AnyView to match the Coordinator's UIHostingController<AnyView>
+        let hostingController = UIHostingController(rootView: AnyView(content.ignoresSafeArea()))
         hostingController.view.backgroundColor = .clear
         
         // Add the hosting controller's view to the scroll view
@@ -41,7 +41,6 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
             contentView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
             contentView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
             
-            // Allow the content view to determine its own size, but start at the scroll view's size
             contentView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
             contentView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor)
         ])
@@ -58,7 +57,8 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UIScrollView, context: Context) {
-        context.coordinator.hostingController?.rootView = content
+        // FIX: Package update content into AnyView to correctly match the hostingController rootView type
+        context.coordinator.hostingController?.rootView = AnyView(content.ignoresSafeArea())
         context.coordinator.onZoomScaleChanged = onZoomScaleChanged
     }
 
@@ -67,7 +67,7 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
     }
 
     class Coordinator: NSObject, UIScrollViewDelegate {
-        var hostingController: UIHostingController<Content>?
+        var hostingController: UIHostingController<AnyView>!
         var onZoomScaleChanged: ((CGFloat) -> Void)?
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? {

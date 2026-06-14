@@ -99,6 +99,9 @@ struct ChatRoomView: View {
         // FIXED: Conditional compilation for cross-platform support
         #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
+        // No `.toolbar(.hidden, for: .tabBar)`: pill mode uses a custom `PillNav` overlay (see
+        // `BaseView.PillContainer`) that hides itself whenever the nav path is non-empty, so there
+        // is no native tab bar to hide here.
         .background(SwipeBackEnabler())
         #else
         .navigationTitle("")
@@ -151,9 +154,17 @@ struct ChatRoomView: View {
             }
         }
         .task {
-            // Check if user is still a member of this room
-            await checkMembership()
+            // Mark this room active for notification suppression here (not synchronously in
+            // onAppear) so the @Published write lands just after the push begins, off the
+            // transition's synchronous commit.
+            navigationState.currentScreen = .chatRoom
+            navigationState.currentRoomId = room.id
+
+            // Run the membership check concurrently with the message load so messages (often
+            // served instantly from the repository cache) aren't gated behind a network call.
+            async let membership: Void = checkMembership()
             await viewModel.loadMessages()
+            await membership
             await viewModel.markRead()
             isLoading = false
         }
@@ -161,8 +172,7 @@ struct ChatRoomView: View {
             Task { await viewModel.markRead() }
         }
         .onAppear {
-            navigationState.currentScreen = .chatRoom
-            navigationState.currentRoomId = room.id
+            // currentScreen/currentRoomId are set in `.task` (off the push's synchronous commit).
             #if canImport(UIKit)
             if liveRoom.type == .secret {
                 screenshotObserver = NotificationCenter.default.addObserver(
@@ -330,82 +340,88 @@ struct ChatRoomView: View {
 
     @ViewBuilder
     private var bottomControls: some View {
-        VStack(spacing: 8) {
-            if isUserMember {
-                if viewModel.isFetchingNewMessages {
-                    SyncingIndicatorView()
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-
-                if let replyTarget = viewModel.replyingTo {
-                    ComposerReplyCard(message: replyTarget) {
-                        withAnimation(.spring(response: 0.3)) { viewModel.replyingTo = nil }
+        GlassEffectContainer {
+            VStack(spacing: 8) {
+                if isUserMember {
+                    if viewModel.isFetchingNewMessages {
+                        SyncingIndicatorView()
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    .padding(.horizontal, 16)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
 
-                MessageInputView(
-                    messageText: $messageText,
-                    showImagePicker: $showImagePicker,
-                    isShowingAttachmentMenu: $isShowingAttachmentMenu,
-                    navHighlight: navIndex,
-                    onSendMessage: { text in
-                        Task { await viewModel.sendMessage(text) }
-                    },
-                    onTextChanged: { text in viewModel.onTextChanged(text) },
-                    onTakePhoto: { isShowingAttachmentMenu = false; showCamera = true },
-                    onTakeVideo: { isShowingAttachmentMenu = false; showCamera = true },
-                    onRecordAudio: { isShowingAttachmentMenu = false; showVoiceRecorder = true }
-                )
-            } else {
-                HStack(spacing: 8) {
-                    Image(systemName: "person.slash.fill")
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
-                    Text("You are no longer a member of this room")
-                        .font(.subheadline)
-                        .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                    if let replyTarget = viewModel.replyingTo {
+                        ComposerReplyCard(message: replyTarget) {
+                            withAnimation(.spring(response: 0.3)) { viewModel.replyingTo = nil }
+                        }
+                        .padding(.horizontal, 16)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+
+                    MessageInputView(
+                        messageText: $messageText,
+                        showImagePicker: $showImagePicker,
+                        isShowingAttachmentMenu: $isShowingAttachmentMenu,
+                        navHighlight: navIndex,
+                        onSendMessage: { text in
+                            Task { await viewModel.sendMessage(text) }
+                        },
+                        onTextChanged: { text in viewModel.onTextChanged(text) },
+                        onTakePhoto: { isShowingAttachmentMenu = false; showCamera = true },
+                        onTakeVideo: { isShowingAttachmentMenu = false; showCamera = true },
+                        onRecordAudio: { isShowingAttachmentMenu = false; showVoiceRecorder = true }
+                    )
+                } else {
+                    HStack(spacing: 8) {
+                        Image(systemName: "person.slash.fill")
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).destructive)
+                        Text("You are no longer a member of this room")
+                            .font(.subheadline)
+                            .foregroundStyle(selectedTheme.colors(for: colorScheme).textSecondary)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(selectedTheme.colors(for: colorScheme).cardBackground)
+                    )
+                    .padding(.horizontal, 16)
                 }
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(selectedTheme.colors(for: colorScheme).cardBackground)
-                )
-                .padding(.horizontal, 16)
             }
+            .background(Color.clear)
+            .animation(.easeInOut(duration: 0.2), value: viewModel.isFetchingNewMessages)
+            .background(
+                GeometryReader { chromeProxy in
+                    Color.clear
+                        .preference(key: BottomChromeHeightPreferenceKey.self, value: chromeProxy.size.height)
+                }
+            )
         }
-        .background(Color.clear)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.isFetchingNewMessages)
-        .background(
-            GeometryReader { chromeProxy in
-                Color.clear
-                    .preference(key: BottomChromeHeightPreferenceKey.self, value: chromeProxy.size.height)
-            }
-        )
+        
     }
 
     private var topControls: some View {
-        HStack {
-            LiquidButton(icon: "chevron.left", showFocusRing: navIndex == 0) {
-                dismiss()
-            }
+        GlassEffectContainer {
+            HStack {
+                LiquidButton(icon: "chevron.left", showFocusRing: navIndex == 0) {
+                    dismiss()
+                }
 
-            Spacer()
+                Spacer()
 
-            RoomTitleView(
-                title: liveRoom.name,
-                roomType: liveRoom.type,
-                avatarImage: roomAvatarImage,
-                showFocusRing: navIndex == 1
-            )
+                RoomTitleView(
+                    title: liveRoom.name,
+                    roomType: liveRoom.type,
+                    avatarImage: roomAvatarImage,
+                    showFocusRing: navIndex == 1
+                )
 
-            Spacer()
+                Spacer()
 
-            LiquidButton(icon: "info.circle", showFocusRing: navIndex == 2) {
-                showRoomInfo = true
+                LiquidButton(icon: "info.circle", showFocusRing: navIndex == 2) {
+                    showRoomInfo = true
+                }
             }
         }
+        
         .padding(.horizontal, 16)
         .background(Color.clear)
         .background(
@@ -489,8 +505,7 @@ struct RoomTitleView: View {
     @Environment(\.colorScheme) private var colorScheme
     var showFocusRing: Bool = false
     @State private var isExpanded = false
-    @State private var textLayoutWidth: CGFloat = 0
-    @State private var containerWidth: CGFloat = 0
+    @State private var collapseTask: Task<Void, Never>?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -511,26 +526,37 @@ struct RoomTitleView: View {
             }
 
             Text(title)
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
+                // Collapsed: single line. Tapped: all lines needed for the full name.
                 .lineLimit(isExpanded ? nil : 1)
+                .multilineTextAlignment(.center)
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).textPrimary)
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.onAppear { containerWidth = geo.size.width }
-                    }
-                )
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
+        .padding(.vertical, 8)
+        .frame(minHeight: 44)
+        // Native Liquid Glass — `.interactive()` gives the fluid stretch-on-drag (plain `.regular`
+        // is static and reads as a flat material). A rounded rect (not a capsule) so it stays clean
+        // when expanded to multiple lines; at the 44pt collapsed height it still reads as a pill.
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 20))
+        // Clip to the same shape — interactive glass can otherwise mis-render/flicker its shape.
+        .clipShape(RoundedRectangle(cornerRadius: 20))
         .overlay(
-            Capsule()
+            RoundedRectangle(cornerRadius: 20)
                 .strokeBorder(selectedTheme.colors(for: colorScheme).primary.first ?? .blue, lineWidth: showFocusRing ? 2 : 0)
         )
         .onTapGesture {
-            if textLayoutWidth > containerWidth {
-                withAnimation(.spring()) { isExpanded.toggle() }
+            // Expand to the full multi-line name, then auto-collapse 2s later. Re-tapping
+            // restarts the timer (or collapses immediately if already expanded).
+            collapseTask?.cancel()
+            let willExpand = !isExpanded
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { isExpanded = willExpand }
+            if willExpand {
+                collapseTask = Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { isExpanded = false }
+                }
             }
         }
     }

@@ -109,19 +109,34 @@ private struct RoomGridContent: View {
             }
             .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 20)
 
-            LazyVGrid(columns: gridColumns, spacing: 16) {
-                ForEach(rooms.enumerated(), id: \.element.id) { index, room in
-                    NavigationLink(value: room) {
-                        EnhancedRoomCard(
-                            room: room,
-                            unreadCount: unreadCounts[room.id] ?? 0,
-                            typingText: typingTextProvider(room.id),
-                            isSelected: selectedRoomIndex == index
-                        ) {
-                            onLeaveRoom(room)
+            // Non-lazy grid: the rooms list is hosted inside a UIKit UIScrollView (RoomsSheet),
+            // where SwiftUI lazy containers misalign (no SwiftUI scroll viewport). Build rows of
+            // `columnCount` manually with VStack/HStack. Fine for a modest joined-rooms list.
+            let columnCount = max(1, gridColumns.count)
+            VStack(spacing: 16) {
+                ForEach(Array(stride(from: 0, to: rooms.count, by: columnCount)), id: \.self) { rowStart in
+                    let upper = min(rowStart + columnCount, rooms.count)
+                    HStack(spacing: 16) {
+                        ForEach(Array(zip(rowStart..<upper, rooms[rowStart..<upper])), id: \.1.id) { index, room in
+                            NavigationLink(value: room) {
+                                EnhancedRoomCard(
+                                    room: room,
+                                    unreadCount: unreadCounts[room.id] ?? 0,
+                                    typingText: typingTextProvider(room.id),
+                                    isSelected: selectedRoomIndex == index
+                                ) {
+                                    onLeaveRoom(room)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity)
+                        }
+                        if upper - rowStart < columnCount {
+                            ForEach(0..<(columnCount - (upper - rowStart)), id: \.self) { _ in
+                                Color.clear.frame(maxWidth: .infinity)
+                            }
                         }
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, horizontalSizeClass == .regular ? 32 : 16)

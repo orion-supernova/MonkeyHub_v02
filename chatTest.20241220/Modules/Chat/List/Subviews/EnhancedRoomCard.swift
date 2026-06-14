@@ -110,7 +110,9 @@ struct EnhancedRoomCard: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(selectedTheme.colors(for: colorScheme).cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.05), radius: 8, y: 4)
+        // Tight shadow: a wide soft blur here is an offscreen GPU pass per card, recomputed every
+        // frame while the sheet translates — kept small so drag/snap stays smooth.
+        .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
         .overlay(
             RoundedRectangle(cornerRadius: 20)
                 .strokeBorder(

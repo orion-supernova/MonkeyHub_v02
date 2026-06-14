@@ -472,6 +472,10 @@ struct SettingsView: View {
                             .mask(RoundedRectangle(cornerRadius: 32))
                             .offset(y: -60)
                             .padding(.top, 60)
+
+                            // Clears the floating PillNav (BaseView) so the last section isn't
+                            // hidden behind it now that there's no native tab bar reserving space.
+                            Color.clear.frame(height: 100)
                         }
                     }
                     .scrollIndicators(.hidden)

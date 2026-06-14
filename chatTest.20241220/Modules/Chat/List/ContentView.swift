@@ -71,11 +71,22 @@ struct ContentView: View {
     var body: some View {
         NavigationStack(path: $navigationState.path) {
             ZStack(alignment: .top) {
-                // Header background
+                // Solid base — guarantees the area behind the floating (translucent)
+                // tab bar is always the dark theme background, never gradient color.
+                selectedTheme.colors(for: colorScheme).background
+                    .ignoresSafeArea()
+
+                // Full-screen gradient that reaches the dark background color before the
+                // tab-bar band (~60% down) and holds dark below it. Smooth blue→dark up
+                // top (no 2-color seam), no bright bleed through the tab bar (no leak).
                 LinearGradient(
-                    colors: selectedTheme.colors(for: colorScheme).headerBackground,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
+                    stops: [
+                        .init(color: selectedTheme.colors(for: colorScheme).headerBackground[0], location: 0.0),
+                        .init(color: selectedTheme.colors(for: colorScheme).headerBackground[1], location: 0.30),
+                        .init(color: selectedTheme.colors(for: colorScheme).background,           location: 0.60),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
                 )
                 .ignoresSafeArea()
 
@@ -88,25 +99,27 @@ struct ContentView: View {
                     onSearch: { isShowingSearchView = true }
                 )
 
-                // Scrollable content
-                ChatListContentView(
-                    viewModel: viewModel,
-                    selectedSection: selectedSection,
-                    selectedRoomIndex: selectedRoomIndex,
-                    onLeaveRoom: handleLeaveRoom,
-                    onStartFriendChat: { friend in directStartFriend = friend },
-                    onPreviewRequest: { request in previewRequest = request },
-                    onOpenOutgoingRequest: { request in
-                        navigationState.path.append(
-                            DraftDirectChatSession(
-                                user: request.user,
-                                roomType: request.roomType,
-                                messageLifetime: request.messageLifetime,
-                                requestId: request.id
+                // Resizable rooms panel (rises over the header behind it; both stay tappable).
+                RoomsSheet(collapsedTopInset: headerHeight - 20) {
+                    ChatListContentView(
+                        viewModel: viewModel,
+                        selectedSection: selectedSection,
+                        selectedRoomIndex: selectedRoomIndex,
+                        onLeaveRoom: handleLeaveRoom,
+                        onStartFriendChat: { friend in directStartFriend = friend },
+                        onPreviewRequest: { request in previewRequest = request },
+                        onOpenOutgoingRequest: { request in
+                            navigationState.path.append(
+                                DraftDirectChatSession(
+                                    user: request.user,
+                                    roomType: request.roomType,
+                                    messageLifetime: request.messageLifetime,
+                                    requestId: request.id
+                                )
                             )
-                        )
-                    }
-                )
+                        }
+                    )
+                }
             }
             .navigationDestination(for: ChatRoom.self) { room in
                 ChatRoomView(room: room)

@@ -310,17 +310,23 @@ final class UIKitScrollViewController<Content: View>: UIViewController, UIScroll
         animatedScroll: Bool = true
     ) {
         hostingController.rootView = content
-        
+
+        // Mark the new content dirty, but DON'T force a synchronous layout here. The
+        // scroll-to-bottom paths below already lay out on the next runloop (via
+        // scheduleScrollToBottomAfterLayout → performImmediateScrollToBottom). Forcing two
+        // blocking layout passes inline was hitching the push-in transition on first load.
         hostingController.view.setNeedsLayout()
-        hostingController.view.layoutIfNeeded()
         scrollView.setNeedsLayout()
-        scrollView.layoutIfNeeded()
 
         if forceInitialAnchor {
             scheduleScrollToBottomAfterLayout(animated: false)
         } else if scrollToBottomIfNeeded {
             scheduleScrollToBottomAfterLayout(animated: animatedScroll)
         } else {
+            // This branch reads the live content offset to clamp it, so it needs a current
+            // layout — keep the synchronous pass only here, where it's actually required.
+            hostingController.view.layoutIfNeeded()
+            scrollView.layoutIfNeeded()
             if scrollView.contentOffset.y < -baseTopInset {
                 scrollView.contentOffset.y = -baseTopInset
             }

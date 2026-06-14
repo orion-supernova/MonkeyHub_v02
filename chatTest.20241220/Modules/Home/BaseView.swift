@@ -18,24 +18,75 @@ extension BaseView.Tab {
 
 struct BaseView: View {
     @State private var selectedTab: Tab = .chat
-    @State private var isMenuExpanded = false
-    @State private var menuButtonRotation = 0.0
-    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @AppStorage(AppearanceKeys.navStyle) private var navStyle = NavStyle.pill
-    @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var navigationState = NavigationStateManager.shared
-    @State private var hasSubscribed = false
 
     enum Tab: String, CaseIterable {
         case chat = "Chat", feed = "Feed", settings = "Settings"
+        /// Outline glyph — the native tab bar fills it automatically when selected.
         var icon: String {
             switch self {
-            case .chat: return "bubble.left.and.bubble.right.fill"
-            case .feed: return "newspaper.fill"
-            case .settings: return "gearshape.fill"
+            case .chat: return "bubble.left.and.bubble.right"
+            case .feed: return "newspaper"
+            case .settings: return "gearshape"
             }
         }
+        /// Always-filled glyph for the custom radial menu, which renders a single state.
+        var filledIcon: String { icon + ".fill" }
     }
+
+    var body: some View {
+        switch navStyle {
+        case .pill:
+            // Custom floating pill (NOT the native TabView tab bar). The native bar's hide/show on
+            // push/pop has an unavoidable restore delay on the way back; a custom overlay we drive
+            // ourselves slides out/in *in sync* with the navigation transition. Same pattern as
+            // `RadialContainer` below. Observation is isolated to the container subview.
+            PillContainer(selectedTab: $selectedTab)
+        case .radial:
+            // The custom floating menu IS driven by navigation state, so its observation is
+            // isolated to this subview.
+            RadialContainer(selectedTab: $selectedTab)
+        }
+    }
+}
+
+/// Pill mode — custom floating `PillNav` overlay, shown/hidden via `shouldShowFloatingMenu`.
+/// Replaces the native `TabView` tab bar so the bar slides out on push and back in *in sync* with
+/// the pop (the native bar restores only after the pop completes — a visible delay).
+private struct PillContainer: View {
+    @Binding var selectedTab: BaseView.Tab
+    @StateObject private var navigationState = NavigationStateManager.shared
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Group {
+                switch selectedTab {
+                case .chat: ContentView()
+                case .feed: FeedView()
+                case .settings: SettingsView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Hidden whenever the nav path is non-empty (i.e. inside a pushed room), so entering a
+            // room slides the pill out and popping slides it back — driven by our own animation.
+            if navigationState.shouldShowFloatingMenu {
+                PillNav(selectedTab: $selectedTab)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.3), value: navigationState.shouldShowFloatingMenu)
+    }
+}
+
+/// Radial orb mode — the custom overlay navigation, shown/hidden via `shouldShowFloatingMenu`.
+/// Owns its own `NavigationStateManager` observation so the pill-mode `TabView` stays inert.
+private struct RadialContainer: View {
+    @Binding var selectedTab: BaseView.Tab
+    @StateObject private var navigationState = NavigationStateManager.shared
+    @State private var isMenuExpanded = false
+    @State private var menuButtonRotation = 0.0
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -49,20 +100,15 @@ struct BaseView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if navigationState.shouldShowFloatingMenu {
-                if navStyle == .radial {
-                    FloatingMenu(
-                        isExpanded: $isMenuExpanded,
-                        selectedTab: $selectedTab,
-                        rotation: $menuButtonRotation
-                    )
-                    .padding(24)
-                } else {
-                    PillNav(selectedTab: $selectedTab)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.bottom, 12)
-                }
+                FloatingMenu(
+                    isExpanded: $isMenuExpanded,
+                    selectedTab: $selectedTab,
+                    rotation: $menuButtonRotation
+                )
+                .padding(24)
             }
         }
+        // The custom floating menu is shown/hidden manually, so animate its appearance.
         .animation(.spring(duration: 0.3), value: navigationState.currentScreen)
     }
 }
@@ -104,9 +150,8 @@ struct PillNav: View {
             }
         }
         .padding(6)
-        .background(Capsule().fill(.ultraThinMaterial))
-        .overlay(Capsule().strokeBorder(theme.textSecondary.opacity(0.12), lineWidth: 1))
-        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+        // Native Liquid Glass capsule — same material the system tab bar uses.
+        .glassEffect(.regular, in: .capsule)
     }
 }
 
@@ -124,7 +169,7 @@ struct FloatingMenu: View {
             ForEach(BaseView.Tab.allCases.indices, id: \.self) { index in
                 let tab = BaseView.Tab.allCases[index]
                 MenuButton(
-                    icon: tab.icon,
+                    icon: tab.filledIcon,
                     isSelected: selectedTab == tab,
                     isHovered: hoveredTab == tab,
                     distance: isExpanded ? 90.0 : 0,

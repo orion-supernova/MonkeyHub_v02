@@ -18,7 +18,8 @@ struct MessageInputView: View {
     let onRecordAudio: () -> Void
     
     var body: some View {
-        // This HStack is the ONLY container. No .background means it's invisible except for the glass components.
+        // No GlassEffectContainer here — wrapping the glass controls in one made the interactive
+        // spring-back flicker worse; standalone glass elements settle more cleanly.
         HStack(spacing: 12) {
             LiquidButton(icon: "plus", showFocusRing: navHighlight == 3) {
                 // Let the system handle keyboard dismiss with animation
@@ -39,6 +40,7 @@ struct MessageInputView: View {
             LiquidButton(
                 icon: "arrow.up",
                 isDisabled: messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                isProminent: true,
                 showFocusRing: navHighlight == 5
             ) {
                 Task { await sendIfNotEmpty() }
@@ -119,10 +121,13 @@ struct LiquidButton: View {
     @Environment(\.colorScheme) private var colorScheme
     let icon: String
     var isDisabled: Bool = false
+    /// Tinted, filled glass style for the primary/send action.
+    var isProminent: Bool = false
     var showFocusRing: Bool = false
     let action: () -> Void
-    
+
     var body: some View {
+#if os(macOS)
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .bold))
@@ -136,10 +141,7 @@ struct LiquidButton: View {
                       ))
                 )
                 .frame(width: 44, height: 44)
-#if os(macOS)
-                .background(
-                    Circle().fill(.ultraThinMaterial)
-                )
+                .background(Circle().fill(.ultraThinMaterial))
                 .overlay(
                     Circle().stroke(LinearGradient(
                         colors: [
@@ -150,12 +152,8 @@ struct LiquidButton: View {
                         startPoint: .topLeading, endPoint: .bottomTrailing
                     ), lineWidth: 1.5)
                 )
-#else
-                .modifier(LiquidGlassModifier(cornerRadius: 22))
-#endif
                 .contentShape(Circle())
         }
-#if os(macOS)
         .buttonStyle(.plain)
         .focusable(false)
         .overlay(
@@ -172,10 +170,27 @@ struct LiquidButton: View {
                 .opacity(showFocusRing ? 1 : 0)
                 .animation(.easeInOut(duration: 0.15), value: showFocusRing)
         )
-#else
-        .buttonStyle(LiquidButtonStyle())
-#endif
         .disabled(isDisabled)
+#else
+        // Native iOS 26 Liquid Glass button: `.glassProminent` (tinted) for the primary/send action,
+        // `.glass` for the rest. `.clipShape(Circle())` after `.buttonBorderShape(.circle)` is the
+        // documented workaround for circle glass-button rendering artifacts.
+        Group {
+            if isProminent {
+                Button(action: action) { Image(systemName: icon) }
+                    .buttonStyle(.glassProminent)
+                    .tint(selectedTheme.colors(for: colorScheme).primary.first ?? .accentColor)
+            } else {
+                Button(action: action) { Image(systemName: icon) }
+                    .buttonStyle(.glass)
+            }
+        }
+        .font(.system(size: 17, weight: .semibold))
+        .controlSize(.large)
+        .buttonBorderShape(.circle)
+        .clipShape(Circle())
+        .disabled(isDisabled)
+#endif
     }
 }
 
@@ -243,37 +258,14 @@ struct GlassTextField: View {
 }
 
 struct LiquidGlassModifier: ViewModifier {
-    @Environment(\.colorScheme) var colorScheme
     var cornerRadius: CGFloat
-    
+
     func body(content: Content) -> some View {
+        // Native iOS 26 Liquid Glass. clipShape after glassEffect is the documented workaround for
+        // interactive glass mis-rendering its shape.
         content
-            .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: cornerRadius).fill(.ultraThinMaterial)
-                    RoundedRectangle(cornerRadius: cornerRadius)
-                        .fill(LinearGradient(
-                            colors: [
-                                .white.opacity(colorScheme == .dark ? 0.1 : 0.45),
-                                .white.opacity(0.05),
-                                .clear
-                            ],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ))
-                }
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .stroke(LinearGradient(
-                        colors: [
-                            .white.opacity(colorScheme == .dark ? 0.5 : 0.8),
-                            .white.opacity(0.2),
-                            .black.opacity(colorScheme == .dark ? 0 : 0.05)
-                        ],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ), lineWidth: 1.5)
-            )
-            .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.08), radius: colorScheme == .dark ? 8 : 12, x: 0, y: 4)
+            .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: cornerRadius))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
 }
 

@@ -36,10 +36,13 @@ struct ChatListHeaderView: View {
                     Spacer()
                 }
 
-                HStack(spacing: 12) {
-                    HeaderActionButton(title: "New Room", icon: "plus.circle.fill", action: onCreateRoom)
-                    HeaderActionButton(title: "Search", icon: "magnifyingglass", action: onSearch)
+                GlassEffectContainer {
+                    HStack(spacing: 12) {
+                        HeaderActionButton(title: "New Room", icon: "plus.circle.fill", action: onCreateRoom)
+                        HeaderActionButton(title: "Search", icon: "magnifyingglass", action: onSearch)
+                    }
                 }
+                
 
                 SectionSelectorView(
                     selectedSection: $selectedSection,
@@ -65,33 +68,16 @@ private struct HeaderActionButton: View {
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: icon)
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(
-                    LinearGradient(
-                        colors: [
-                            selectedTheme.colors(for: colorScheme).headerOverlay,
-                            selectedTheme.colors(for: colorScheme).headerOverlay.opacity(0.8),
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .clipShape(.rect(cornerRadius: 16))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 16)
-                        .strokeBorder(
-                            selectedTheme.colors(for: colorScheme).text.opacity(0.2),
-                            lineWidth: 1
-                        )
-                }
+                .frame(maxWidth: .infinity, minHeight: 30)
         }
-#if os(macOS)
-        .buttonStyle(.plain)
-        .contentShape(.rect(cornerRadius: 16))
-#endif
+        // Native Liquid Glass — same treatment as the chat-room top-control buttons, but a wide
+        // rounded-rect shape instead of a circle. clipShape after buttonBorderShape is the
+        // documented workaround for the glass shape rendering artifact.
+        .buttonStyle(.glass)
+        .buttonBorderShape(.roundedRectangle(radius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 

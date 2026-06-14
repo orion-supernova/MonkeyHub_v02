@@ -3,7 +3,6 @@ import SwiftUI
 struct ChatListContentView: View {
     @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     @ObservedObject var viewModel: ChatListViewModel
     let selectedSection: ChatListViewModel.Section
@@ -13,13 +12,10 @@ struct ChatListContentView: View {
     let onPreviewRequest: (FriendRequest) -> Void
     let onOpenOutgoingRequest: (FriendRequest) -> Void
 
-    private var headerHeight: CGFloat {
-        verticalSizeClass == .compact ? 240 : 320
-    }
-
+    // Just the scrollable rows — the enclosing RoomsSheet owns the (UIKit) ScrollView and chrome.
+    // Non-lazy: lazy stacks misalign when hosted in a UIKit UIScrollView (no SwiftUI scroll viewport).
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 16) {
+        VStack(spacing: 16) {
                 if selectedSection == .chats {
                     ChatRoomGridView(
                         rooms: viewModel.myRooms,
@@ -55,21 +51,8 @@ struct ChatListContentView: View {
 
                 Color.clear
                     .frame(height: 100)
-            }
-            .padding(.top, 16)
-            .background(
-                UnevenRoundedRectangle(topLeadingRadius: 32, topTrailingRadius: 32)
-                    .fill(selectedTheme.colors(for: colorScheme).background)
-                    .shadow(
-                        color: selectedTheme.colors(for: colorScheme).primary[0]
-                            .opacity(0.1),
-                        radius: 20,
-                        y: -10
-                    )
-                    .padding(.bottom, -1000)
-            )
         }
-        .padding(.top, headerHeight - 20)
-        .scrollClipDisabled()
+        .padding(.top, 4)
+        .frame(maxWidth: .infinity)
     }
 }

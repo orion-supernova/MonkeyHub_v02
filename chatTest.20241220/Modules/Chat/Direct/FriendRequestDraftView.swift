@@ -63,6 +63,8 @@ struct FriendRequestDraftView: View {
         .navigationTitle(session.user.displayName)
         #if canImport(UIKit)
         .navigationBarTitleDisplayMode(.inline)
+        // No `.toolbar(.hidden, for: .tabBar)`: the custom `PillNav` overlay (BaseView) hides
+        // itself whenever the nav path is non-empty, so there is no native tab bar to hide here.
         #endif
         .onAppear {
             if let requestId {

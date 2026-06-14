@@ -151,12 +151,19 @@ private final class RoomsSheetController<Content: View>: UIViewController, UIScr
     private var lastPanY: CGFloat = 0
     private var contentSizeObservation: NSKeyValueObservation?
 
-    /// Reports expand progress (0 = collapsed, 1 = expanded) — driven live from the pan and from a
-    /// display link during the spring settle so the SwiftUI header tracks the panel frame-perfectly.
+    /// Reports expand progress (0 = collapsed, 1 = expanded) — emitted from the pan and from the
+    /// settle display link so the SwiftUI header tracks the panel frame-perfectly.
     var onProgress: ((CGFloat) -> Void)?
-    private var settleLink: CADisplayLink?
     /// Last progress we emitted, so we don't spam identical values.
     private var lastEmittedProgress: CGFloat = -1
+
+    /// Self-driven settle: one display link springs `topConstraint.constant` toward `settleTarget`
+    /// each frame and emits progress from the same value. Because the constraint always holds the
+    /// real on-screen position (no UIView.animate model-jump), a new pan can interrupt mid-settle
+    /// with no jump — just stop the link.
+    private var settleLink: CADisplayLink?
+    private var settleTarget: CGFloat = 0
+    private var settleVelocity: CGFloat = 0
 
     #if DEBUG
     private let debugLabel = UILabel()
@@ -304,6 +311,14 @@ private final class RoomsSheetController<Content: View>: UIViewController, UIScr
     }
 
     private var isPanning = false
+    /// Did the current gesture actually move the panel (vs. purely scroll the list)? Only a gesture
+    /// that moved the panel gets a velocity-driven settle on release — otherwise a fast content
+    /// overscroll fling would bleed into the panel spring and jolt it instead of bouncing the list.
+    private var didMovePanel = false
+    /// True for the lifetime of a pan that began while collapsed. Such a gesture only ever drives the
+    /// panel to its detent — it never hands its leftover fling off to scrolling, even after the panel
+    /// reaches full-expand mid-gesture. Scrolling starts on the next, separate touch.
+    private var gestureLocksScroll = false
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
@@ -337,7 +352,7 @@ private final class RoomsSheetController<Content: View>: UIViewController, UIScr
     /// Content may scroll only when the panel is expanded; while collapsed the scroll view stays
     /// hard-pinned to the top (see `NonAutoScrollingScrollView`).
     private func syncScrollEnabled() {
-        scrollView.allowsContentScroll = isExpanded
+        scrollView.allowsContentScroll = isExpanded && !gestureLocksScroll
     }
 
     func update(collapsedTopInset: CGFloat, panelBackground: UIColor, grabberColor: UIColor, hairlineColor: UIColor, content: Content) {
@@ -386,7 +401,13 @@ private final class RoomsSheetController<Content: View>: UIViewController, UIScr
             lastPanY = 0
             isPanning = true
             scrollView.isPanningSheet = true
-            stopSettleLink() // a new drag overrides any in-flight settle animation
+            // Lock scrolling for this whole gesture if it started collapsed: it should only expand the
+            // panel, not flow into scrolling the list.
+            gestureLocksScroll = !isExpanded
+            didMovePanel = false
+            // A new drag overrides any in-flight settle. The constraint already holds the real
+            // on-screen position (we drive it each frame), so the next .changed picks up with no jump.
+            stopSettle()
         case .changed:
             let dy = translationY - lastPanY
             lastPanY = translationY
@@ -395,6 +416,7 @@ private final class RoomsSheetController<Content: View>: UIViewController, UIScr
             // Move the panel while resizing, or when expanded + at the top + pulling down.
             let movePanel = (top > expandedTop) || (atTop && dy > 0)
             if movePanel {
+                didMovePanel = true
                 topConstraint.constant = min(collapsedTop, max(expandedTop, top + dy))
                 // Pin the scroll to the top so content doesn't move while the panel resizes.
                 scrollView.contentOffset.y = 0
@@ -405,6 +427,11 @@ private final class RoomsSheetController<Content: View>: UIViewController, UIScr
         case .ended, .cancelled:
             isPanning = false
             scrollView.isPanningSheet = false
+            gestureLocksScroll = false // gesture over; the next touch decides scroll afresh
+            // Only spring the panel if this gesture moved it. A pure content-scroll gesture leaves the
+            // panel at its detent — settling it with the scroll fling velocity would jolt it and rob
+            // the list of its native overscroll bounce.
+            guard didMovePanel else { break }
             let velocityY = g.velocity(in: panel).y
             let projected = topConstraint.constant + velocityY * 0.12
             let mid = (expandedTop + collapsedTop) / 2
@@ -413,62 +440,59 @@ private final class RoomsSheetController<Content: View>: UIViewController, UIScr
         default:
             isPanning = false
             scrollView.isPanningSheet = false
+            gestureLocksScroll = false
         }
     }
 
+    /// Spring the panel to `target`, carrying the fling velocity. Critically damped, so it eases in
+    /// without overshoot. The display link (`settleTick`) advances the constraint each frame.
     private func settle(to target: CGFloat, velocityY: CGFloat) {
-        let distance = abs(target - topConstraint.constant)
-        let initialVelocity = distance > 0 ? min(8, abs(velocityY) / distance) : 0
-        topConstraint.constant = target
-        // The target detent decides whether content may scroll; update before the animation so the
-        // scroll view pins (collapsed) or releases (expanded) immediately.
+        settleTarget = target
+        settleVelocity = velocityY
+        // The target detent decides whether content may scroll; update up front so the scroll view
+        // pins (collapsed) or releases (expanded) immediately.
         syncScrollEnabled()
-        scrollView.isPanningSheet = true // Keep active during physical settling transitions
-        // Track the panel's *animated* position each frame so the header stays glued to it through
-        // the spring (the constraint constant jumps to `target` immediately and wouldn't tick).
-        startSettleLink()
-        UIView.animate(
-            withDuration: 0.45,
-            delay: 0,
-            usingSpringWithDamping: 0.85,
-            initialSpringVelocity: initialVelocity,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            self.view.layoutIfNeeded()
-        } completion: { [weak self] _ in
-            guard let self else { return }
-            self.scrollView.isPanningSheet = false
-            self.stopSettleLink()
-            self.emitProgress(self.progress(forTop: target)) // snap to the exact final value
+        if settleLink == nil {
+            let link = CADisplayLink(target: self, selector: #selector(settleTick(_:)))
+            link.add(to: .main, forMode: .common)
+            settleLink = link
         }
     }
 
-    private func startSettleLink() {
-        stopSettleLink()
-        let link = CADisplayLink(target: self, selector: #selector(settleTick))
-        link.add(to: .main, forMode: .common)
-        settleLink = link
-    }
-
-    private func stopSettleLink() {
+    private func stopSettle() {
         settleLink?.invalidate()
         settleLink = nil
     }
 
-    @objc private func settleTick() {
-        // Read the in-flight presentation layer for the live animated top; fall back to the model.
-        let top = panel.layer.presentation()?.frame.minY ?? topConstraint.constant
-        emitProgress(progress(forTop: top))
+    @objc private func settleTick(_ link: CADisplayLink) {
+        let dt = CGFloat(link.duration)
+        // Critically damped spring: damping = 2·√stiffness ⇒ fast, no overshoot. Bump `stiffness`
+        // for a snappier settle. Integrated semi-implicitly for stability at high fling speeds.
+        let stiffness: CGFloat = 220
+        let damping = 2 * sqrt(stiffness)
+        let x = topConstraint.constant
+        settleVelocity += (-stiffness * (x - settleTarget) - damping * settleVelocity) * dt
+        var next = x + settleVelocity * dt
+
+        // Close enough — snap to the exact detent and finish.
+        if abs(next - settleTarget) < 0.5 && abs(settleVelocity) < 5 {
+            next = settleTarget
+            stopSettle()
+        }
+        topConstraint.constant = next
+        view.layoutIfNeeded()
+        emitProgress(progress(forTop: next))
     }
 
     deinit { settleLink?.invalidate() }
 
     // MARK: - Delegates
 
-    // While the panel isn't fully expanded, keep the content pinned at the top so the scroll view's
-    // own pan can't move content during a resize (prevents the two-system "shake").
+    // Keep the content pinned at the top while the panel isn't fully expanded — or for the whole of a
+    // gesture that began collapsed — so the scroll view's own pan can't move content during a resize
+    // (prevents the two-system "shake") or flow a fast open-flick straight into scrolling.
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        if !isExpanded && scrollView.contentOffset.y != 0 {
+        if (!isExpanded || gestureLocksScroll) && scrollView.contentOffset.y != 0 {
             scrollView.contentOffset.y = 0
         }
         #if DEBUG

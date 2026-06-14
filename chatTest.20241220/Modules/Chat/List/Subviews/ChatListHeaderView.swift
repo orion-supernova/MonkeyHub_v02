@@ -98,7 +98,7 @@ private struct SectionSelectorView: View {
             height: 44,
             normalTitleColor: theme.text,
             selectedTitleColor: theme.text,
-            clearsBackground: true
+            clearsBackground: false
         )
         // Glass border on the WHOLE control (tinted to match the prominent buttons). Non-interactive
         // so it doesn't intercept the segmented control's own press-and-drag handle gesture.

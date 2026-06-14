@@ -65,6 +65,9 @@ struct RoomsSheet<Content: View>: View {
 
     /// Top inset (from the safe-area top) when collapsed — how much header shows above.
     let collapsedTopInset: CGFloat
+    /// Reports the panel's expand progress (0 = collapsed, 1 = fully expanded) every frame, both while
+    /// dragging and during the spring settle. Lets the header behind fade/slide in lockstep.
+    var onProgress: ((CGFloat) -> Void)? = nil
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -74,6 +77,7 @@ struct RoomsSheet<Content: View>: View {
             panelBackground: UIColor(selectedTheme.colors(for: colorScheme).background),
             grabberColor: UIColor(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.4)),
             hairlineColor: UIColor(selectedTheme.colors(for: colorScheme).textSecondary.opacity(0.12)),
+            onProgress: onProgress,
             content: content
         )
         .ignoresSafeArea(edges: .bottom)
@@ -91,19 +95,23 @@ private struct RoomsSheetRepresentable<Content: View>: UIViewControllerRepresent
     let panelBackground: UIColor
     let grabberColor: UIColor
     let hairlineColor: UIColor
+    let onProgress: ((CGFloat) -> Void)?
     let content: Content
 
     func makeUIViewController(context: Context) -> RoomsSheetController<Content> {
-        RoomsSheetController(
+        let vc = RoomsSheetController(
             collapsedTopInset: collapsedTopInset,
             panelBackground: panelBackground,
             grabberColor: grabberColor,
             hairlineColor: hairlineColor,
             content: content
         )
+        vc.onProgress = onProgress
+        return vc
     }
 
     func updateUIViewController(_ vc: RoomsSheetController<Content>, context: Context) {
+        vc.onProgress = onProgress
         vc.update(
             collapsedTopInset: collapsedTopInset,
             panelBackground: panelBackground,
@@ -142,6 +150,13 @@ private final class RoomsSheetController<Content: View>: UIViewController, UIScr
 
     private var lastPanY: CGFloat = 0
     private var contentSizeObservation: NSKeyValueObservation?
+
+    /// Reports expand progress (0 = collapsed, 1 = expanded) — driven live from the pan and from a
+    /// display link during the spring settle so the SwiftUI header tracks the panel frame-perfectly.
+    var onProgress: ((CGFloat) -> Void)?
+    private var settleLink: CADisplayLink?
+    /// Last progress we emitted, so we don't spam identical values.
+    private var lastEmittedProgress: CGFloat = -1
 
     #if DEBUG
     private let debugLabel = UILabel()
@@ -346,6 +361,22 @@ private final class RoomsSheetController<Content: View>: UIViewController, UIScr
 
     private var isExpanded: Bool { topConstraint.constant <= expandedTop + 0.5 }
 
+    // MARK: - Header progress
+
+    /// Maps a panel top-offset to 0 (collapsed) … 1 (expanded), clamped.
+    private func progress(forTop top: CGFloat) -> CGFloat {
+        let span = collapsedTop - expandedTop
+        guard span > 0 else { return 0 }
+        return min(1, max(0, (collapsedTop - top) / span))
+    }
+
+    /// Emit a progress value to the header, de-duplicated.
+    private func emitProgress(_ p: CGFloat) {
+        guard abs(p - lastEmittedProgress) > 0.0001 else { return }
+        lastEmittedProgress = p
+        onProgress?(p)
+    }
+
     // MARK: - Pan coordination
 
     @objc private func handlePan(_ g: UIPanGestureRecognizer) {
@@ -355,6 +386,7 @@ private final class RoomsSheetController<Content: View>: UIViewController, UIScr
             lastPanY = 0
             isPanning = true
             scrollView.isPanningSheet = true
+            stopSettleLink() // a new drag overrides any in-flight settle animation
         case .changed:
             let dy = translationY - lastPanY
             lastPanY = translationY
@@ -367,6 +399,8 @@ private final class RoomsSheetController<Content: View>: UIViewController, UIScr
                 // Pin the scroll to the top so content doesn't move while the panel resizes.
                 scrollView.contentOffset.y = 0
                 syncScrollEnabled()
+                // Header follows the finger live.
+                emitProgress(progress(forTop: topConstraint.constant))
             }
         case .ended, .cancelled:
             isPanning = false
@@ -390,6 +424,9 @@ private final class RoomsSheetController<Content: View>: UIViewController, UIScr
         // scroll view pins (collapsed) or releases (expanded) immediately.
         syncScrollEnabled()
         scrollView.isPanningSheet = true // Keep active during physical settling transitions
+        // Track the panel's *animated* position each frame so the header stays glued to it through
+        // the spring (the constraint constant jumps to `target` immediately and wouldn't tick).
+        startSettleLink()
         UIView.animate(
             withDuration: 0.45,
             delay: 0,
@@ -398,10 +435,33 @@ private final class RoomsSheetController<Content: View>: UIViewController, UIScr
             options: [.allowUserInteraction, .beginFromCurrentState]
         ) {
             self.view.layoutIfNeeded()
-        } completion: { _ in
+        } completion: { [weak self] _ in
+            guard let self else { return }
             self.scrollView.isPanningSheet = false
+            self.stopSettleLink()
+            self.emitProgress(self.progress(forTop: target)) // snap to the exact final value
         }
     }
+
+    private func startSettleLink() {
+        stopSettleLink()
+        let link = CADisplayLink(target: self, selector: #selector(settleTick))
+        link.add(to: .main, forMode: .common)
+        settleLink = link
+    }
+
+    private func stopSettleLink() {
+        settleLink?.invalidate()
+        settleLink = nil
+    }
+
+    @objc private func settleTick() {
+        // Read the in-flight presentation layer for the live animated top; fall back to the model.
+        let top = panel.layer.presentation()?.frame.minY ?? topConstraint.constant
+        emitProgress(progress(forTop: top))
+    }
+
+    deinit { settleLink?.invalidate() }
 
     // MARK: - Delegates
 

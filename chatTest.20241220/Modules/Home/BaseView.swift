@@ -37,11 +37,10 @@ struct BaseView: View {
     var body: some View {
         switch navStyle {
         case .pill:
-            // Custom floating pill (NOT the native TabView tab bar). The native bar's hide/show on
-            // push/pop has an unavoidable restore delay on the way back; a custom overlay we drive
-            // ourselves slides out/in *in sync* with the navigation transition. Same pattern as
-            // `RadialContainer` below. Observation is isolated to the container subview.
-            PillContainer(selectedTab: $selectedTab)
+            // Native iOS 26 `TabView` — renders the system Liquid Glass floating tab bar. On iOS 26
+            // the bar hides/restores *in sync* with the (interactive) push/pop, so the old custom
+            // overlay workaround for the pop-restore delay is no longer needed.
+            NativeTabBarContainer(selectedTab: $selectedTab)
         case .radial:
             // The custom floating menu IS driven by navigation state, so its observation is
             // isolated to this subview.
@@ -50,33 +49,25 @@ struct BaseView: View {
     }
 }
 
-/// Pill mode — custom floating `PillNav` overlay, shown/hidden via `shouldShowFloatingMenu`.
-/// Replaces the native `TabView` tab bar so the bar slides out on push and back in *in sync* with
-/// the pop (the native bar restores only after the pop completes — a visible delay).
-private struct PillContainer: View {
+/// Pill mode — the native iOS 26 `TabView`. It draws the system Liquid Glass floating tab bar for
+/// free; the bar slides away when a room is pushed (`.toolbar(.hidden, for: .tabBar)` on the room
+/// destinations inside `ContentView`'s `NavigationStack`) and the system slides it back in sync with
+/// the pop. The native tab bar already provides the selection pill, haptics, and Dynamic Type.
+private struct NativeTabBarContainer: View {
     @Binding var selectedTab: BaseView.Tab
-    @StateObject private var navigationState = NavigationStateManager.shared
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            Group {
-                switch selectedTab {
-                case .chat: ContentView()
-                case .feed: FeedView()
-                case .settings: SettingsView()
-                }
+        TabView(selection: $selectedTab) {
+            Tab(BaseView.Tab.chat.rawValue, systemImage: BaseView.Tab.chat.icon, value: BaseView.Tab.chat) {
+                ContentView()
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            // Hidden whenever the nav path is non-empty (i.e. inside a pushed room), so entering a
-            // room slides the pill out and popping slides it back — driven by our own animation.
-            if navigationState.shouldShowFloatingMenu {
-                PillNav(selectedTab: $selectedTab)
-                    .padding(.bottom, 8)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            Tab(BaseView.Tab.feed.rawValue, systemImage: BaseView.Tab.feed.icon, value: BaseView.Tab.feed) {
+                FeedView()
+            }
+            Tab(BaseView.Tab.settings.rawValue, systemImage: BaseView.Tab.settings.icon, value: BaseView.Tab.settings) {
+                SettingsView()
             }
         }
-        .animation(.spring(duration: 0.3), value: navigationState.shouldShowFloatingMenu)
     }
 }
 
@@ -110,48 +101,6 @@ private struct RadialContainer: View {
         }
         // The custom floating menu is shown/hidden manually, so animate its appearance.
         .animation(.spring(duration: 0.3), value: navigationState.currentScreen)
-    }
-}
-
-/// Native bottom pill tab bar (default navigation style).
-struct PillNav: View {
-    @Binding var selectedTab: BaseView.Tab
-    @AppStorage("selectedTheme") private var selectedTheme = AppTheme.basic
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        let theme = selectedTheme.colors(for: colorScheme)
-        HStack(spacing: 6) {
-            ForEach(BaseView.Tab.allCases, id: \.self) { tab in
-                let isSelected = selectedTab == tab
-                Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { selectedTab = tab }
-                    #if canImport(UIKit)
-                    UISelectionFeedbackGenerator().selectionChanged()
-                    #endif
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 16, weight: .semibold))
-                        if isSelected {
-                            Text(tab.rawValue).font(.subheadline.weight(.semibold))
-                        }
-                    }
-                    .foregroundStyle(isSelected ? theme.text : theme.textSecondary)
-                    .padding(.horizontal, isSelected ? 16 : 12)
-                    .padding(.vertical, 10)
-                    .background(
-                        Capsule().fill(isSelected
-                            ? AnyShapeStyle(LinearGradient(colors: theme.primary, startPoint: .topLeading, endPoint: .bottomTrailing))
-                            : AnyShapeStyle(Color.clear))
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(6)
-        // Native Liquid Glass capsule — same material the system tab bar uses.
-        .glassEffect(.regular, in: .capsule)
     }
 }
 

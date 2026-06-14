@@ -44,6 +44,18 @@ struct ChatRoomView: View {
         repository.rooms.first { $0.id == room.id } ?? room
     }
 
+    private var stableBottomSafeAreaInset: CGFloat {
+        #if canImport(UIKit)
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first(where: \.isKeyWindow)?
+            .safeAreaInsets.bottom ?? 0
+        #else
+        0
+        #endif
+    }
+
     init(room: ChatRoom) {
         self.room = room
         self._viewModel = StateObject(wrappedValue: ChatRoomViewModel(roomId: room.id))
@@ -98,10 +110,12 @@ struct ChatRoomView: View {
         .onPreferenceChange(BottomChromeHeightPreferenceKey.self) { bottomChromeHeight = $0 }
         // FIXED: Conditional compilation for cross-platform support
         #if os(iOS)
+        .ignoresSafeArea(.container, edges: .bottom)
         .toolbar(.hidden, for: .navigationBar)
-        // No `.toolbar(.hidden, for: .tabBar)`: pill mode uses a custom `PillNav` overlay (see
-        // `BaseView.PillContainer`) that hides itself whenever the nav path is non-empty, so there
-        // is no native tab bar to hide here.
+        // ContentView applies these at the destination boundary too; keeping them here protects
+        // any future entry point that presents ChatRoomView directly.
+        .toolbar(.hidden, for: .tabBar)
+        .navigationBarBackButtonHidden(true)
         .background(SwipeBackEnabler())
         #else
         .navigationTitle("")
@@ -388,6 +402,7 @@ struct ChatRoomView: View {
             }
             .background(Color.clear)
             .animation(.easeInOut(duration: 0.2), value: viewModel.isFetchingNewMessages)
+            .padding(.bottom, stableBottomSafeAreaInset)
             .background(
                 GeometryReader { chromeProxy in
                     Color.clear
@@ -579,7 +594,9 @@ private struct BottomChromeHeightPreferenceKey: PreferenceKey {
 }
 
 #if os(iOS)
-/// Re-enables the interactive pop gesture that SwiftUI disables when the nav bar is hidden.
+/// Re-enables the interactive pop gesture that SwiftUI disables when the nav bar is hidden, and
+/// fades the native tab bar with the swipe progress. SwiftUI restores the tab bar only at the end
+/// of the pop; driving alpha here gives the chat-app feel users expect during the drag itself.
 private struct SwipeBackEnabler: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {
         SwipeBackViewController()
@@ -587,10 +604,102 @@ private struct SwipeBackEnabler: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
 
     private class SwipeBackViewController: UIViewController {
+        private weak var observedPopGesture: UIGestureRecognizer?
+        private var isObservingPopGesture = false
+
+        deinit {
+            observedPopGesture?.removeTarget(self, action: #selector(handleInteractivePop(_:)))
+        }
+
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
-            navigationController?.interactivePopGestureRecognizer?.isEnabled = true
-            navigationController?.interactivePopGestureRecognizer?.delegate = nil
+            guard let gesture = navigationController?.interactivePopGestureRecognizer else { return }
+            gesture.isEnabled = true
+            gesture.delegate = nil
+            observePopGestureIfNeeded(gesture)
+            hideTabBarForSettledChat()
+        }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            guard let coordinator = transitionCoordinator else {
+                revealTabBar()
+                return
+            }
+
+            if coordinator.isInteractive {
+                coordinator.notifyWhenInteractionChanges { [weak self] context in
+                    if context.isCancelled {
+                        self?.hideTabBarForSettledChat()
+                    } else {
+                        self?.revealTabBar()
+                    }
+                }
+            } else {
+                coordinator.animate { [weak self] _ in
+                    self?.revealTabBar()
+                }
+            }
+        }
+
+        private func observePopGestureIfNeeded(_ gesture: UIGestureRecognizer) {
+            guard observedPopGesture !== gesture else { return }
+            if isObservingPopGesture {
+                observedPopGesture?.removeTarget(self, action: #selector(handleInteractivePop(_:)))
+            }
+            observedPopGesture = gesture
+            isObservingPopGesture = true
+            gesture.addTarget(self, action: #selector(handleInteractivePop(_:)))
+        }
+
+        @objc private func handleInteractivePop(_ gesture: UIPanGestureRecognizer) {
+            guard let tabBar = tabBarController?.tabBar,
+                  let baseView = view else { return }
+            let hostView = baseView.window ?? baseView
+
+            switch gesture.state {
+            case .began, .changed:
+                let width = max(hostView.bounds.width, 1)
+                let progress = min(max(gesture.translation(in: hostView).x / width, 0), 1)
+                tabBar.layer.removeAllAnimations()
+                tabBar.isHidden = false
+                tabBar.alpha = progress
+
+            case .ended, .cancelled, .failed:
+                let width = max(hostView.bounds.width, 1)
+                let progress = min(max(gesture.translation(in: hostView).x / width, 0), 1)
+                let velocity = gesture.velocity(in: hostView).x
+                let shouldReveal = progress > 0.45 || velocity > 600
+                animateTabBar(visible: shouldReveal)
+
+            default:
+                break
+            }
+        }
+
+        private func hideTabBarForSettledChat() {
+            guard let tabBar = tabBarController?.tabBar else { return }
+            tabBar.layer.removeAllAnimations()
+            tabBar.alpha = 0
+            tabBar.isHidden = true
+        }
+
+        private func revealTabBar() {
+            animateTabBar(visible: true)
+        }
+
+        private func animateTabBar(visible: Bool) {
+            guard let tabBar = tabBarController?.tabBar else { return }
+            tabBar.isHidden = false
+            UIView.animate(
+                withDuration: 0.18,
+                delay: 0,
+                options: [.beginFromCurrentState, .curveEaseOut]
+            ) {
+                tabBar.alpha = visible ? 1 : 0
+            } completion: { _ in
+                tabBar.isHidden = !visible
+            }
         }
     }
 }

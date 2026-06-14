@@ -63,8 +63,8 @@ struct FriendRequestDraftView: View {
         .navigationTitle(session.user.displayName)
         #if canImport(UIKit)
         .navigationBarTitleDisplayMode(.inline)
-        // No `.toolbar(.hidden, for: .tabBar)`: the custom `PillNav` overlay (BaseView) hides
-        // itself whenever the nav path is non-empty, so there is no native tab bar to hide here.
+        // Drafts keep the native tab bar visible; when a draft turns into a real room we pre-arm
+        // NavigationStateManager before appending the room so ContentView hides chrome immediately.
         #endif
         .onAppear {
             if let requestId {
@@ -82,9 +82,12 @@ struct FriendRequestDraftView: View {
             guard let room = newRooms.first(where: { names.contains($0.name) }) else { return }
             hasTransitioned = true
             // Replace this draft destination with the real chat room in the nav stack.
-            guard !NavigationStateManager.shared.path.isEmpty else { return }
-            NavigationStateManager.shared.path.removeLast()
-            NavigationStateManager.shared.path.append(room)
+            let navigationState = NavigationStateManager.shared
+            guard !navigationState.path.isEmpty else { return }
+            navigationState.currentScreen = .chatRoom
+            navigationState.currentRoomId = room.id
+            navigationState.path.removeLast()
+            navigationState.path.append(room)
         }
         // When the outgoing request disappears without a room, it was either accepted (no
         // messages → no room created) or rejected/cancelled.

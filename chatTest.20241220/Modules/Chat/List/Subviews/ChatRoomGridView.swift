@@ -11,6 +11,7 @@ struct ChatRoomGridView: View {
     let unreadCounts: [String: Int]
     let typingTextProvider: (String) -> String?
     let selectedRoomIndex: Int?
+    let onOpenRoom: (ChatRoom) -> Void
     let onLeaveRoom: (ChatRoom) -> Void
 
     private var gridColumns: [GridItem] {
@@ -35,6 +36,7 @@ struct ChatRoomGridView: View {
                 unreadCounts: unreadCounts,
                 typingTextProvider: typingTextProvider,
                 selectedRoomIndex: selectedRoomIndex,
+                onOpenRoom: onOpenRoom,
                 onLeaveRoom: onLeaveRoom
             )
         }
@@ -92,6 +94,7 @@ private struct RoomGridContent: View {
     let unreadCounts: [String: Int]
     let typingTextProvider: (String) -> String?
     let selectedRoomIndex: Int?
+    let onOpenRoom: (ChatRoom) -> Void
     let onLeaveRoom: (ChatRoom) -> Void
 
     var body: some View {
@@ -118,7 +121,9 @@ private struct RoomGridContent: View {
                     let upper = min(rowStart + columnCount, rooms.count)
                     HStack(spacing: 16) {
                         ForEach(Array(zip(rowStart..<upper, rooms[rowStart..<upper])), id: \.1.id) { index, room in
-                            NavigationLink(value: room) {
+                            Button {
+                                onOpenRoom(room)
+                            } label: {
                                 EnhancedRoomCard(
                                     room: room,
                                     unreadCount: unreadCounts[room.id] ?? 0,

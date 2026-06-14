@@ -9,6 +9,9 @@ struct ContentView: View {
 
     // MARK: - UI State
     @State private var selectedSection: ChatListViewModel.Section = .chats
+    /// 0 = rooms sheet collapsed (header fully shown) … 1 = expanded (header hidden). Fed every frame
+    /// by the sheet so the header fades/slides in lockstep with the panel.
+    @State private var headerProgress: CGFloat = 0
     @State private var isShowingNewRoomSheet = false
     @State private var newRoomName = ""
     @State private var isShowingJoinRoomSheet = false
@@ -82,15 +85,17 @@ struct ContentView: View {
                 LinearGradient(
                     stops: [
                         .init(color: selectedTheme.colors(for: colorScheme).headerBackground[0], location: 0.0),
-                        .init(color: selectedTheme.colors(for: colorScheme).headerBackground[1], location: 0.30),
-                        .init(color: selectedTheme.colors(for: colorScheme).background,           location: 0.60),
+                        .init(color: selectedTheme.colors(for: colorScheme).headerBackground[1], location: 0.70),
+                        .init(color: selectedTheme.colors(for: colorScheme).background,           location: 0.90),
                     ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
                 .ignoresSafeArea()
 
-                // Header content
+                // Header content — fades + slides up as the rooms sheet expands. Values come straight
+                // from the sheet's live position each frame, so no SwiftUI animation here (an implicit
+                // animation would fight the per-frame updates and desync from the panel).
                 ChatListHeaderView(
                     selectedSection: $selectedSection,
                     sectionSummary: viewModel.sectionSummary(for: selectedSection),
@@ -98,13 +103,18 @@ struct ContentView: View {
                     onCreateRoom: { isShowingNewRoomSheet = true },
                     onSearch: { isShowingSearchView = true }
                 )
+                .opacity(Double(1 - headerProgress))
+                .offset(y: -headerProgress * 20)
+                .scaleEffect(1 - headerProgress * 0.04, anchor: .top)
+                .allowsHitTesting(headerProgress < 0.5)
 
                 // Resizable rooms panel (rises over the header behind it; both stay tappable).
-                RoomsSheet(collapsedTopInset: headerHeight - 20) {
+                RoomsSheet(collapsedTopInset: headerHeight - 20, onProgress: { headerProgress = $0 }) {
                     ChatListContentView(
                         viewModel: viewModel,
                         selectedSection: selectedSection,
                         selectedRoomIndex: selectedRoomIndex,
+                        onOpenRoom: openRoom,
                         onLeaveRoom: handleLeaveRoom,
                         onStartFriendChat: { friend in directStartFriend = friend },
                         onPreviewRequest: { request in previewRequest = request },
@@ -123,7 +133,16 @@ struct ContentView: View {
             }
             .navigationDestination(for: ChatRoom.self) { room in
                 ChatRoomView(room: room)
+                    #if os(iOS)
+                    // Destination-level chrome lets the native tab bar participate in the
+                    // interactive pop: reveal while dragging, hide again if cancelled.
+                    .toolbar(.hidden, for: .navigationBar)
+                    .toolbar(.hidden, for: .tabBar)
+                    .navigationBarBackButtonHidden(true)
+                    #endif
                     .onAppear {
+                        navigationState.currentScreen = .chatRoom
+                        navigationState.currentRoomId = room.id
                         viewModel.clearUnread(for: room.id)
                     }
             }
@@ -135,12 +154,10 @@ struct ContentView: View {
                     if !viewModel.myRooms.contains(where: { $0.id == room.id }) {
                         viewModel.addRoomOptimistically(room)
                     }
-                    navigationState.path.append(room)
+                    openRoom(room)
                 } else if let roomId = notification.userInfo?["roomId"] as? String {
                     if let room = viewModel.myRooms.first(where: { $0.id == roomId }) {
-                        if navigationState.currentRoomId != roomId {
-                            navigationState.path.append(room)
-                        }
+                        openRoom(room)
                     } else {
                         navigationState.pendingRoomId = roomId
                     }
@@ -150,7 +167,7 @@ struct ContentView: View {
                 guard let pendingId = navigationState.pendingRoomId,
                       let room = rooms.first(where: { $0.id == pendingId }) else { return }
                 navigationState.pendingRoomId = nil
-                navigationState.path.append(room)
+                openRoom(room)
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenDraftChat"))) { notification in
                 if let draft = notification.userInfo?["draft"] as? DraftDirectChatSession {
@@ -170,7 +187,7 @@ struct ContentView: View {
             }
             .onKeyPress(.return) {
                 if let index = selectedRoomIndex, index < viewModel.myRooms.count {
-                    navigationState.path.append(viewModel.myRooms[index])
+                    openRoom(viewModel.myRooms[index])
                     selectedRoomIndex = nil
                     return .handled
                 }
@@ -191,7 +208,7 @@ struct ContentView: View {
                             isShowingNewRoomSheet = false
                             newRoomName = ""
                             try? await Task.sleep(for: .milliseconds(300))
-                            navigationState.path.append(room)
+                            openRoom(room)
                         }
                     }
                 )
@@ -251,7 +268,7 @@ struct ContentView: View {
                     actionTitle: "Open Chat"
                 ) { roomType, messageLifetime in
                     if let room = await viewModel.startFriendConversation(with: friend, roomType: roomType, messageLifetime: messageLifetime) {
-                        navigationState.path.append(room)
+                        openRoom(room)
                     }
                 }
             }
@@ -305,6 +322,13 @@ struct ContentView: View {
 
     // MARK: - Actions
 
+    private func openRoom(_ room: ChatRoom) {
+        guard navigationState.currentRoomId != room.id || navigationState.path.isEmpty else { return }
+        navigationState.currentScreen = .chatRoom
+        navigationState.currentRoomId = room.id
+        navigationState.path.append(room)
+    }
+
     private func handleLeaveRoom(_ room: ChatRoom) {
         let action = viewModel.initiateLeaveRoom(room)
         switch action {
@@ -321,7 +345,7 @@ struct ContentView: View {
         switch result {
         case .success(let room):
             isShowingJoinRoomSheet = false
-            navigationState.path.append(room)
+            openRoom(room)
         case .passwordRequired(let room):
             passwordPromptRoom = room
         case .wrongPassword:

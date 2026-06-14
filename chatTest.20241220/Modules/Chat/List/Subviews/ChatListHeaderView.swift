@@ -36,13 +36,10 @@ struct ChatListHeaderView: View {
                     Spacer()
                 }
 
-                GlassEffectContainer {
-                    HStack(spacing: 12) {
-                        HeaderActionButton(title: "New Room", icon: "plus.circle.fill", action: onCreateRoom)
-                        HeaderActionButton(title: "Search", icon: "magnifyingglass", action: onSearch)
-                    }
+                HStack(spacing: 12) {
+                    HeaderActionButton(title: "New Room", icon: "plus.circle.fill", action: onCreateRoom)
+                    HeaderActionButton(title: "Search", icon: "magnifyingglass", action: onSearch)
                 }
-                
 
                 SectionSelectorView(
                     selectedSection: $selectedSection,
@@ -69,15 +66,12 @@ private struct HeaderActionButton: View {
         Button(action: action) {
             Label(title, systemImage: icon)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(selectedTheme.colors(for: colorScheme).text)
                 .frame(maxWidth: .infinity, minHeight: 30)
         }
-        // Native Liquid Glass — same treatment as the chat-room top-control buttons, but a wide
-        // rounded-rect shape instead of a circle. clipShape after buttonBorderShape is the
-        // documented workaround for the glass shape rendering artifact.
-        .buttonStyle(.glass)
+        // Prominent (tinted) Liquid Glass, branded with the theme accent.
+        .buttonStyle(.glassProminent)
+        .tint(selectedTheme.colors(for: colorScheme).headerControlTint)
         .buttonBorderShape(.roundedRectangle(radius: 16))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -91,43 +85,38 @@ private struct SectionSelectorView: View {
     let pendingRequestCount: Int
 
     var body: some View {
-        HStack(spacing: 0) {
+        // Native draggable segmented control — press a segment and slide the handle. We keep the iOS 26
+        // Liquid Glass frosted handle as the selected indicator (NO `selectedTint`, which would force
+        // the legacy flat filled style), clear the control's own track, and put a tinted glass capsule
+        // BEHIND it so the whole control reads as one branded glass pill with a glass border to match
+        // the buttons above. Titles are white so they stay legible on the glass + gradient.
+        #if canImport(UIKit)
+        let theme = selectedTheme.colors(for: colorScheme)
+        NativeSegmentedControl(
+            selection: $selectedSection,
+            items: ChatListViewModel.Section.allCases.map { (value: $0, title: label(for: $0)) },
+            height: 44,
+            normalTitleColor: theme.text,
+            selectedTitleColor: theme.text,
+            clearsBackground: true
+        )
+        // Glass border on the WHOLE control (tinted to match the prominent buttons). Non-interactive
+        // so it doesn't intercept the segmented control's own press-and-drag handle gesture.
+        .glassEffect(.regular.tint(theme.headerControlTint), in: .capsule)
+        #else
+        Picker("Section", selection: $selectedSection) {
             ForEach(ChatListViewModel.Section.allCases, id: \.self) { section in
-                Button {
-                    withAnimation(.spring(duration: 0.25)) {
-                        selectedSection = section
-                    }
-                } label: {
-                    VStack(spacing: 6) {
-                        Label(section.rawValue, systemImage: section.icon)
-                            .font(.subheadline.bold())
-                        if section == .requests && pendingRequestCount > 0 {
-                            Text("\(pendingRequestCount)")
-                                .font(.caption.bold())
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.orange.opacity(0.18), in: .capsule)
-                        }
-                    }
-                    .foregroundStyle(
-                        selectedSection == section
-                            ? selectedTheme.colors(for: colorScheme).text
-                            : selectedTheme.colors(for: colorScheme).text.opacity(0.6)
-                    )
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(
-                        selectedSection == section
-                            ? selectedTheme.colors(for: colorScheme).headerOverlay
-                            : Color.clear
-                    )
-                    .clipShape(.capsule)
-                }
-                .buttonStyle(.plain)
+                Text(label(for: section)).tag(section)
             }
         }
-        .padding(4)
-        .background(selectedTheme.colors(for: colorScheme).headerOverlay.opacity(0.6))
-        .clipShape(.capsule)
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        #endif
+    }
+
+    private func label(for section: ChatListViewModel.Section) -> String {
+        section == .requests && pendingRequestCount > 0
+            ? "\(section.rawValue) (\(pendingRequestCount))"
+            : section.rawValue
     }
 }

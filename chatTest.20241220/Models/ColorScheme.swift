@@ -178,6 +178,14 @@ struct ThemeColors {
     let headerBackground: [Color]
     let headerOverlay: Color
     let sheetGradient: [Color]
+
+    /// Mid-point of the header background gradient — used to tint header controls so they match the
+    /// background color behind them. Blends the two gradient blues (same hue → no hue shift). Tune
+    /// the `by:` ratio toward 0 for the darker top color, toward 1 for the lighter one.
+    var headerControlTint: Color {
+        guard headerBackground.count >= 2 else { return headerBackground.first ?? accent }
+        return headerBackground[0].mix(with: headerBackground[1], by: 0.5)
+    }
 }
 
 extension Color {

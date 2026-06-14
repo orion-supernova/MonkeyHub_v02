@@ -7,6 +7,7 @@ struct ChatListContentView: View {
     @ObservedObject var viewModel: ChatListViewModel
     let selectedSection: ChatListViewModel.Section
     let selectedRoomIndex: Int?
+    let onOpenRoom: (ChatRoom) -> Void
     let onLeaveRoom: (ChatRoom) -> Void
     let onStartFriendChat: (ChatUser) -> Void
     let onPreviewRequest: (FriendRequest) -> Void
@@ -23,6 +24,7 @@ struct ChatListContentView: View {
                         unreadCounts: viewModel.unreadCounts,
                         typingTextProvider: viewModel.typingText,
                         selectedRoomIndex: selectedRoomIndex,
+                        onOpenRoom: onOpenRoom,
                         onLeaveRoom: onLeaveRoom
                     )
                 } else {
